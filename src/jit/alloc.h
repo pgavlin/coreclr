@@ -25,6 +25,9 @@ protected:
         size_t m_usedBytes; // # of bytes actually used. (This is only valid when we've allocated a new page.)
                             // See ArenaAllocator::allocateNewPage.
 
+#if defined(DEBUG)
+        size_t m_firstBlockOffset; // Byte offset of first allocatable byte in m_contents.
+#endif
         BYTE m_contents[];
     };
 
@@ -32,7 +35,7 @@ protected:
     // Thus if we want to make this smaller, we need to do a reserve / commit scheme
     enum
     {
-        DEFAULT_PAGE_SIZE = 16 * OS_page_size,
+        DEFAULT_PAGE_SIZE = 256 * OS_page_size,
         MIN_PAGE_SIZE     = sizeof(PageDescriptor)
     };
 
@@ -53,6 +56,16 @@ protected:
 
     void* allocateHostMemory(size_t size);
     void freeHostMemory(void* block);
+
+#if defined(DEBUG)
+private:
+    void getBlockMapIndex(PageDescriptor* page, void* address, size_t* byteIndex, size_t* bitIndex);
+    BYTE getBlockMapEntry(PageDescriptor* page, void* address);
+    void updateBlockMapEntry(PageDescriptor* page, void* address, BYTE set, BYTE clear);
+
+    void mark(uintptr_t address);
+#endif
+
 
 public:
     ArenaAllocator();
@@ -83,6 +96,10 @@ public:
         return block;
     }
 #endif // !defined(DEBUG)
+
+#if defined(DEBUG)
+    size_t getTotalLiveBytes(size_t* deadBytes);
+#endif
 
     size_t getTotalBytesAllocated();
     size_t getTotalBytesUsed();

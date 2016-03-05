@@ -9025,7 +9025,11 @@ private:
     static LPCWSTR JitTimeLogCsv();        // Retrieve the file name for CSV from ConfigDWORD.
     static LPCWSTR compJitTimeLogFilename; // If a log file for JIT time is desired, filename to write it to.
 #endif
-    inline void EndPhase(Phases phase); // Indicate the end of the given phase.
+#ifdef DEBUG
+    size_t compLiveBytesByPhase[PHASE_NUMBER_OF]; // Live bytes in the arena allocator per phase
+    size_t compDeadBytesByPhase[PHASE_NUMBER_OF]; // Dead bytes in the arena allocator per phase
+#endif
+    inline void EndPhase(Phases phase);  // Indicate the end of the given phase.
 
 #if MEASURE_CLRAPI_CALLS
     // Thin wrappers that call into JitTimer (if present).

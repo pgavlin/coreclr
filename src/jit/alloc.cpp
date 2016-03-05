@@ -185,6 +185,11 @@ void* ArenaAllocator::allocateNewPage(size_t size, bool canThrow)
         pageSize = roundUp(pageSize, DEFAULT_PAGE_SIZE);
     }
 
+#if defined(DEBUG)
+    // In debug builds, we need space for the block map
+    size_t blockMapSize = (((pageSize / 32) + (((pageSize % 32) != 0) ? 1 : 0)) * 2) / 8;
+#endif
+
     // Allocate the new page
     PageDescriptor* newPage = (PageDescriptor*)allocateHostMemory(pageSize);
     if (newPage == nullptr)
@@ -216,12 +221,23 @@ void* ArenaAllocator::allocateNewPage(size_t size, bool canThrow)
 
     m_lastPage = newPage;
 
+    size_t blockOffset = 0;
+#if defined(DEBUG)
+    // In debug builds, we need to zero the block map and align the first allocatable byte
+    // to 32 bytes.
+    size_t pageContents = reinterpret_cast<uintptr_t>(newPage->m_contents);
+    blockOffset = roundUp(pageContents + blockMapSize, 32) - pageContents;
+    newPage->m_firstBlockOffset = blockOffset;
+
+    memset(newPage->m_contents, 0, blockMapSize);
+#endif
+
     // Adjust the next/last free byte pointers
-    m_nextFreeByte = newPage->m_contents + size;
+    m_nextFreeByte = newPage->m_contents + blockOffset + size;
     m_lastFreeByte = (BYTE*)newPage + pageSize;
     assert((m_lastFreeByte - m_nextFreeByte) >= 0);
 
-    return newPage->m_contents;
+    return newPage->m_contents + blockOffset;
 }
 
 //------------------------------------------------------------------------
@@ -331,8 +347,8 @@ void* ArenaAllocator::allocateMemory(size_t size)
     assert(isInitialized());
     assert(size != 0 && (size & (sizeof(int) - 1)) == 0);
 
-    // Ensure that we always allocate in pointer sized increments.
-    size = (size_t)roundUp(size, sizeof(size_t));
+    // Ensure that we always allocate in 32-byte increments.
+    size = (size_t)roundUp(size, 32);
 
     if (JitConfig.ShouldInjectFault() != 0)
     {
@@ -357,9 +373,185 @@ void* ArenaAllocator::allocateMemory(size_t size)
         block = allocateNewPage(size, true);
     }
 
+    // Update the block map.
+    assert(getBlockMapEntry(m_lastPage, block) == 0);
+    updateBlockMapEntry(m_lastPage, block, 0x1, 0x0);
+
     memset(block, UninitializedWord<char>(), size);
     return block;
 }
+
+void ArenaAllocator::getBlockMapIndex(PageDescriptor* page, void* address, size_t* byteIndex, size_t* bitIndex)
+{
+    assert(page != nullptr);
+    assert(byteIndex != nullptr);
+    assert(bitIndex != nullptr);
+    assert(address >= (page->m_contents + page->m_firstBlockOffset));
+    assert(address < (reinterpret_cast<BYTE*>(page) + page->m_pageBytes));
+    assert((reinterpret_cast<uintptr_t>(address) % 32) == 0);
+    assert((reinterpret_cast<uintptr_t>(page->m_contents + page->m_firstBlockOffset) % 32) == 0);
+
+    size_t blockIndex = ((reinterpret_cast<BYTE*>(address) - (page->m_contents + page->m_firstBlockOffset)) / 32) * 2;
+    *byteIndex = blockIndex / 8;
+    *bitIndex = blockIndex % 8;
+
+    assert(*byteIndex < page->m_firstBlockOffset);
+}
+
+BYTE ArenaAllocator::getBlockMapEntry(PageDescriptor* page, void* address)
+{
+    size_t byteIndex = 0, bitIndex = 0;
+    getBlockMapIndex(page, address, &byteIndex, &bitIndex);
+    return (page->m_contents[byteIndex] >> bitIndex) & 0x3;
+}
+
+void ArenaAllocator::updateBlockMapEntry(PageDescriptor* page, void* address, BYTE set, BYTE clear)
+{
+    size_t byteIndex = 0, bitIndex = 0;
+    getBlockMapIndex(page, address, &byteIndex, &bitIndex);
+
+    BYTE* blockMap = page->m_contents;
+    BYTE blockByte = blockMap[byteIndex];
+    blockMap[byteIndex] = (blockByte | (set << bitIndex)) & ~(clear << bitIndex);
+}
+
+void ArenaAllocator::mark(uintptr_t address)
+{
+    uintptr_t cursor = address;
+
+    // Check to see if the address points into any of this allocator's pages
+    PageDescriptor* containingPage = nullptr;
+    for (PageDescriptor* page = m_firstPage; page != nullptr; page = page->m_next)
+    {
+        if (cursor >= reinterpret_cast<uintptr_t>(page->m_contents + page->m_firstBlockOffset) &&
+            cursor < (reinterpret_cast<uintptr_t>(page) + page->m_usedBytes))
+        {
+            containingPage = page;
+            break;
+        }
+    }
+    if (containingPage == nullptr)
+    {
+        return;
+    }
+
+    // Look for the block containing this cursor
+    cursor &= ~31;
+    size_t byteIndex, bitIndex;
+    getBlockMapIndex(containingPage, reinterpret_cast<void*>(cursor), &byteIndex, &bitIndex);
+
+    BYTE* blockMap = containingPage->m_contents;
+    while ((((blockMap[byteIndex] >> bitIndex) & 0x3) == 0) && (byteIndex > 0 || bitIndex > 0))
+    {
+        cursor -= 32;
+        if (bitIndex == 0)
+        {
+            byteIndex--;
+            bitIndex = 6;
+        }
+        else
+        {
+            bitIndex -= 2;
+        }
+    }
+
+    // The block must have been allocated.
+    assert(((blockMap[byteIndex] >> bitIndex) & 0x1) == 0x1);
+
+    // If this block has already been marked, skip it.
+    if (((blockMap[byteIndex] >> bitIndex) & 0x2) != 0)
+    {
+        return;
+    }
+
+    // Otherwise, mark the block live and recurse through it.
+    blockMap[byteIndex] |= 0x2 << bitIndex;
+
+    size_t blockMapEntries = (containingPage->m_usedBytes / 32) + (((containingPage->m_usedBytes % 32) != 0) ? 1 : 0);
+    size_t maxByteIndex = (2 * blockMapEntries) / 8;
+    size_t maxBitIndex = (2 * blockMapEntries) % 8;
+
+    size_t blockSize = 0;
+    do
+    {
+        if (bitIndex == 6)
+        {
+            byteIndex++;
+            bitIndex = 0;
+        }
+        else
+        {
+            bitIndex += 2;
+        }
+        blockSize += 32;
+    } while ((((blockMap[byteIndex] >> bitIndex) & 0x3) == 0) && (byteIndex < maxByteIndex || bitIndex < maxBitIndex));
+
+    for (size_t byteOffset = 0; byteOffset < blockSize; byteOffset += sizeof(uintptr_t*))
+    {
+        uintptr_t address = *reinterpret_cast<uintptr_t*>(cursor + byteOffset);
+        mark(address);
+    }
+}
+
+size_t ArenaAllocator::getTotalLiveBytes(size_t* deadBytes)
+{
+    uintptr_t stackBase = reinterpret_cast<uintptr_t>(ClrTeb::GetStackBase());
+
+    // Make sure the last page has its occupied bytes set correctly
+    if (m_lastPage != nullptr)
+    {
+        m_lastPage->m_usedBytes = m_nextFreeByte - m_lastPage->m_contents;
+    }
+
+    // Recursively mark any blocks rooted
+    for (uintptr_t cursor = reinterpret_cast<uintptr_t>(&stackBase); cursor < stackBase; cursor += sizeof(void*))
+    {
+        uintptr_t address = *reinterpret_cast<uintptr_t*>(cursor);
+        mark(address);
+    }
+
+    // Walk the blocks in each page, accumulate the total number of live bytes,
+    // and unmark the live blocks.
+    size_t liveBytes = 0;
+    size_t totalBytes = 0;
+    for (PageDescriptor* page = m_firstPage; page != nullptr; page = page->m_next)
+    {
+        BYTE* blockMap = page->m_contents;
+        size_t blockMapEntries = (page->m_usedBytes / 32) + (((page->m_usedBytes % 32) != 0) ? 1 : 0);
+        for (size_t index = 1, blockStart = 0; index <= blockMapEntries; index++)
+        {
+            if (index < blockMapEntries)
+            {
+                size_t byteIndex = (2 * index) / 8;
+                size_t bitIndex = (2 * index) % 8;
+                BYTE blockEntry = (blockMap[byteIndex] >> bitIndex) & 0x3;
+                if (blockEntry == 0)
+                {
+                    continue;
+                }
+            }
+
+            size_t byteIndex = (2 * blockStart) / 8;
+            size_t bitIndex = (2 * blockStart) % 8;
+            BYTE blockEntry = (blockMap[byteIndex] >> bitIndex) & 0x3;
+            assert((blockEntry & 0x1) != 0);
+
+            if ((blockEntry & 0x2) != 0)
+            {
+                blockMap[byteIndex] = blockMap[byteIndex] & ~(0x2 << bitIndex);
+                liveBytes += (index - blockStart) * 32;
+            }
+
+            blockStart = index;
+        }
+
+        totalBytes += page->m_usedBytes;
+    }
+
+    *deadBytes = totalBytes - liveBytes;
+    return liveBytes;
+}
+
 #endif // defined(DEBUG)
 
 //------------------------------------------------------------------------
@@ -556,6 +748,12 @@ void PooledAllocator::destroy()
     m_lastPage          = m_firstPage;
     m_nextFreeByte      = m_firstPage->m_contents;
     m_lastFreeByte      = (BYTE*)m_firstPage + m_firstPage->m_pageBytes;
+
+    // In debug mode, we need to adjust for the block map
+#if defined(DEBUG)
+    m_nextFreeByte += m_firstPage->m_firstBlockOffset;
+    memset(m_firstPage->m_contents, 0, m_firstPage->m_firstBlockOffset);
+#endif
 
     assert(getTotalBytesAllocated() == s_defaultPageSize);
 

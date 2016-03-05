@@ -4491,6 +4491,8 @@ inline void Compiler::EndPhase(Phases phase)
             }
         }
     }
+
+    compLiveBytesByPhase[phase] = compAllocator->getTotalLiveBytes(&compDeadBytesByPhase[phase]);
 #endif
 }
 
