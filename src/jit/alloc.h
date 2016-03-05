@@ -26,9 +26,10 @@ protected:
                             // See ArenaAllocator::allocateNewPage.
 
 #if defined(DEBUG)
-        size_t m_firstBlockOffset; // Byte offset of first allocatable byte in m_contents.
-#endif
+        BYTE* m_contents;
+#else
         BYTE m_contents[];
+#endif
     };
 
     // Anything less than 64K leaves VM holes since the OS allocates address space in this size.
@@ -60,9 +61,6 @@ protected:
 #if defined(DEBUG)
 private:
     void getBlockMapIndex(PageDescriptor* page, void* address, size_t* byteIndex, size_t* bitIndex);
-    BYTE getBlockMapEntry(PageDescriptor* page, void* address);
-    void updateBlockMapEntry(PageDescriptor* page, void* address, BYTE set, BYTE clear);
-
     void mark(uintptr_t address);
 #endif
 
