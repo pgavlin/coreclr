@@ -231,7 +231,7 @@ void* ArenaAllocator::allocateNewPage(size_t size, bool canThrow)
     size_t blockMapEntries = (pageSize / 32) + (((pageSize % 32) != 0) ? 1 : 0);
     size_t blockMapSize = roundUp((blockMapEntries * 2) / 8, 32);
 
-    BYTE* blockMap = m_nextFreeByte;
+    BYTE* blockMap = newPage->m_contents;
     m_nextFreeByte += blockMapSize;
 
     memset(blockMap, 0, blockMapSize);
@@ -408,10 +408,11 @@ void ArenaAllocator::mark(uintptr_t address)
 
     // Check to see if the address points into any of this allocator's pages
     PageDescriptor* containingPage = nullptr;
+    uintptr_t pageEnd = 0;
     for (PageDescriptor* page = m_firstPage; page != nullptr; page = page->m_next)
     {
-        if (cursor >= reinterpret_cast<uintptr_t>(page->m_contents) &&
-            cursor < (reinterpret_cast<uintptr_t>(page) + page->m_usedBytes))
+        pageEnd = reinterpret_cast<uintptr_t>(page) + page->m_usedBytes;
+        if (cursor >= reinterpret_cast<uintptr_t>(page->m_contents) && cursor < pageEnd)
         {
             containingPage = page;
             break;
@@ -428,34 +429,36 @@ void ArenaAllocator::mark(uintptr_t address)
     size_t byteIndex, bitIndex;
     getBlockMapIndex(containingPage, reinterpret_cast<void*>(cursor), &byteIndex, &bitIndex);
 
+    // If this block has been marked, skip it.
+    BYTE* blockMap = containingPage->m_contents;
+    if ((blockMap[byteIndex] & (0x2 << bitIndex)) != 0)
+    {
+        return;
+    }
+
     size_t blockMapEntries = (containingPage->m_usedBytes / 32) + (((containingPage->m_usedBytes % 32) != 0) ? 1 : 0);
     size_t maxByteIndex = (2 * blockMapEntries) / 8;
     size_t maxBitIndex = (2 * blockMapEntries) % 8;
-    BYTE* blockMap = containingPage->m_contents;
-    for (;;)
+    do
     {
-        // Have we hit the end of the block map?
-        if (byteIndex == maxByteIndex && bitIndex == maxBitIndex)
-        {
-            break;
-        }
-
-        // Has this block been marked or is it the start of a new allocation?
-        if ((blockMap[byteIndex] & (0x3 << bitIndex)) != 0)
-        {
-            break;
-        }
-
         // Mark the block and recurse.
         blockMap[byteIndex] |= (0x2 << bitIndex);
 
         uintptr_t blockEnd = cursor + 32;
-        for (; cursor < blockEnd && cursor < containingPage->m_usedBytes; cursor += sizeof(uintptr_t*))
+        for (; cursor < blockEnd && cursor < pageEnd; cursor += sizeof(uintptr_t*))
         {
             uintptr_t address = *reinterpret_cast<uintptr_t*>(cursor);
             mark(address);
         }
-    }
+
+        bitIndex = (bitIndex + 2) % 8;
+        if (bitIndex == 0)
+        {
+            byteIndex++;
+        }
+
+        // Have we hit the end of the block map, a marked block, or the start of a new allocation?
+    } while ((byteIndex < maxByteIndex || bitIndex < maxBitIndex) && ((blockMap[byteIndex] & (0x3 << bitIndex)) == 0));
 }
 
 size_t ArenaAllocator::getTotalLiveBytes(size_t* deadBytes)
@@ -489,6 +492,12 @@ size_t ArenaAllocator::getTotalLiveBytes(size_t* deadBytes)
             {
                 blockMap[byteIndex] = blockMap[byteIndex] & ~(0x2 << bitIndex);
                 liveBytes += 32;
+            }
+
+            bitIndex = (bitIndex + 2) % 8;
+            if (bitIndex == 0)
+            {
+                byteIndex++;
             }
         }
 
@@ -703,7 +712,7 @@ void PooledAllocator::destroy()
     size_t blockMapEntries = (m_firstPage->m_pageBytes / 32) + (((m_firstPage->m_pageBytes % 32) != 0) ? 1 : 0);
     size_t blockMapSize = roundUp((blockMapEntries * 2) / 8, 32);
 
-    BYTE* blockMap = m_nextFreeByte;
+    BYTE* blockMap = m_firstPage->m_contents;
     m_nextFreeByte += blockMapSize;
 
     memset(blockMap, 0, blockMapSize);
