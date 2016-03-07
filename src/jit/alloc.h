@@ -36,8 +36,12 @@ protected:
     // Thus if we want to make this smaller, we need to do a reserve / commit scheme
     enum
     {
+#if defined(DEBUG)
         DEFAULT_PAGE_SIZE = 256 * OS_page_size,
-        MIN_PAGE_SIZE     = sizeof(PageDescriptor)
+#else
+        DEFAULT_PAGE_SIZE = 16 * OS_page_size,
+#endif
+        MIN_PAGE_SIZE = sizeof(PageDescriptor)
     };
 
     static size_t s_defaultPageSize;
@@ -63,7 +67,6 @@ private:
     void getBlockMapIndex(PageDescriptor* page, void* address, size_t* byteIndex, size_t* bitIndex);
     void mark(uintptr_t address);
 #endif
-
 
 public:
     ArenaAllocator();
