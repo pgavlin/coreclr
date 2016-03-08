@@ -876,7 +876,7 @@ void ConfigMethodRange::InitRanges(const wchar_t* rangeStr, unsigned capacity)
 
 #endif // defined(DEBUG) || defined(INLINE_DATA)
 
-#if CALL_ARG_STATS || COUNT_BASIC_BLOCKS || COUNT_LOOPS || EMITTER_STATS || MEASURE_NODE_SIZE || MEASURE_MEM_ALLOC
+#if CALL_ARG_STATS || COUNT_BASIC_BLOCKS || COUNT_LOOPS || EMITTER_STATS || MEASURE_NODE_SIZE || MEASURE_MEM_ALLOC || defined(DEBUG)
 
 /*****************************************************************************
  *  Histogram class.
@@ -970,7 +970,7 @@ void Histogram::record(unsigned size)
     m_counts[i]++;
 }
 
-#endif // CALL_ARG_STATS || COUNT_BASIC_BLOCKS || COUNT_LOOPS || EMITTER_STATS || MEASURE_NODE_SIZE
+#endif // CALL_ARG_STATS || COUNT_BASIC_BLOCKS || COUNT_LOOPS || EMITTER_STATS || MEASURE_NODE_SIZE || defined(DEBUG)
 
 /*****************************************************************************
  * Fixed bit vector class

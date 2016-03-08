@@ -3,6 +3,7 @@
 // See the LICENSE file in the project root for more information.
 
 #include "jitpch.h"
+#include "hostallocator.h"
 
 #if defined(_MSC_VER)
 #pragma hdrstop
@@ -492,6 +493,8 @@ void ArenaAllocator::mark(uintptr_t address)
     } while ((byteIndex < maxByteIndex || bitIndex < maxBitIndex) && ((blockMap[byteIndex] & (MARK_MASK << bitIndex)) == 0));
 }
 
+static unsigned s_mortalityBuckets[] = { 50, 100, 150, 200, 250, 300, 350, 400, 450, 500, 550, 600, 650, 700, 750, 800, 850, 900, 950, 1000, 0 };
+static Histogram s_mortalityHistogram(HostAllocator::getHostAllocator(), s_mortalityBuckets);
 size_t ArenaAllocator::getTotalLiveBytes(size_t* deadBytes)
 {
     uintptr_t stackBase = reinterpret_cast<uintptr_t>(ClrTeb::GetStackBase());
@@ -539,6 +542,9 @@ size_t ArenaAllocator::getTotalLiveBytes(size_t* deadBytes)
     }
 
     *deadBytes = totalBytes - liveBytes;
+
+    s_mortalityHistogram.record((unsigned)(((float)*deadBytes / (float)totalBytes) * 1000));
+
     return liveBytes;
 }
 
