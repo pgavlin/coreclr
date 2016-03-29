@@ -173,6 +173,43 @@ extern void notYetImplemented(const char * msg, const char * file, unsigned line
 
 #endif
 
+// We cannot use the usual PREF{IX,AST}_ASSUME or UNREACHABLE macros because
+// they require out-of-band CLR functionality in debug builds. Use functionally
+// similar versions instead.
+#undef UNREACHABLE
+#undef PREFIX_ASSUME
+#undef PREFAST_ASSUME
+#undef PREFIX_ASSUME_MSG
+#undef PREFAST_ASSUME_MSG
+
+#if defined(DEBUG)
+#define UNREACHABLE() assert(!"unreachable!"); __assume(0);
+#else
+#define UNREACHABLE() __assume(0);
+#endif
+
+#if defined(_PREFAST_) || defined(_PREFIX_)
+#define PREFIX_ASSUME(_condition) if (!(_condition)) __assume(0);
+#define PREFAST_ASSUME(_condition) if (!(_condition)) __assume(0);
+
+#define PREFIX_ASSUME_MSG(_condition, _msg) PREFIX_ASSUME(_condition)
+#define PREFAST_ASSUME_MSG(_condition, _msg) PREFAST_ASSUME(_condition)
+#else
+#if defined(DEBUG)
+#define PREFIX_ASSUME(_condition) assert(_condition);
+#define PREFAST_ASSUME(_condition) assert(_condition);
+
+#define PREFIX_ASSUME_MSG(_condition, _msg) assert(_condition && _msg);
+#define PREFAST_ASSUME_MSG(_condition, _msg) assert(_condition && _msg);
+#else
+#define PREFIX_ASSUME(_condition) __assume(_condition);
+#define PREFAST_ASSUME(_condition) __assume(_condition);
+
+#define PREFIX_ASSUME_MSG(_condition, _msg) PREFIX_ASSUME(_condition)
+#define PREFAST_ASSUME_MSG(_condition, _msg) PREFAST_ASSUME(_condition)
+#endif
+#endif
+
     // IMPL_LIMITATION is called when we encounter valid IL that is not
     // supported by our current implementation because of various
     // limitations (that could be removed in the future)
