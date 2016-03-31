@@ -43,6 +43,7 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 #include "valuenum.h"
 #include "reglist.h"
 #include "jittelemetry.h"
+#include "random.h"
 #ifdef    LATE_DISASM
 #include "disasm.h"
 #endif
@@ -896,7 +897,7 @@ public:
         {
             // CompareExchange-based lazy init.
             CRITSEC_COOKIE newCs = ClrCreateCriticalSection(CrstLeafLock, CRST_DEFAULT);
-            CRITSEC_COOKIE observed = InterlockedCompareExchangeT(&m_pCs, newCs, NULL);
+            CRITSEC_COOKIE observed = InterlockedCompareExchangePointer(&(void*)m_pCs, (void*)newCs, NULL);
             if (observed != NULL)
             {
                 ClrDeleteCriticalSection(newCs);

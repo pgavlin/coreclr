@@ -4030,7 +4030,7 @@ int           Compiler::compCompile(CORINFO_METHOD_HANDLE methodHnd,
         // Call into VM to get the config strings. FEATURE_JIT_METHOD_PERF is enabled for 
         // retail builds. Do not call the regular Config helper here as it would pull 
         // in a copy of the config parser into the clrjit.dll.
-        InterlockedCompareExchangeT(&Compiler::compJitTimeLogFilename,
+        InterlockedCompareExchangePointer(&Compiler::compJitTimeLogFilename,
             compHnd->getJitTimeLogFilename(), NULL);
 
         // At a process or module boundary clear the file and start afresh.
@@ -4083,9 +4083,9 @@ int           Compiler::compCompile(CORINFO_METHOD_HANDLE methodHnd,
 
     if (tmpJitFuncInfoFilename != NULL)
     {
-        LPCWSTR oldFuncInfoFileName = InterlockedCompareExchangeT(&compJitFuncInfoFilename,
-                                                                  tmpJitFuncInfoFilename,
-                                                                  NULL);
+        LPCWSTR oldFuncInfoFileName = (LPCWSTR)InterlockedCompareExchangePointer((void**)&compJitFuncInfoFilename,
+                                                                                 (void*)tmpJitFuncInfoFilename,
+                                                                                 NULL);
         if (oldFuncInfoFileName == NULL)
         {
             assert(compJitFuncInfoFile == NULL);

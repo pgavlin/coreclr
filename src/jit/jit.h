@@ -220,8 +220,15 @@ struct CLRConfig
 };
 #endif
 
-#include "utilcode.h"   // this defines assert as _ASSERTE
-#include "host.h"       // this redefines assert for the JIT to use assertAbort
+#if !defined(_DEBUG_IMPL) && defined(_DEBUG) && !defined(DACCESS_COMPILE)
+#define _DEBUG_IMPL 1
+#endif
+
+#include "debugmacros.h" // this defines assert as _ASSERTE
+#include "contract.h"    // this is necessary for DebugState-related functions used by
+                         // the exception trap
+
+#include "host.h"        // this redefines assert for the JIT to use assertAbort
 #include "utils.h"
 
 #ifdef DEBUG

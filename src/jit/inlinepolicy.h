@@ -20,6 +20,7 @@
 
 #include "jit.h"
 #include "inline.h"
+#include "random.h"
 
 // LegalPolicy is a partial policy that encapsulates the common
 // legality and ability checks the inliner must make.

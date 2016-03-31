@@ -123,6 +123,8 @@ HINSTANCE GetModuleInst()
     return (g_hInst);
 }
 
+struct CoreClrCallbacks;
+
 extern "C"
 void __stdcall sxsJitStartup(CoreClrCallbacks const & cccallbacks)
 {
