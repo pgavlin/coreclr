@@ -220,6 +220,11 @@ struct CLRConfig
 };
 #endif
 
+// NOTE: remove these three lines once we are no longer transitively including utilcode.
+#include "utilcode.h"
+#undef InterlockedCompareExchangePointer
+#define InterlockedCompareExchangePointer InterlockedCompareExchangeT
+
 #if !defined(_DEBUG_IMPL) && defined(_DEBUG) && !defined(DACCESS_COMPILE)
 #define _DEBUG_IMPL 1
 #endif

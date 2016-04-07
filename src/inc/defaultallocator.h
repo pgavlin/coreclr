@@ -5,6 +5,9 @@
 #ifndef _DEFAULTALLOCATOR_H_
 #define _DEFAULTALLOCATOR_H_
 
+#include "contract.h"
+#include "safemath.h"
+
 // The "DefaultAllocator" class may be used by classes that wish to
 // provide the flexibility of using an "IAllocator" may avoid writing
 // conditionals at allocation sites about whether a non-default

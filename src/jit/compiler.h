@@ -870,8 +870,6 @@ struct CompTimeInfo
 #endif
 };
 
-// TBD: Move this to UtilCode.
-
 // The CLR requires that critical section locks be initialized via its ClrCreateCriticalSection API...but
 // that can't be called until the CLR is initialized. If we have static data that we'd like to protect by a
 // lock, and we have a statically allocated lock to protect that data, there's an issue in how to initialize
