@@ -25,6 +25,48 @@ extern  LONG            __EEfilter(PEXCEPTION_POINTERS pExceptionPointers, LPVOI
         // Only catch JIT internal errors (will not catch EE generated Errors)
 extern  LONG            __JITfilter(PEXCEPTION_POINTERS pExceptionPointers, LPVOID lpvParam);
 
+// For Windows builds, PAL_TRY is implemented using SEH. We cannot use the CLR-defined
+// macros because they require out-of-band CLR functionality in debug builds, so we
+// must define our own.
+//
+// For cross-platform builds, we'll pick up the CLR PAL's SEH emulation, which does
+// not have dependencies outside its own code.
+#if !defined(FEATURE_PAL)
+
+#undef PAL_TRY
+#undef PAL_EXCEPT_FILTER
+#undef PAL_FINALLY
+#undef PAL_ENDTRY
+
+#define PAL_TRY(__ParamType, __paramDef, __paramRef)                            \
+{                                                                               \
+    __ParamType __param = __paramRef;                                           \
+    __ParamType __paramDef = __param;                                           \
+    {                                                                           \
+        bool __exHandled; __exHandled = false;                                  \
+        DWORD __exCode; __exCode = 0;                                           \
+        __try                                                                   \
+        {                                                                       \
+
+#define PAL_EXCEPT_FILTER(pfnFilter)                                            \
+        }                                                                       \
+        __except(__exCode = GetExceptionCode(),                                 \
+                 pfnFilter(GetExceptionInformation(), __param))                 \
+        {                                                                       \
+            __exHandled = true;                                                 \
+
+#define PAL_FINALLY                                                             \
+        }                                                                       \
+        __finally                                                               \
+        {                                                                       \
+
+#define PAL_ENDTRY                                                              \
+        }                                                                       \
+    }                                                                           \
+}                                                                               \
+
+#endif
+
 #define                 setErrorTrap(compHnd, ParamType, paramDef, paramRef) \
     struct __JITParam : ErrorTrapParam                                      \
     {                                                                       \
