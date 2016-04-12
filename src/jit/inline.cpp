@@ -1090,7 +1090,7 @@ void InlineStrategy::DumpData()
             unsigned __int64 compCycles = 0;
             if (compCycles > 0)
             {
-                double countsPerSec = CycleTimer::CyclesPerSecond();
+                double countsPerSec = CycleCount::CyclesPerSecond();
                 double counts = (double) compCycles;
                 microsecondsSpentJitting = (unsigned) ((counts / countsPerSec) * 1000 * 1000);
             }

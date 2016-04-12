@@ -456,7 +456,7 @@ public:
     }
 };
 
-#ifdef FEATURE_JIT_METHOD_PERF
+#if defined(FEATURE_JIT_METHOD_PERF) || defined(DEBUG) || defined(INLINE_DATA) || defined(FEATURE_CLRSQM)
 // When Start() is called time is noted and when ElapsedTime
 // is called we know how much time was spent in msecs.
 //
@@ -465,6 +465,7 @@ class CycleCount
 private:
     double           cps;             // cycles per second
     unsigned __int64 beginCycles;     // cycles at stop watch construction
+
 public:    
     CycleCount();
 
@@ -475,11 +476,15 @@ public:
     // Return time elapsed in msecs, if Start returned true.
     double ElapsedTime();
 
-private:
     // Return true if successful.
-    bool GetCycles(unsigned __int64* time);
+    static bool GetThreadCycles(unsigned __int64* time);
+
+    static double CyclesPerSecond();
 };
 
+#endif // defined(FEATURE_JIT_METHOD_PERF) || defined(DEBUG) || defined(INLINE_DATA) || defined(FEATURE_CLRSQM)
+
+#if defined(FEATURE_JIT_METHOD_PERF)
 
 // Uses win API QueryPerformanceCounter/QueryPerformanceFrequency.
 class PerfCounter
@@ -496,7 +501,7 @@ public:
     double ElapsedTime();
 };
 
-#endif // FEATURE_JIT_METHOD_PERF
+#endif // defined(FEATURE_JIT_METHOD_PERF)
 
 
 

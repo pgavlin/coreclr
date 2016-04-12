@@ -6354,7 +6354,7 @@ void CompTimeSummaryInfo::Print(FILE* f)
 {
     if (f == NULL) return;
     // Otherwise...
-    double countsPerSec = CycleTimer::CyclesPerSecond();
+    double countsPerSec = CycleCount::CyclesPerSecond();
     if (countsPerSec == 0.0)
     {
         fprintf(f, "Processor does not have a high-frequency timer.\n");
@@ -6567,7 +6567,7 @@ void JitTimer::PrintCsvMethodStats(Compiler* comp)
         fprintf(fp, "%I64u,", m_info.m_cyclesByPhase[i]);
     }
     fprintf(fp, "%I64u,", m_info.m_totalCycles);
-    fprintf(fp, "%f\n", CycleTimer::CyclesPerSecond());
+    fprintf(fp, "%f\n", CycleCount::CyclesPerSecond());
     fclose(fp);
 
     ClrLeaveCriticalSection(s_csvLock.Val());
@@ -6721,7 +6721,7 @@ void Compiler::RecordStateAtEndOfInlining()
 
     m_compCyclesAtEndOfInlining = 0;
     m_compTickCountAtEndOfInlining = 0;
-    bool b = CycleTimer::GetThreadCyclesS(&m_compCyclesAtEndOfInlining);
+    bool b = CycleCount::GetThreadCycles(&m_compCyclesAtEndOfInlining);
     if (!b) return; // We don't have a thread cycle counter.
     m_compTickCountAtEndOfInlining = GetTickCount();
 
@@ -6739,7 +6739,7 @@ void Compiler::RecordStateAtEndOfCompilation()
     // Common portion
     m_compCycles = 0;
     unsigned __int64 compCyclesAtEnd;
-    bool b = CycleTimer::GetThreadCyclesS(&compCyclesAtEnd);
+    bool b = CycleCount::GetThreadCycles(&compCyclesAtEnd);
     if (!b) return; // We don't have a thread cycle counter.
     assert(compCyclesAtEnd >= m_compCyclesAtEndOfInlining);
 

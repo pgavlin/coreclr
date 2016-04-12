@@ -1479,28 +1479,78 @@ bool AssemblyNamesList2::IsInList(const char* assemblyName)
     return false;
 }
 
-#ifdef FEATURE_JIT_METHOD_PERF
+#if defined(FEATURE_JIT_METHOD_PERF) || defined(DEBUG) || defined(INLINE_DATA) || defined(FEATURE_CLRSQM)
+
+double CycleCount::CyclesPerSecond()
+{
+    static const int SampleLoopSize = 1000000;
+
+    // Windows does not provide a way of converting cycles to time -- reasonably enough,
+    // since the frequency of a machine may vary, due, e.g., to power management.
+    // Windows *does* allow you to translate QueryPerformanceCounter counts into time,
+    // however.  So we'll assume that the clock speed stayed constant, and measure both the
+    // QPC counts and cycles of a short loop, to get a conversion factor.
+    LARGE_INTEGER lpFrequency;
+    if (!QueryPerformanceFrequency(&lpFrequency))
+    {
+        return 0.0;
+    }
+
+    // Otherwise...
+    LARGE_INTEGER qpcStart;
+    unsigned __int64 cycleStart;
+    if (!QueryPerformanceCounter(&qpcStart) || !GetThreadCycles(&cycleStart))
+    {
+        return 0.0;
+    }
+
+    volatile int sum = 0;
+    for (int k = 0; k < SampleLoopSize; k++)
+    {
+        sum += k;
+    }
+
+    LARGE_INTEGER qpcEnd;
+    unsigned __int64 cycleEnd;
+    if (!QueryPerformanceCounter(&qpcEnd) || !GetThreadCycles(&cycleEnd))
+    {
+        return 0.0;
+    }
+
+    double qpcTicks = ((double)qpcEnd.QuadPart) - ((double)qpcStart.QuadPart);
+    double secs = (qpcTicks / ((double)lpFrequency.QuadPart));
+    double cycles = ((double)cycleEnd) - ((double)cycleStart);
+    return cycles / secs;
+}
+
 CycleCount::CycleCount()
-    : cps(CycleTimer::CyclesPerSecond())
+    : cps(CyclesPerSecond())
 {
 }
 
-bool CycleCount::GetCycles(unsigned __int64* time)
+bool CycleCount::GetThreadCycles(unsigned __int64* cycles)
 {
-    return CycleTimer::GetThreadCyclesS(time);
+    BOOL res = FALSE;
+    res = QueryThreadCycleTime(GetCurrentThread(), cycles);
+    return res != FALSE;
 }
 
 bool CycleCount::Start()
 {
-    return GetCycles(&beginCycles);
+    return GetThreadCycles(&beginCycles);
 }
 
 double CycleCount::ElapsedTime()
 {
     unsigned __int64 nowCycles;
-    (void) GetCycles(&nowCycles);
+    (void) GetThreadCycles(&nowCycles);
     return ((double) (nowCycles - beginCycles) / cps) * 1000.0;
 }
+
+#endif // defined(FEATURE_JIT_METHOD_PERF) || defined(DEBUG) || defined(INLINE_DATA) || defined(FEATURE_CLRSQM)
+
+
+#if defined(FEATURE_JIT_METHOD_PERF)
 
 bool PerfCounter::Start()
 {
@@ -1522,7 +1572,7 @@ double PerfCounter::ElapsedTime()
     return (double) (li.QuadPart - beg.QuadPart) / freq;
 }
 
-#endif
+#endif // defined(FEATURE_JIT_METHOD_PERF)
 
 
 #ifdef DEBUG

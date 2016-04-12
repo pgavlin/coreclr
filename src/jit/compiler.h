@@ -994,9 +994,7 @@ public:
     // "m_info" to true.
     bool GetThreadCycles(unsigned __int64* cycles)
     {
-        bool res = CycleTimer::GetThreadCyclesS(cycles);
-        if (!res) { m_info.m_timerFailure = true; }
-        return res;
+        return CycleCount::GetThreadCyclesS(cycles);
     }
 };
 #endif // FEATURE_JIT_METHOD_PERF
