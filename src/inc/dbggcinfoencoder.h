@@ -25,7 +25,6 @@
 #include "iallocator.h"
 #include "gcinfoarraylist.h"
 
-#include "stdmacros.h"
 #include "gcinfotypes.h"
 
 

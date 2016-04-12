@@ -81,8 +81,6 @@
 #include "corjit.h"
 #include "iallocator.h"
 #include "gcinfoarraylist.h"
-#include "stdmacros.h"
-#include "eexcp.h"
 #endif
 
 #include "gcinfotypes.h"

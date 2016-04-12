@@ -9,7 +9,7 @@
  */
 
 #include <stdint.h>
-
+#include "stdmacros.h"
 #include "gcinfoencoder.h"
 
 #ifdef VERIFY_GCINFO

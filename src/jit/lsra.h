@@ -6,7 +6,6 @@
 #ifndef _LSRA_H_
 #define _LSRA_H_
 
-#include "arraylist.h"
 #include "nodeinfo.h"
 
 // Minor and forward-reference types
