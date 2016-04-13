@@ -16,7 +16,6 @@ add_library_clr(protojit
 )
 
 set(RYUJIT_LINK_LIBRARIES
-   utilcodestaticnohost
    gcinfo
 )
 

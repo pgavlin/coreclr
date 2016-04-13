@@ -15,7 +15,6 @@ add_library_clr(ryujit
 )
 
 set(RYUJIT_LINK_LIBRARIES
-   utilcodestaticnohost
    gcinfo
 )
 

@@ -220,8 +220,15 @@ struct CLRConfig
 };
 #endif
 
+#include "host.h"             // This redefines assert for the JIT to use assertAbort
+
+// Redefine _ASSERTE_MSG for the JIT to use assertAbort
+#ifdef DEBUG
+#define _ASSERTE_MSG(expr, msg) (void)((expr) || (assertAbort(msg, __FILE__, __LINE__), 0))
+#endif
+
 #include "stdmacros.h"
-#include "host.h"        // this redefines assert for the JIT to use assertAbort
+
 #include "utils.h"
 
 #ifdef DEBUG
