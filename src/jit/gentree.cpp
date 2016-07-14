@@ -5214,6 +5214,99 @@ GenTreePtr*         GenTree::gtGetChildPointer(GenTreePtr parent)
     return nullptr;
 }
 
+bool              GenTree::TryGetUse(GenTree* def, GenTree*** use)
+{
+    assert(def != nullptr);
+    assert(use != nullptr);
+
+    switch (OperGet())
+    {
+    default:
+        if (!OperIsSimple())                      return (*use = nullptr, true);
+        if (def == gtOp.gtOp1)                    return (*use = &(gtOp.gtOp1), true);
+        if (def == gtOp.gtOp2)                    return (*use = &(gtOp.gtOp2), true);
+        break;
+
+#if !FEATURE_MULTIREG_ARGS
+        // Note that when FEATURE_MULTIREG_ARGS==1 
+        //  a GT_OBJ node is handled above by the default case
+    case GT_OBJ:
+        // Any GT_OBJ with a field must be lowered before def point.
+        noway_assert(!"GT_OBJ encountered in GenTree::TryGetUse");
+        break;
+#endif // !FEATURE_MULTIREG_ARGS
+
+    case GT_CMPXCHG:
+        if (def == gtCmpXchg.gtOpLocation)        return (*use = &(gtCmpXchg.gtOpLocation), true);
+        if (def == gtCmpXchg.gtOpValue)           return (*use = &(gtCmpXchg.gtOpValue), true);
+        if (def == gtCmpXchg.gtOpComparand)       return (*use = &(gtCmpXchg.gtOpComparand), true);
+        break;
+
+    case GT_ARR_BOUNDS_CHECK:
+#ifdef FEATURE_SIMD
+    case GT_SIMD_CHK:
+#endif // FEATURE_SIMD
+        if (def == gtBoundsChk.gtArrLen)          return (*use = &(gtBoundsChk.gtArrLen), true);
+        if (def == gtBoundsChk.gtIndex)           return (*use = &(gtBoundsChk.gtIndex), true);
+        if (def == gtBoundsChk.gtIndRngFailBB)    return (*use = &(gtBoundsChk.gtIndRngFailBB), true);
+        break;
+
+    case GT_ARR_ELEM:
+        if (def == gtArrElem.gtArrObj)            return (*use = &(gtArrElem.gtArrObj), true);
+        for (int i = 0; i < GT_ARR_MAX_RANK; i++)
+            if (def == gtArrElem.gtArrInds[i])    return (*use = &(gtArrElem.gtArrInds[i]), true);
+        break;
+
+    case GT_ARR_OFFSET:
+        if (def == gtArrOffs.gtOffset)            return (*use = &(gtArrOffs.gtOffset), true);
+        if (def == gtArrOffs.gtIndex)             return (*use = &(gtArrOffs.gtIndex), true);
+        if (def == gtArrOffs.gtArrObj)            return (*use = &(gtArrOffs.gtArrObj), true);
+        break;
+
+    case GT_FIELD:
+        if (def == AsField()->gtFldObj)           return (*use = &(AsField()->gtFldObj), true);
+        break;
+
+    case GT_RET_EXPR:
+        if (def == gtRetExpr.gtInlineCandidate)   return (*use = &(gtRetExpr.gtInlineCandidate), true);
+        break;
+
+    case GT_CALL:
+        {
+            GenTreeCall* call = AsCall();
+
+            assert(def != call->gtCallArgs);
+            assert(def != call->gtCallLateArgs);
+
+            if (def == call->gtCallObjp)                  return (*use = &(call->gtCallObjp), true);
+            if (def == call->gtControlExpr)               return (*use = &(call->gtControlExpr), true);
+            if (call->gtCallType == CT_INDIRECT)
+            {
+                if (def == call->gtCallCookie)            return (*use = &(call->gtCallCookie), true);
+                if (def == call->gtCallAddr)              return (*use = &(call->gtCallAddr), true);
+            }
+
+            for (GenTreeArgList* args = call->gtCallArgs; args != nullptr; args = args->Rest())
+            {
+                if (def == args->gtOp1)                   return (*use = &(args->gtOp1), true);
+            }
+
+            for (GenTreeArgList* args = call->gtCallLateArgs; args != nullptr; args = args->Rest())
+            {
+                if (def == args->gtOp1)                   return (*use = &(args->gtOp1), true);
+            }
+        }
+        break;
+
+    case GT_STMT:
+        noway_assert(!"Illegal node for gtGetChildPointer()");
+        unreached();
+    }
+
+    *use = nullptr;
+    return false;
+}
+
 //------------------------------------------------------------------------
 // gtGetParent: Get the parent of this node, and optionally capture the
 //    pointer to the child so that it can be modified.
@@ -11807,7 +11900,7 @@ GenTreePtr          Compiler::gtNewTempAssign(unsigned tmp, GenTreePtr val)
 #ifndef LEGACY_BACKEND
     if (fgOrder == FGOrderLinear)
     {
-        Rationalizer::MorphAsgIntoStoreLcl(nullptr, asg);
+        Rationalizer::RewriteAssignmentIntoStoreLcl(asg->AsOp());
     }
 #endif // !LEGACY_BACKEND
 

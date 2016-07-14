@@ -1357,6 +1357,10 @@ public:
     // can be modified; otherwise, return null.
     GenTreePtr*       gtGetChildPointer(GenTreePtr parent);
 
+    // Given a tree node, if this node uses that node, return the use as an out parameter and return true.
+    // Otherwise, return false.
+    bool              TryGetUse(GenTree* def, GenTree*** use);
+
     // Get the parent of this node, and optionally capture the pointer to the child so that it can be modified.
     GenTreePtr        gtGetParent(GenTreePtr** parentChildPtrPtr);
 

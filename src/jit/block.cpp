@@ -497,6 +497,118 @@ void BasicBlock::CloneBlockState(Compiler* compiler, BasicBlock* to, const Basic
     }
 }
 
+// LIR manipulators
+void BasicBlock::InsertNodeBefore(GenTree* node, GenTree* insertionPoint)
+{
+    assert(node != nullptr);
+    assert(node->gtPrev == nullptr);
+    assert(node->gtNext == nullptr);
+
+    assert(insertionPoint != nullptr);
+    assert(ContainsNode(insertionPoint));
+
+    node->gtPrev = insertionPoint->gtPrev;
+    if (node->gtPrev != nullptr)
+    {
+        node->gtPrev->gtNext = node;
+    }
+    else
+    {
+        assert(insertionPoint == bbTreeList);
+        bbTreeList = node;
+    }
+
+    node->gtNext = insertionPoint;
+    insertionPoint->gtPrev = node;
+}
+
+void BasicBlock::InsertNodeAfter(GenTree* node, GenTree* insertionPoint)
+{
+    assert(node != nullptr);
+    assert(node->gtPrev == nullptr);
+    assert(node->gtNext == nullptr);
+
+    assert(insertionPoint != nullptr);
+    assert(ContainsNode(insertionPoint));
+
+    node->gtNext = insertionPoint->gtNext;
+    if (node->gtNext != nullptr)
+    {
+        node->gtNext->gtPrev = node;
+    }
+    else
+    {
+        assert(insertionPoint == bbLastNode);
+        bbLastNode = node;
+    }
+
+    node->gtPrev = insertionPoint;
+    insertionPoint->gtNext = node;
+}
+
+void BasicBlock::RemoveNode(GenTree* node)
+{
+    assert(node != nullptr);
+    assert(ContainsNode(node));
+
+    GenTree* prev = node->gtPrev;
+    GenTree* next = node->gtNext;
+
+    if (prev != nullptr)
+    {
+        prev->gtNext = next;
+    }
+    if (next != nullptr)
+    {
+        next->gtPrev = prev;
+    }
+
+    node->gtPrev = nullptr;
+    node->gtNext = nullptr;
+}
+
+bool BasicBlock::TryGetUse(GenTree* node, GenTree*** use)
+{
+    assert(node != nullptr);
+    assert(ContainsNode(node));
+
+    for (GenTree* n = node->gtNext; n != nullptr; n = n->gtNext)
+    {
+        if (n->TryGetUse(node, use))
+        {
+            return true;
+        }
+    }
+
+    *use = nullptr;
+    return false;
+}
+
+#ifdef DEBUG
+bool BasicBlock::ContainsNode(GenTree* node)
+{
+    assert(node != nullptr);
+
+    for (GenTree* n = bbTreeList; n != nullptr; n = n->gtNext)
+    {
+        if (n == node)
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool CheckNodes()
+{
+    // TODO(pdg): implement debug checks
+
+    return true;
+}
+
+#endif // DEBUG
+
 //------------------------------------------------------------------------
 // firstStmt: Returns the first statement in the block
 //

@@ -242,6 +242,7 @@ GTNODE(PUTARG_REG   , "putarg_reg"    ,0,GTK_UNOP)           // operator that pl
 GTNODE(PUTARG_STK   , "putarg_stk"    ,0,GTK_UNOP)           // operator that places outgoing arg in stack
 GTNODE(RETURNTRAP   , "returnTrap"    ,0,GTK_UNOP)           // a conditional call to wait on gc
 GTNODE(SWAP         , "swap"          ,0,GTK_BINOP)          // op1 and op2 swap (registers)
+GTNODE(IL_OFFSET    , "il_offset"     ,0,GTK_LEAF)           // marks an IL offset for debugging purposes
 
 /*****************************************************************************/
 #undef  GTNODE
