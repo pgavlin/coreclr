@@ -118,6 +118,7 @@ enum genTreeKinds
     GTK_LOCAL   = 0x0200,       // is a local access (load, store, phi)
 
     GTK_NOVALUE = 0x0400,       // node does not produce a value
+    GTK_NOTLIR  = 0x0800,       // node is not allowed in LIR
 
     /* Define composite value(s) */
 
@@ -895,7 +896,7 @@ public:
         return opKind & ~GTK_EXOP;
     }
 
-    bool            OperIsValue() const
+    bool            IsValue() const
     {
         if ((OperKind(gtOper) & GTK_NOVALUE) != 0)
         {
@@ -908,6 +909,40 @@ public:
         }
 
         return true;
+    }
+
+    bool            IsLIR() const
+    {
+        if ((OperKind(gtOper) & GTK_NOTLIR) != 0)
+        {
+            return false;
+        }
+
+        switch (gtOper)
+        {
+        case GT_NOP:
+            // NOPs may only be present in LIR if they do not produce a value.
+            return IsNothingNode();
+
+        case GT_ARGPLACE:
+        case GT_LIST:
+            // ARGPLACE and LIST nodes may not be present in a block's LIR sequence, but they may
+            // be used to represent non-executable concepts.
+            return gtNext == nullptr && gtPrev == nullptr;
+
+        case GT_ADDR:
+            {
+                // ADDR ndoes may only be present in LIR if the location they refer to is not a
+                // local, class variable, or IND node.
+                GenTree* location = const_cast<GenTree*>(this)->gtGetOp1();
+                genTreeOps locationOp = location->OperGet();
+                return !location->IsLocal() && locationOp != GT_CLS_VAR && locationOp != GT_IND;
+            }
+
+        default:
+            // All other nodes are assumed to be correct.
+            return true;
+        }
     }
 
     static
@@ -1681,6 +1716,14 @@ public:
 
     // Requires "childNum < NumChildren()".  Returns the "n"th child of "this."
     GenTreePtr GetChild(unsigned childNum);
+
+    // Returns the number of operands to the current node. Differs from NumChildren only in the
+    // case of call nodes.
+    unsigned NumOperands();
+
+    // Returns the use-to-def edge for the nth operand of the current node. Differs from GetChild
+    // only in the case of call nodes and its handling of GTF_REVERSE_OPS.
+    GenTree** GetOperand(unsigned operandNum);
 
     // The maximum possible # of children of any node.
     static const int MAX_CHILDREN = 6;

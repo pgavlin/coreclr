@@ -49,10 +49,10 @@ GTNODE(NEG        , "unary -"       ,0,GTK_UNOP)
 GTNODE(COPY       , "copy"          ,0,GTK_UNOP)             // Copies a variable from its current location to a register that satisfies
                                                                 // code generation constraints.  The child is the actual lclVar node.
 GTNODE(RELOAD     , "reload"        ,0,GTK_UNOP)
-GTNODE(CHS        , "flipsign"      ,0,GTK_BINOP|GTK_ASGOP)  // GT_CHS is actually unary -- op2 is ignored.
-                                                                // Changing to unary presently causes problems, though -- take a little work to fix.
+GTNODE(CHS        , "flipsign"      ,0,GTK_BINOP|GTK_ASGOP|GTK_NOTLIR)  // GT_CHS is actually unary -- op2 is ignored.
+                                                                            // Changing to unary presently causes problems, though -- take a little work to fix.
 
-GTNODE(ARR_LENGTH , "arrLen"        ,0,GTK_UNOP|GTK_EXOP)    // array-length
+GTNODE(ARR_LENGTH , "arrLen"        ,0,GTK_UNOP|GTK_EXOP|GTK_NOTLIR)    // array-length
 
 GTNODE(INTRINSIC  , "intrinsic"     ,0,GTK_BINOP|GTK_EXOP)   // intrinsics
 
@@ -75,7 +75,7 @@ GTNODE(STOREIND         , "storeIndir"    ,0,GTK_BINOP|GTK_NOVALUE) // store ind
                                                                       // TODO-Cleanup: GT_ARR_BOUNDS_CHECK should be made a GTK_BINOP now that it has only two child nodes
 GTNODE(ARR_BOUNDS_CHECK , "arrBndsChk"    ,0,GTK_SPECIAL|GTK_NOVALUE) // array bounds check
 GTNODE(OBJ              , "obj"           ,0,GTK_UNOP|GTK_EXOP)
-GTNODE(BOX              , "box"           ,0,GTK_UNOP|GTK_EXOP)
+GTNODE(BOX              , "box"           ,0,GTK_UNOP|GTK_EXOP|GTK_NOTLIR)
 
 #ifdef FEATURE_SIMD
 GTNODE(SIMD_CHK         , "simdChk"       ,0,GTK_SPECIAL|GTK_NOVALUE) // Compare whether an index is less than the given SIMD vector length, and call CORINFO_HELP_RNGCHKFAIL if not.
@@ -109,22 +109,22 @@ GTNODE(ROL        , "rol"        ,0,GTK_BINOP)
 GTNODE(ROR        , "ror"        ,0,GTK_BINOP)
 GTNODE(MULHI      , "mulhi"      ,1,GTK_BINOP) // returns high bits (top N bits of the 2N bit result of an NxN multiply)
 
-GTNODE(ASG        , "="          ,0,GTK_BINOP|GTK_ASGOP)
-GTNODE(ASG_ADD    , "+="         ,0,GTK_BINOP|GTK_ASGOP)
-GTNODE(ASG_SUB    , "-="         ,0,GTK_BINOP|GTK_ASGOP)
-GTNODE(ASG_MUL    , "*="         ,0,GTK_BINOP|GTK_ASGOP)
-GTNODE(ASG_DIV    , "/="         ,0,GTK_BINOP|GTK_ASGOP)
-GTNODE(ASG_MOD    , "%="         ,0,GTK_BINOP|GTK_ASGOP)
+GTNODE(ASG        , "="          ,0,GTK_BINOP|GTK_ASGOP|GTK_NOTLIR)
+GTNODE(ASG_ADD    , "+="         ,0,GTK_BINOP|GTK_ASGOP|GTK_NOTLIR)
+GTNODE(ASG_SUB    , "-="         ,0,GTK_BINOP|GTK_ASGOP|GTK_NOTLIR)
+GTNODE(ASG_MUL    , "*="         ,0,GTK_BINOP|GTK_ASGOP|GTK_NOTLIR)
+GTNODE(ASG_DIV    , "/="         ,0,GTK_BINOP|GTK_ASGOP|GTK_NOTLIR)
+GTNODE(ASG_MOD    , "%="         ,0,GTK_BINOP|GTK_ASGOP|GTK_NOTLIR)
 
-GTNODE(ASG_UDIV   , "/="         ,0,GTK_BINOP|GTK_ASGOP)
-GTNODE(ASG_UMOD   , "%="         ,0,GTK_BINOP|GTK_ASGOP)
+GTNODE(ASG_UDIV   , "/="         ,0,GTK_BINOP|GTK_ASGOP|GTK_NOTLIR)
+GTNODE(ASG_UMOD   , "%="         ,0,GTK_BINOP|GTK_ASGOP|GTK_NOTLIR)
 
-GTNODE(ASG_OR     , "|="         ,0,GTK_BINOP|GTK_ASGOP)
-GTNODE(ASG_XOR    , "^="         ,0,GTK_BINOP|GTK_ASGOP)
-GTNODE(ASG_AND    , "&="         ,0,GTK_BINOP|GTK_ASGOP)
-GTNODE(ASG_LSH    , "<<="        ,0,GTK_BINOP|GTK_ASGOP)
-GTNODE(ASG_RSH    , ">>="        ,0,GTK_BINOP|GTK_ASGOP)
-GTNODE(ASG_RSZ    , ">>>="       ,0,GTK_BINOP|GTK_ASGOP)
+GTNODE(ASG_OR     , "|="         ,0,GTK_BINOP|GTK_ASGOP|GTK_NOTLIR)
+GTNODE(ASG_XOR    , "^="         ,0,GTK_BINOP|GTK_ASGOP|GTK_NOTLIR)
+GTNODE(ASG_AND    , "&="         ,0,GTK_BINOP|GTK_ASGOP|GTK_NOTLIR)
+GTNODE(ASG_LSH    , "<<="        ,0,GTK_BINOP|GTK_ASGOP|GTK_NOTLIR)
+GTNODE(ASG_RSH    , ">>="        ,0,GTK_BINOP|GTK_ASGOP|GTK_NOTLIR)
+GTNODE(ASG_RSZ    , ">>>="       ,0,GTK_BINOP|GTK_ASGOP|GTK_NOTLIR)
 
 GTNODE(EQ         , "=="         ,0,GTK_BINOP|GTK_RELOP)
 GTNODE(NE         , "!="         ,0,GTK_BINOP|GTK_RELOP)
@@ -133,12 +133,12 @@ GTNODE(LE         , "<="         ,0,GTK_BINOP|GTK_RELOP)
 GTNODE(GE         , ">="         ,0,GTK_BINOP|GTK_RELOP)
 GTNODE(GT         , ">"          ,0,GTK_BINOP|GTK_RELOP)
 
-GTNODE(COMMA      , "comma"      ,0,GTK_BINOP)
+GTNODE(COMMA      , "comma"      ,0,GTK_BINOP|GTK_NOTLIR)
 
-GTNODE(QMARK      , "qmark"      ,0,GTK_BINOP|GTK_EXOP)
-GTNODE(COLON      , "colon"      ,0,GTK_BINOP)
+GTNODE(QMARK      , "qmark"      ,0,GTK_BINOP|GTK_EXOP|GTK_NOTLIR)
+GTNODE(COLON      , "colon"      ,0,GTK_BINOP|GTK_NOTLIR)
 
-GTNODE(INDEX      , "[]"         ,0,GTK_BINOP|GTK_EXOP)   // SZ-array-element
+GTNODE(INDEX      , "[]"         ,0,GTK_BINOP|GTK_EXOP|GTK_NOTLIR)   // SZ-array-element
 
 GTNODE(MKREFANY   , "mkrefany"   ,0,GTK_BINOP)
 

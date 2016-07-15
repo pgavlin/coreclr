@@ -1405,9 +1405,9 @@ void Rationalizer::DoPhase()
                 this,
                 true);
         }
-    }
 
-    //DBEXEC(TRUE, SanityCheckRational());
+        assert(block->CheckLIR(comp));
+    }
 
     comp->compRationalIRForm = true;
 

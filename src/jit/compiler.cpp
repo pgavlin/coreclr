@@ -9709,7 +9709,7 @@ void        cNodeIR(Compiler* comp, GenTree* tree)
         }
     }
 
-    bool nodeIsValue = tree->OperIsValue();
+    bool nodeIsValue = tree->IsValue();
 
     // Dump tree id or dataflow destination.
 

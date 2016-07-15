@@ -1005,7 +1005,7 @@ public:
 
 #ifdef DEBUG
     bool ContainsNode(GenTree* node);
-    bool CheckNodes();
+    bool CheckLIR(Compiler* compiler);
 #endif // DEBUG
 };
 

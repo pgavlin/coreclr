@@ -638,9 +638,92 @@ bool BasicBlock::ContainsNode(GenTree* node)
     return false;
 }
 
-bool CheckNodes()
+bool BasicBlock::CheckLIR(Compiler* compiler)
 {
-    // TODO(pdg): implement debug checks
+    // Debug checks:
+    // - defs are singly-used
+    // - uses follow defs
+    // - uses are correctly linked into the block
+    // - nodes that do not produce values are not used
+    // - only LIR nodes are present in the block
+    //
+    // The first four properties are verified by walking the block's LIR in execution order,
+    // inserting defs into a set as they are visited, and removing them as they are used. The
+    // different cases are distinguished only when an error is detected.
+    //
+    // The final property is verified simply by checking the opcode for each node as it is
+    // visited.
+
+    // This code uses a stack as a map. Lookup is accomplished by scanning downward from the top.
+    // This relies on defs being near uses for efficiency.
+    ArrayStack<GenTree*> unusedDefs(compiler);
+    auto tryGetAndRemoveDef = [&unusedDefs](GenTree* def) -> bool
+    {
+        int height = unusedDefs.Height();
+        for (int i = 0; i < height; i++)
+        {
+            if (unusedDefs.Index(i) == def)
+            {
+                for (; i > 0; i--)
+                {
+                    unusedDefs.IndexRef(i) = unusedDefs.Index(i - 1);
+                }
+
+                unusedDefs.Pop();
+                return true;
+            }
+        }
+
+        return false;
+    };
+
+    GenTree* prev = nullptr;
+    for (GenTree* node = bbTreeList; node != nullptr; prev = node, node = node->gtNext)
+    {
+        // Verify that the node is allowed in LIR.
+        assert(node->IsLIR());
+
+        // Skip nodes that do not produce values.
+        if (!node->IsValue())
+        {
+            continue;
+        }
+
+        unsigned numOperands = node->NumOperands();
+        for (unsigned i = 0; i < numOperands; i++)
+        {
+            GenTree** use = node->GetOperand(i);
+            GenTree* def = *use;
+            if (def->OperGet() == GT_ARGPLACE)
+            {
+                // ARGPLACE nodes are not represented in the LIR sequence. Ignore them.
+                continue;
+            }
+
+            bool foundDef = tryGetAndRemoveDef(def);
+            if (!foundDef)
+            {
+                // First, scan backwards and look for a preceding use.
+                for (GenTree* prev = node; prev != nullptr; prev = prev->gtPrev)
+                {
+                    // TODO: dump the users and the def
+                    GenTree** earlierUse;
+                    bool foundEarlierUse = prev->TryGetUse(def, &earlierUse) && earlierUse != use;
+                    assert(!foundEarlierUse && "found multiply-used LIR node");
+                }
+
+                // The def did not precede the use. Check to see if it exists in the block at all.
+                for (GenTree* next = node->gtNext; next != nullptr; next = next->gtNext)
+                {
+                    // TODO: dump the user and the def
+                    assert(next != def && "found def after use");
+                }
+
+                // By this point, the only possibility is that the def is not threaded into the LIR sequence.
+                assert(false && "found use of node that is not in the LIR sequence");
+            }
+        }
+    }
 
     return true;
 }
