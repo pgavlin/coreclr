@@ -1397,5 +1397,5 @@ void Rationalizer::DoPhase()
 
     comp->compRationalIRForm = true;
 
-    assert(false && "later stages cannot yet process LIR!");
+    NYI("later stages cannot yet process LIR!");
 }
