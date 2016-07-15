@@ -497,7 +497,12 @@ void BasicBlock::CloneBlockState(Compiler* compiler, BasicBlock* to, const Basic
     }
 }
 
-// LIR manipulators
+// LIR helpers
+bool BasicBlock::IsLIR()
+{
+    return bbTreeList != nullptr && !bbTreeList->IsStatement();
+}
+
 void BasicBlock::InsertNodeBefore(GenTree* node, GenTree* insertionPoint)
 {
     assert(node != nullptr);

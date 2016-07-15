@@ -993,6 +993,8 @@ public:
     static void CloneBlockState(Compiler* compiler, BasicBlock* to, const BasicBlock* from);
 
     // LIR helper methods
+    bool IsLIR();
+
     void InsertNodeBefore(GenTree* node, GenTree* insertionPoint);
     void InsertNodeAfter(GenTree* node, GenTree* insertionPoint);
     void RemoveNode(GenTree* node);

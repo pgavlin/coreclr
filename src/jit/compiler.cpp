@@ -7912,44 +7912,55 @@ void        cBlockIR(Compiler* comp, BasicBlock* block)
     }
 
     printf("\n");
-    for (GenTreeStmt* stmt = block->firstStmt(); stmt; stmt = stmt->gtNextStmt)
+
+    if (!block->IsLIR())
     {
-        // Skip embedded stmts. They should have already been dumped prior to the stmt 
-        // that they are embedded into.  Even though they appear on the stmt list
-        // after the stmt they are embedded into.  Don't understand the rationale for that
-        // but make the dataflow view look consistent.
-
-        if ((stmt->gtFlags & GTF_STMT_TOP_LEVEL) == 0)
+        for (GenTreeStmt* stmt = block->firstStmt(); stmt; stmt = stmt->gtNextStmt)
         {
-            continue;
-        }
+            // Skip embedded stmts. They should have already been dumped prior to the stmt 
+            // that they are embedded into.  Even though they appear on the stmt list
+            // after the stmt they are embedded into.  Don't understand the rationale for that
+            // but make the dataflow view look consistent.
 
-        // Print current stmt.
-
-        if (trees)
-        {
-            cTree(comp, stmt);
-            printf("\n");
-            printf("=====================================================================\n");
-        }
-
-        if (comp->compRationalIRForm)
-        {
-            GenTree* tree;
-
-            foreach_treenode_execution_order(tree, stmt)
+            if ((stmt->gtFlags & GTF_STMT_TOP_LEVEL) == 0)
             {
-                cNodeIR(comp, tree);
+                continue;
+            }
+
+            // Print current stmt.
+
+            if (trees)
+            {
+                cTree(comp, stmt);
+                printf("\n");
+                printf("=====================================================================\n");
+            }
+
+            if (comp->compRationalIRForm)
+            {
+                GenTree* tree;
+
+                foreach_treenode_execution_order(tree, stmt)
+                {
+                    cNodeIR(comp, tree);
+                }
+            }
+            else
+            {
+                cTreeIR(comp, stmt);
+            }
+
+            if (!noStmts && !trees)
+            {
+               printf("\n");
             }
         }
-        else
+    }
+    else
+    {
+        for (GenTree* node = block->bbTreeList; node != nullptr; node = node->gtNext)
         {
-            cTreeIR(comp, stmt);
-        }
-
-        if (!noStmts && !trees)
-        {
-           printf("\n");
+            cNodeIR(comp, node);
         }
     }
 
@@ -9328,6 +9339,14 @@ int         cLeafIR(Compiler *comp, GenTree* tree)
             chars += printf("BB?");
         break;
 
+    case GT_IL_OFFSET:
+
+        if (tree->gtStmt.gtStmtILoffsx == BAD_IL_OFFSET)
+            chars += printf("?");
+        else
+            chars += printf("0x%x", jitGetILoffs(tree->gtStmt.gtStmtILoffsx));
+        break;
+
     case GT_CLS_VAR:
     case GT_CLS_VAR_ADDR:
     default:
@@ -9690,6 +9709,8 @@ void        cNodeIR(Compiler* comp, GenTree* tree)
         }
     }
 
+    bool nodeIsValue = tree->OperIsValue();
+
     // Dump tree id or dataflow destination.
 
     int chars = 0;
@@ -9724,7 +9745,7 @@ void        cNodeIR(Compiler* comp, GenTree* tree)
             chars += cValNumIR(comp, tree);
         }
     }
-    else
+    else if (nodeIsValue)
     {
         chars += printf("t%d", tree->gtTreeID);
         if (comp->dumpIRRegs)
@@ -9749,7 +9770,7 @@ void        cNodeIR(Compiler* comp, GenTree* tree)
 
     chars += dTabStopIR(chars, COLUMN_OPCODE);
     const char * opName = tree->OpName(op);
-    chars += printf(" = %s", opName);
+    chars += printf(" %c %s", nodeIsValue ? '=' : ' ', opName);
 
     if (dataflowView)
     {

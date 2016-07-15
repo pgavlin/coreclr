@@ -117,6 +117,8 @@ enum genTreeKinds
 
     GTK_LOCAL   = 0x0200,       // is a local access (load, store, phi)
 
+    GTK_NOVALUE = 0x0400,       // node does not produce a value
+
     /* Define composite value(s) */
 
     GTK_SMPOP   = (GTK_UNOP|GTK_BINOP|GTK_RELOP|GTK_LOGOP)
@@ -891,6 +893,21 @@ public:
     static unsigned StripExOp(unsigned opKind)
     {
         return opKind & ~GTK_EXOP;
+    }
+
+    bool            OperIsValue() const
+    {
+        if ((OperKind(gtOper) & GTK_NOVALUE) != 0)
+        {
+            return false;
+        }
+
+        if (gtOper == GT_NOP || gtOper == GT_CALL)
+        {
+            return gtType != TYP_VOID;
+        }
+
+        return true;
     }
 
     static

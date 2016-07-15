@@ -1014,6 +1014,7 @@ void Rationalizer::RewriteAssignment(GenTree** use)
     case GT_REG_VAR:
     case GT_PHI_ARG:
         RewriteAssignmentIntoStoreLclCore(assignment, location, value, locationOp);
+        m_block->RemoveNode(location);
         break;
 
     case GT_IND:
@@ -1118,6 +1119,12 @@ Compiler::fgWalkResult Rationalizer::RewriteNode(GenTree** use, ArrayStack<GenTr
 
     GenTree* node = *use;
 
+    // First, remove any preceeding GT_LIST nodes, which are not otherwise visited by the tree walk.
+    for (GenTree* prev = node->gtPrev; prev != nullptr && prev->OperGet() == GT_LIST; prev = node->gtPrev)
+    {
+        m_block->RemoveNode(prev);
+    }
+
     switch (node->OperGet())
     {
     case GT_ASG:
@@ -1164,8 +1171,7 @@ Compiler::fgWalkResult Rationalizer::RewriteNode(GenTree** use, ArrayStack<GenTr
         break;
 
     case GT_ARGPLACE:
-    case GT_LIST:
-        // Remove argplace and list nodes from the LIR.
+        // Remove argplace nodes from the LIR.
         m_block->RemoveNode(node);
         break;
 
