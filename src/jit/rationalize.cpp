@@ -1220,11 +1220,25 @@ Compiler::fgWalkResult Rationalizer::RewriteNode(GenTree** use, ArrayStack<GenTr
         if (node->gtType == TYP_STRUCT)
         {
             GenTree* addr = node->AsIndir()->Addr();
-            assert(addr->OperIsLocal() && addr->TypeGet() == TYP_BYREF);
-            LclVarDsc* varDsc = &(comp->lvaTable[addr->AsLclVarCommon()->gtLclNum]);
-            assert(varDsc->lvSIMDType);
-            unsigned simdSize = (unsigned int) roundUp(varDsc->lvExactSize, TARGET_POINTER_SIZE);
-            node->gtType = comp->getSIMDTypeForSize(simdSize);
+            assert(addr->TypeGet() == TYP_BYREF);
+
+            if (addr->OperIsLocal())
+            {
+                LclVarDsc* varDsc = &(comp->lvaTable[addr->AsLclVarCommon()->gtLclNum]);
+                assert(varDsc->lvSIMDType);
+                unsigned simdSize = (unsigned int) roundUp(varDsc->lvExactSize, TARGET_POINTER_SIZE);
+                node->gtType = comp->getSIMDTypeForSize(simdSize);
+            }
+#if DEBUG
+            else
+            {
+                // If the address is not a local var, assert that the user of this IND is an ADDR node.
+                GenTree* user;
+                GenTree** unused;
+                bool foundUse = m_block->TryGetUse(node, &user, &unused);
+                assert(foundUse && user->OperGet() == GT_ADDR);
+            }
+#endif
         }
         break;
 

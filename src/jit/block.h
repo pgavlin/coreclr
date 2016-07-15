@@ -1000,6 +1000,7 @@ public:
     void RemoveNode(GenTree* node);
 
     bool TryGetUse(GenTree* node, GenTree*** use);
+    bool TryGetUse(GenTree* node, GenTree** user, GenTree*** use);
     void ReplaceUseWith(GenTree** use, GenTree* replacement);
 
 #ifdef DEBUG

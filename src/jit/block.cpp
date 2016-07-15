@@ -586,16 +586,29 @@ void BasicBlock::RemoveNode(GenTree* node)
 bool BasicBlock::TryGetUse(GenTree* node, GenTree*** use)
 {
     assert(node != nullptr);
+    assert(use != nullptr);
+
+    GenTree* unused;
+    return TryGetUse(node, &unused, use);
+}
+
+bool BasicBlock::TryGetUse(GenTree* node, GenTree** user, GenTree*** use)
+{
+    assert(node != nullptr);
+    assert(user != nullptr);
+    assert(use != nullptr);
     assert(ContainsNode(node));
 
     for (GenTree* n = node->gtNext; n != nullptr; n = n->gtNext)
     {
         if (n->TryGetUse(node, use))
         {
+            *user = n;
             return true;
         }
     }
 
+    *user = nullptr;
     *use = nullptr;
     return false;
 }
