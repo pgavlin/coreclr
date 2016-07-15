@@ -9074,6 +9074,18 @@ Compiler::gtDispLeaf(GenTree *tree, IndentStack* indentStack)
         printf(" %s", getRegName(tree->gtPhysReg.gtSrcReg, varTypeIsFloating(tree)));
         break;
 
+    case GT_IL_OFFSET:
+        printf(" IL offset: ");
+        if (tree->gtStmt.gtStmtILoffsx == BAD_IL_OFFSET)
+        {
+            printf("(BAD)");
+        }
+        else
+        {
+            printf("%d", tree->gtStmt.gtStmtILoffsx);
+        }
+        break;
+
     default:
         assert(!"don't know how to display tree leaf node");
     }

@@ -558,9 +558,20 @@ void BasicBlock::RemoveNode(GenTree* node)
     {
         prev->gtNext = next;
     }
+    else
+    {
+        assert(node == bbTreeList);
+        bbTreeList = next;
+    }
+
     if (next != nullptr)
     {
         next->gtPrev = prev;
+    }
+    else
+    {
+        assert(node == bbLastNode);
+        bbLastNode = prev;
     }
 
     node->gtPrev = nullptr;
@@ -582,6 +593,15 @@ bool BasicBlock::TryGetUse(GenTree* node, GenTree*** use)
 
     *use = nullptr;
     return false;
+}
+
+void BasicBlock::ReplaceUseWith(GenTree** use, GenTree* replacement)
+{
+    assert(use != nullptr);
+    assert(replacement != nullptr);
+    assert(ContainsNode(replacement));
+
+    *use = replacement;
 }
 
 #ifdef DEBUG

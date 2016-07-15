@@ -1163,6 +1163,12 @@ Compiler::fgWalkResult Rationalizer::RewriteNode(GenTree** use, ArrayStack<GenTr
         }
         break;
 
+    case GT_ARGPLACE:
+    case GT_LIST:
+        // Remove argplace and list nodes from the LIR.
+        m_block->RemoveNode(node);
+        break;
+
 #ifdef _TARGET_XARCH_
     case GT_CLS_VAR:
         {
@@ -1285,16 +1291,6 @@ Compiler::fgWalkResult Rationalizer::RewriteNode(GenTree** use, ArrayStack<GenTr
     GenTree* newNode = *use;
     if (newNode != node)
     {
-        if (node == m_statement->gtStmtList)
-        {
-            m_statement->gtStmtList = newNode;
-        }
-
-        // If we just replaced the first or last node in the statement, make sure that the
-        // replacement has no predecessors or successors, respectively.
-        assert(node != m_statement->gtStmtList || newNode->gtPrev == nullptr);
-        assert(node != m_statement->gtStmtExpr || newNode->gtNext == nullptr);
-
         comp->fgFixupIfCallArg(&parentStack, node, newNode);
     }
 
@@ -1308,14 +1304,32 @@ void Rationalizer::DoPhase()
     comp->compCurBB = NULL;
     comp->fgOrder = Compiler::FGOrderLinear;
 
-    // Rewrite intrinsics that are not supported by the target back into user calls.
-    // This needs to be done before the transition to LIR because it relies on the use
-    // of fgMorphArgs, which is designed to operate on HIR.
+    BasicBlock* firstBlock = comp->fgFirstBB;
+
     for (BasicBlock* block = comp->fgFirstBB; block != nullptr; block = block->bbNext)
     {
-        for (GenTree* tree = block->FirstNonPhiDef(); tree != nullptr; tree = tree->gtNext)
+        // Establish the first and last nodes for the block. This is necessary in order for the LIR
+        // utilities that hang off the BasicBlock type to work correctly.
+        GenTreeStmt* firstStatement = block->firstStmt();
+        if (firstStatement == nullptr)
         {
-            GenTreeStmt* statement = tree->AsStmt();
+            // No statements in this block; skip it.
+            continue;
+        }
+
+        GenTreeStmt* lastStatement = block->lastStmt();
+        block->bbTreeList = firstStatement->gtStmtList;
+        block->bbLastNode = lastStatement->gtStmtExpr;
+
+        // Rewrite intrinsics that are not supported by the target back into user calls.
+        // This needs to be done before the transition to LIR because it relies on the use
+        // of fgMorphArgs, which is designed to operate on HIR. Once this is done for a
+        // particular statement, link that statement's nodes into the current basic block.
+        GenTree* lastNodeInPreviousStatement = nullptr;
+        for (GenTreeStmt* statement = firstStatement; statement != nullptr; statement = statement->getNextStmt())
+        {
+            assert(statement->gtStmtList != nullptr);
+            assert(statement->gtStmtExpr != nullptr);
 
             SplitData splitData;
             splitData.root = statement;
@@ -1338,36 +1352,6 @@ void Rationalizer::DoPhase()
                 },
                 &splitData,
                 true);
-        }
-    }
-
-    // Perform all other rewrites and link the the first node of each statement to the last node
-    // of its preceding statement (if any).
-    for (BasicBlock* block = comp->fgFirstBB; block != nullptr; block = block->bbNext)
-    {
-        // Establish the first and last nodes for the block. This is necessary in order for the LIR
-        // utilities that hang off the BasicBlock type to work correctly.
-        GenTreeStmt* firstStatement = block->firstStmt();
-        GenTreeStmt* firstNonPhiDef = block->FirstNonPhiDef();
-        block->bbTreeList = firstStatement->gtStmtList;
-        block->bbLastNode = block->lastStmt()->gtStmtExpr;
-
-        m_block = block;
-        GenTree* lastNodeInPreviousStatement = nullptr;
-        for (GenTreeStmt* statement = firstStatement, *nextStatement; statement != nullptr; statement = nextStatement)
-        {
-            // Do not rewrite phi defs.
-            if (statement != firstNonPhiDef)
-            {
-                m_statement = statement;
-                comp->fgWalkTreePost(&statement->gtStmtExpr,
-                    [](GenTree** use, Compiler::fgWalkData* walkData) -> Compiler::fgWalkResult
-                    {
-                        return reinterpret_cast<Rationalizer*>(walkData->pCallbackData)->RewriteNode(use, *walkData->parentStack);
-                    },
-                    this,
-                    true);
-            }
 
             GenTree* firstNodeInStatement = statement->gtStmtList;
             if (lastNodeInPreviousStatement != nullptr)
@@ -1377,7 +1361,12 @@ void Rationalizer::DoPhase()
 
             firstNodeInStatement->gtPrev = lastNodeInPreviousStatement;
             lastNodeInPreviousStatement = statement->gtStmtExpr;
+        }
 
+        // Rewrite HIR nodes into LIR nodes.
+        m_block = block;
+        for (GenTreeStmt* statement = firstStatement, *nextStatement; statement != nullptr; statement = nextStatement)
+        {
             nextStatement = statement->getNextStmt();
 
             // Change this statement into an IL offset node and insert it into the LIR.
@@ -1385,7 +1374,16 @@ void Rationalizer::DoPhase()
             statement->gtNext = nullptr;
             statement->gtPrev = nullptr;
 
-            block->InsertNodeBefore(statement, firstNodeInStatement);
+            block->InsertNodeBefore(statement, statement->gtStmtList);
+
+            m_statement = statement;
+            comp->fgWalkTreePost(&statement->gtStmtExpr,
+                [](GenTree** use, Compiler::fgWalkData* walkData) -> Compiler::fgWalkResult
+                {
+                    return reinterpret_cast<Rationalizer*>(walkData->pCallbackData)->RewriteNode(use, *walkData->parentStack);
+                },
+                this,
+                true);
         }
     }
 
