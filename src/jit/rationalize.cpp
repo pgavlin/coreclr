@@ -1212,7 +1212,7 @@ Compiler::fgWalkResult Rationalizer::RewriteNode(GenTree** use, ArrayStack<GenTr
 
     case GT_LCL_FLD:
     case GT_STORE_LCL_FLD:
-        FixupIfSIMDLocal(node->AsLclVar());
+        FixupIfSIMDLocal(node->AsLclVarCommon());
         break;
 
     case GT_STOREIND:
