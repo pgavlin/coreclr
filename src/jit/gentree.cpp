@@ -5298,6 +5298,31 @@ bool              GenTree::TryGetUse(GenTree* def, GenTree*** use)
         }
         break;
 
+    case GT_PHI:
+        {
+            GenTreeUnOp* phi = AsUnOp();
+            if (phi->gtOp1 != nullptr)
+            {
+                for (GenTreeArgList* args = phi->gtOp1->AsArgList(); args != nullptr; args = args->Rest())
+                {
+                    if (def == args->gtOp1)               return (*use = &args->gtOp1, true);
+                }
+            }
+        }
+        break;
+
+    case GT_INITBLK:
+    case GT_COPYBLK:
+    case GT_COPYOBJ:
+        {
+            GenTreeBlkOp* blkOp = AsBlkOp();
+            GenTreeArgList* args = blkOp->gtOp1->AsArgList();
+            if (def == args->gtOp1)                       return (*use = &args->gtOp1, true);
+            if (def == args->gtOp2)                       return (*use = &args->gtOp2, true);
+            if (def == blkOp->gtOp2)                      return (*use = &blkOp->gtOp2, true);
+        }
+        break;
+
     case GT_STMT:
         noway_assert(!"Illegal node for gtGetChildPointer()");
         unreached();
