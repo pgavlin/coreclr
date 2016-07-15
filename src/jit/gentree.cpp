@@ -5222,7 +5222,7 @@ bool              GenTree::TryGetUse(GenTree* def, GenTree*** use)
     switch (OperGet())
     {
     default:
-        if (!OperIsSimple())                      return (*use = nullptr, true);
+        if (!OperIsSimple())                      return (*use = nullptr, false);
         if (def == gtOp.gtOp1)                    return (*use = &(gtOp.gtOp1), true);
         if (def == gtOp.gtOp2)                    return (*use = &(gtOp.gtOp2), true);
         break;
@@ -7913,45 +7913,73 @@ GenTreePtr GenTree::GetChild(unsigned childNum)
 
 unsigned GenTree::NumOperands()
 {
-    if (OperGet() != GT_CALL)
-    {
-        return NumChildren();
-    }
-
-    GenTreeCall* call = AsCall();
-
     unsigned numOperands = 0;
-    if (call->gtCallObjp != nullptr)
+    switch (OperGet())
     {
-        numOperands++;
-    }
-
-    for (GenTreeArgList* args = call->gtCallArgs; args != nullptr; args = args->Rest())
-    {
-        numOperands++;
-    }
-
-    for (GenTreeArgList* args = call->gtCallLateArgs; args != nullptr; args = args->Rest())
-    {
-        numOperands++;
-    }
-
-    if (call->gtControlExpr != nullptr)
-    {
-        numOperands++;
-    }
-
-    if (call->gtCallType == CT_INDIRECT)
-    {
-        if (call->gtCallCookie != nullptr)
+    case GT_CALL:
         {
-            numOperands++;
-        }
+            GenTreeCall* call = AsCall();
 
-        if (call->gtCallAddr != nullptr)
-        {
-            numOperands++;
+            if (call->gtCallObjp != nullptr)
+            {
+                numOperands++;
+            }
+
+            for (GenTreeArgList* args = call->gtCallArgs; args != nullptr; args = args->Rest())
+            {
+                numOperands++;
+            }
+
+            for (GenTreeArgList* args = call->gtCallLateArgs; args != nullptr; args = args->Rest())
+            {
+                numOperands++;
+            }
+
+            if (call->gtControlExpr != nullptr)
+            {
+                numOperands++;
+            }
+
+            if (call->gtCallType == CT_INDIRECT)
+            {
+                if (call->gtCallCookie != nullptr)
+                {
+                    numOperands++;
+                }
+
+                if (call->gtCallAddr != nullptr)
+                {
+                    numOperands++;
+                }
+            }
         }
+        break;
+
+    case GT_PHI:
+        {
+            GenTreeUnOp* phi = AsUnOp();
+            if (phi->gtOp1 != nullptr)
+            {
+                for (GenTreeArgList* args = phi->gtOp1->AsArgList(); args != nullptr; args = args->Rest())
+                {
+                    numOperands++;
+                }
+            }
+        }
+        break;
+
+    case GT_INITBLK:
+    case GT_COPYBLK:
+    case GT_COPYOBJ:
+        {
+            // Dest, InitVal/Source, Size
+            numOperands = 3;
+        }
+        break;
+
+    default:
+        numOperands = NumChildren();
+        break;
     }
 
     return numOperands;
@@ -7961,152 +7989,193 @@ GenTree** GenTree::GetOperand(unsigned operandNum)
 {
     assert(operandNum < NumOperands());
 
-    if (OperIsUnary())
+    // Special
+    switch (OperGet())
     {
-        return &AsUnOp()->gtOp1;
-    }
-    else if (OperIsBinary())
-    {
-        if (OperIsAddrMode())
+    case GT_CMPXCHG:
+        switch (operandNum)
         {
-            // If this is the first (0th) child, only return op1 if it is non-null
-            // Otherwise, we return gtOp2.
-            if (operandNum == 0 && AsOp()->gtOp1 != nullptr)
-                return &AsOp()->gtOp1;
-
-            return &AsOp()->gtOp2;
+        case 0:
+            return &AsCmpXchg()->gtOpLocation;
+        case 1:
+            return &AsCmpXchg()->gtOpValue;
+        case 2:
+            return &AsCmpXchg()->gtOpComparand;
+        default:
+            unreached();
         }
-
-        GenTree** op1 = &AsOp()->gtOp1;
-        GenTree** op2 = &AsOp()->gtOp2;
-
-        if ((gtFlags & GTF_REVERSE_OPS) != 0)
-        {
-            GenTree** tmp = op1;
-            op1 = op2;
-            op2 = tmp;
-        }
-
-        return operandNum == 0 ? op1 : op2;
-    }
-    else
-    {
-        // Special
-        switch (OperGet())
-        {
-        case GT_CMPXCHG:
-            switch (operandNum)
-            {
-            case 0:
-                return &AsCmpXchg()->gtOpLocation;
-            case 1:
-                return &AsCmpXchg()->gtOpValue;
-            case 2:
-                return &AsCmpXchg()->gtOpComparand;
-            default:
-                unreached();
-            }
-        case GT_ARR_BOUNDS_CHECK:
+    case GT_ARR_BOUNDS_CHECK:
 #ifdef FEATURE_SIMD
-    case GT_SIMD_CHK:
+case GT_SIMD_CHK:
 #endif // FEATURE_SIMD
-            switch (operandNum)
+        switch (operandNum)
+        {
+        case 0:
+            return &AsBoundsChk()->gtArrLen;
+        case 1:
+            return &AsBoundsChk()->gtIndex;
+        default:
+            unreached();
+        }
+
+    case GT_FIELD:
+        return &AsField()->gtFldObj;
+
+    case GT_STMT:
+        return &AsStmt()->gtStmtExpr;
+
+    case GT_ARR_ELEM:
+        if (operandNum == 0)
+        {
+            return &AsArrElem()->gtArrObj;
+        }
+        else
+        {
+            return &AsArrElem()->gtArrInds[operandNum-1];
+        }
+
+    case GT_ARR_OFFSET:
+        switch (operandNum)
+        {
+        case 0:
+            return &AsArrOffs()->gtOffset;
+        case 1:
+            return &AsArrOffs()->gtIndex;
+        case 2:
+            return &AsArrOffs()->gtArrObj;
+        default:
+            unreached();
+        }
+
+    case GT_CALL:
+        {
+            GenTreeCall* call = AsCall();
+
+            if (call->gtCallObjp != nullptr)
             {
-            case 0:
-                return &AsBoundsChk()->gtArrLen;
-            case 1:
-                return &AsBoundsChk()->gtIndex;
-            default:
-                unreached();
-            }
-
-        case GT_FIELD:
-            return &AsField()->gtFldObj;
-
-        case GT_STMT:
-            return &AsStmt()->gtStmtExpr;
-
-        case GT_ARR_ELEM:
-            if (operandNum == 0)
-            {
-                return &AsArrElem()->gtArrObj;
-            }
-            else
-            {
-                return &AsArrElem()->gtArrInds[operandNum-1];
-            }
-
-        case GT_ARR_OFFSET:
-            switch (operandNum)
-            {
-            case 0:
-                return &AsArrOffs()->gtOffset;
-            case 1:
-                return &AsArrOffs()->gtIndex;
-            case 2:
-                return &AsArrOffs()->gtArrObj;
-            default:
-                unreached();
-            }
-
-        case GT_CALL:
-            {
-                GenTreeCall* call = AsCall();
-
-                if (call->gtCallObjp != nullptr && operandNum == 0)
+                if (operandNum == 0)
                 {
                     return &call->gtCallObjp;
                 }
                 operandNum--;
+            }
 
-                for (GenTreeArgList* args = call->gtCallArgs; args != nullptr; args = args->Rest())
+            for (GenTreeArgList* args = call->gtCallArgs; args != nullptr; args = args->Rest())
+            {
+                if (operandNum == 0)
                 {
-                    if (operandNum == 0)
-                    {
-                        return &args->gtOp1;
-                    }
-                    operandNum--;
+                    return &args->gtOp1;
                 }
+                operandNum--;
+            }
 
-                for (GenTreeArgList* args = call->gtCallLateArgs; args != nullptr; args = args->Rest())
+            for (GenTreeArgList* args = call->gtCallLateArgs; args != nullptr; args = args->Rest())
+            {
+                if (operandNum == 0)
                 {
-                    if (operandNum == 0)
-                    {
-                        return &args->gtOp1;
-                    }
-                    operandNum--;
+                    return &args->gtOp1;
                 }
+                operandNum--;
+            }
 
-                if (call->gtControlExpr != nullptr && operandNum == 0)
+            if (call->gtControlExpr != nullptr)
+            {
+                if (operandNum == 0)
                 {
                     return &call->gtControlExpr;
                 }
                 operandNum--;
+            }
 
-                if (call->gtCallType == CT_INDIRECT)
+            if (call->gtCallType == CT_INDIRECT)
+            {
+                if (call->gtCallCookie != nullptr)
                 {
-                    if (call->gtCallCookie != nullptr && operandNum == 0)
+                    if (operandNum == 0)
                     {
                         return &call->gtCallCookie;
                     }
                     operandNum--;
+                }
 
-                    if (call->gtCallAddr != nullptr && operandNum == 0)
+                if (call->gtCallAddr != nullptr)
+                {
+                    assert(operandNum == 0);
+                    return &call->gtCallAddr;
+                }
+            }
+        }
+        break;
+
+    case GT_PHI:
+        {
+            GenTreeUnOp* phi = AsUnOp();
+            if (phi->gtOp1 != nullptr)
+            {
+                for (GenTreeArgList* args = phi->gtOp1->AsArgList(); args != nullptr; args = args->Rest())
+                {
+                    if (operandNum == 0)
                     {
-                        return &call->gtCallAddr;
+                        return &args->gtOp1;
                     }
                     operandNum--;
                 }
             }
-            __fallthrough;
+        }
+        break;
 
-        case GT_NONE:
-            unreached();
-        default:
-            unreached();
+    case GT_INITBLK:
+    case GT_COPYBLK:
+    case GT_COPYOBJ:
+        {
+            GenTreeBlkOp* blkOp = AsBlkOp();
+            if (operandNum == 0)
+            {
+                return &blkOp->gtOp1->AsArgList()->gtOp1;
+            }
+            else if (operandNum == 1)
+            {
+                return &blkOp->gtOp1->AsArgList()->gtOp2;
+            }
+            else if (operandNum == 3)
+            {
+                return &blkOp->gtOp2;
+            }
+        }
+        break;
+
+    default:
+        if (OperIsUnary())
+        {
+            return &AsUnOp()->gtOp1;
+        }
+        else if (OperIsBinary())
+        {
+            if (OperIsAddrMode())
+            {
+                // If this is the first (0th) child, only return op1 if it is non-null
+                // Otherwise, we return gtOp2.
+                if (operandNum == 0 && AsOp()->gtOp1 != nullptr)
+                    return &AsOp()->gtOp1;
+
+                return &AsOp()->gtOp2;
+            }
+
+            GenTree** op1 = &AsOp()->gtOp1;
+            GenTree** op2 = &AsOp()->gtOp2;
+
+            if ((gtFlags & GTF_REVERSE_OPS) != 0)
+            {
+                GenTree** tmp = op1;
+                op1 = op2;
+                op2 = tmp;
+            }
+
+            return operandNum == 0 ? op1 : op2;
         }
     }
 
+    unreached();
 }
 
 #ifdef DEBUG

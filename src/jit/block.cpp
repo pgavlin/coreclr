@@ -657,7 +657,12 @@ bool BasicBlock::CheckLIR(Compiler* compiler)
     // This code uses a stack as a map. Lookup is accomplished by scanning downward from the top.
     // This relies on defs being near uses for efficiency.
     ArrayStack<GenTree*> unusedDefs(compiler);
-    auto tryGetAndRemoveDef = [&unusedDefs](GenTree* def) -> bool
+    auto recordDef = [&unusedDefs](GenTree* def)
+    {
+        unusedDefs.Push(def);
+    };
+
+    auto tryConsumeDef = [&unusedDefs](GenTree* def) -> bool
     {
         int height = unusedDefs.Height();
         for (int i = 0; i < height; i++)
@@ -699,8 +704,15 @@ bool BasicBlock::CheckLIR(Compiler* compiler)
                 // ARGPLACE nodes are not represented in the LIR sequence. Ignore them.
                 continue;
             }
+            else if (!def->IsValue())
+            {
+                // Calls may contain "uses" of nodes that do not produce a value. This is an artifact of
+                // the HIR and should probably be fixed, but doing so is an unknown amount of work.
+                assert(node->OperGet() == GT_CALL);
+                continue;
+            }
 
-            bool foundDef = tryGetAndRemoveDef(def);
+            bool foundDef = tryConsumeDef(def);
             if (!foundDef)
             {
                 // First, scan backwards and look for a preceding use.
@@ -723,6 +735,8 @@ bool BasicBlock::CheckLIR(Compiler* compiler)
                 assert(false && "found use of node that is not in the LIR sequence");
             }
         }
+
+        recordDef(node);
     }
 
     return true;

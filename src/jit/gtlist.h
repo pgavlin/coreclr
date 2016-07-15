@@ -52,7 +52,7 @@ GTNODE(RELOAD     , "reload"        ,0,GTK_UNOP)
 GTNODE(CHS        , "flipsign"      ,0,GTK_BINOP|GTK_ASGOP|GTK_NOTLIR)  // GT_CHS is actually unary -- op2 is ignored.
                                                                             // Changing to unary presently causes problems, though -- take a little work to fix.
 
-GTNODE(ARR_LENGTH , "arrLen"        ,0,GTK_UNOP|GTK_EXOP|GTK_NOTLIR)    // array-length
+GTNODE(ARR_LENGTH , "arrLen"        ,0,GTK_UNOP|GTK_EXOP)    // array-length
 
 GTNODE(INTRINSIC  , "intrinsic"     ,0,GTK_BINOP|GTK_EXOP)   // intrinsics
 
