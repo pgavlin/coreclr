@@ -918,6 +918,9 @@ typedef unsigned weight_t;             // Type used to hold block and edge weigh
     GenTreeStmt* lastStmt();
     GenTreeStmt* lastTopLevelStmt();
 
+    GenTree* firstNode();
+    GenTree* lastNode();
+
     bool containsStatement(GenTree* statement);
 
     bool endsWithJmpMethod(Compiler *comp);

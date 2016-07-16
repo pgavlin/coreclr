@@ -21,7 +21,8 @@ void dumpTreeStack(Compiler *comp, ArrayStack<GenTree *> *stack)
     printf("=TOS=================\n");
     for (int i=0; i<stack->Height(); i++)
     {
-        comp->gtDispNode(stack->Index(i), 0, "");
+        const bool isLIR = false;
+        comp->gtDispNode(stack->Index(i), 0, "", isLIR);
         printf("\n");
     }
     printf("=====================\n");
@@ -1410,6 +1411,4 @@ void Rationalizer::DoPhase()
     }
 
     comp->compRationalIRForm = true;
-
-    NYI("later stages cannot yet process LIR!");
 }

@@ -8408,7 +8408,8 @@ void                Compiler::gtDispVN(GenTree* tree)
 
 void                Compiler::gtDispNode(GenTreePtr     tree,
                                          IndentStack*   indentStack,
-                                         __in __in_z __in_opt const char * msg)
+                                         __in __in_z __in_opt const char * msg,
+                                         bool           isLIR)
 { 
     bool           printPointer = true;  // always true..
     bool           printFlags   = true;  // always true..
@@ -8665,6 +8666,28 @@ DASH:
 #endif // FEATURE_STACK_FP_X87
     }
 
+    // If we're printing a node for LIR, we use the space normally associated with the message
+    // to display the node's temp name (if any)
+    const bool hasOperands = tree->NumOperands() != 0;
+    if (isLIR)
+    {
+        assert(msg == nullptr);
+
+        // If the tree does not have any operands, we do not display the indent stack. This gives us
+        // two additional characters for alignment.
+        if (!hasOperands)
+        {
+            msgLength += 1;
+        }
+
+        if (tree->IsValue())
+        {
+            const size_t bufLength = msgLength - 1;
+            msg = reinterpret_cast<char*>(alloca(bufLength * sizeof(char)));
+            sprintf_s(const_cast<char*>(msg), bufLength, "t%d = %s", tree->gtTreeID, hasOperands ? "" : " ");
+        }
+    }
+
     /* print the msg associated with the node */
 
     if (msg == NULL)
@@ -8672,10 +8695,13 @@ DASH:
     if (msgLength < 0)
         msgLength = 0;
 
-    printf(" %-*s", msgLength, msg);
+    printf(isLIR ? " %+*s" : " %-*s", msgLength, msg);
 
     /* Indent the node accordingly */
-    printIndent(indentStack);
+    if (!isLIR || hasOperands)
+    {
+        printIndent(indentStack);
+    }
 
     gtDispNodeName(tree);
 
@@ -9370,11 +9396,11 @@ Compiler::gtDispLeaf(GenTree *tree, IndentStack* indentStack)
         printf(" IL offset: ");
         if (tree->gtStmt.gtStmtILoffsx == BAD_IL_OFFSET)
         {
-            printf("(BAD)");
+            printf("???");
         }
         else
         {
-            printf("%d", tree->gtStmt.gtStmtILoffsx);
+            printf("%d", jitGetILoffs(tree->gtStmt.gtStmtILoffsx));
         }
         break;
 
@@ -9431,7 +9457,8 @@ const char * const  simdIntrinsicNames[] =
 void                Compiler::gtDispTree(GenTreePtr             tree,
                                          IndentStack*           indentStack,    /* = nullptr */
                                          __in __in_z __in_opt const char * msg, /* = nullptr  */
-                                         bool                   topOnly)        /* = false */
+                                         bool                   topOnly,        /* = false */
+                                         bool                   isLIR)          /* = false */
 {
     if  (tree == NULL)
     {
@@ -9467,7 +9494,7 @@ void                Compiler::gtDispTree(GenTreePtr             tree,
 
     if  (tree->gtOper >= GT_COUNT)
     {
-        gtDispNode(tree, indentStack, msg); 
+        gtDispNode(tree, indentStack, msg, isLIR);
         printf("Bogus operator!");
         return;
     }
@@ -9477,7 +9504,7 @@ void                Compiler::gtDispTree(GenTreePtr             tree,
     if  (tree->OperIsLeaf()
          || tree->OperIsLocalStore()) // local stores used to be leaves
     {
-        gtDispNode(tree, indentStack, msg);
+        gtDispNode(tree, indentStack, msg, isLIR);
         gtDispLeaf(tree, indentStack);
         gtDispVN(tree);
         printf("\n");
@@ -9522,21 +9549,24 @@ void                Compiler::gtDispTree(GenTreePtr             tree,
 
     if (tree->OperGet() == GT_PHI)
     {
-        gtDispNode(tree, indentStack, msg);
+        gtDispNode(tree, indentStack, msg, isLIR);
         gtDispVN(tree);
         printf("\n");
 
-        if (tree->gtOp.gtOp1 != NULL)
+        if (!topOnly)
         {
-            IndentInfo arcType = IIArcTop;
-            for (GenTreeArgList* args = tree->gtOp.gtOp1->AsArgList(); args != NULL; args = args->Rest())
+            if (tree->gtOp.gtOp1 != NULL)
             {
-                if (args->Rest() == nullptr)
+                IndentInfo arcType = IIArcTop;
+                for (GenTreeArgList* args = tree->gtOp.gtOp1->AsArgList(); args != NULL; args = args->Rest())
                 {
-                   arcType = IIArcBottom;
+                    if (args->Rest() == nullptr)
+                    {
+                       arcType = IIArcBottom;
+                    }
+                    gtDispChild(args->Current(), indentStack, arcType);
+                    arcType = IIArc;
                 }
-                gtDispChild(args->Current(), indentStack, arcType);
-                arcType = IIArc;
             }
         }
         return;
@@ -9568,7 +9598,8 @@ void                Compiler::gtDispTree(GenTreePtr             tree,
             indentStack->Pop();
             indentStack->Push(myArc);
         }
-        gtDispNode(tree, indentStack, msg);
+
+        gtDispNode(tree, indentStack, msg, isLIR);
 
         // Propagate lowerArc to the lower children.
         if (indentStack->Depth() > 0)
@@ -9678,7 +9709,7 @@ void                Compiler::gtDispTree(GenTreePtr             tree,
         indentStack->Pop();
         indentStack->Push(myArc);
     }
-    gtDispNode(tree, indentStack, msg);
+    gtDispNode(tree, indentStack, msg, isLIR);
 
     // Propagate lowerArc to the lower children.
     if (indentStack->Depth() > 0)
@@ -10426,6 +10457,47 @@ GenTreePtr            Compiler::gtDispLinearStmt(GenTreeStmt* stmt, IndentStack 
     indentStack->Pop();
     return nextLinearNode;
 }
+
+// TODO(pdg): comment
+void Compiler::gtDispLIRNode(GenTree* node)
+{
+    unsigned numOperands = node->NumOperands();
+
+    IndentStack indentStack(this);
+
+    // Visit nodes
+    IndentInfo operandArc = IIArcTop;
+    for (unsigned i = 0; i < numOperands; i++)
+    {
+        GenTree* operand = *node->GetOperand(i);
+        if (operand->IsArgPlaceHolderNode() || !operand->IsValue())
+        {
+            // Either of these situations may happen with calls.
+            continue;
+        }
+
+        // TODO(pdg): probably nice to have some special handling for call arguments
+        //            in order to generate the same "argN in rM" message as gtDispTree.
+
+        // 49 spaces for alignment
+        printf("%-49s", "");
+
+        indentStack.Push(operandArc);
+        indentStack.print();
+        indentStack.Pop();
+        operandArc = IIArc;
+
+        printf("  t%d %-6s\n", operand->gtTreeID, varTypeName(operand->TypeGet()));
+    }
+
+    // Visit the operator
+    const bool topOnly = true;
+    const bool isLIR = true;
+    gtDispTree(node, &indentStack, nullptr, topOnly, isLIR);
+
+    printf("\n");
+}
+
 
 /*****************************************************************************/
 #endif // DEBUG

@@ -815,6 +815,18 @@ GenTreeStmt* BasicBlock::lastTopLevelStmt()
     return stmt->AsStmt();
 }
 
+// TODO(pdg): comments
+GenTree* BasicBlock::firstNode()
+{
+    return IsLIR() ? bbTreeList : Compiler::fgGetFirstNode(firstStmt()->gtStmtExpr);
+}
+
+// TODO(pdg): comments
+GenTree* BasicBlock::lastNode()
+{
+    return IsLIR() ? bbLastNode : lastStmt()->gtStmtExpr;
+}
+
 //------------------------------------------------------------------------
 // GetUniquePred: Returns the unique predecessor of a block, if one exists.
 // The predecessor lists must be accurate.

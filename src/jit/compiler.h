@@ -2079,7 +2079,8 @@ public:
 #ifdef DEBUG
     void                    gtDispNode      (GenTreePtr             tree,
                                              IndentStack*           indentStack,
-                                             __in_z const char*     msg);
+                                             __in_z const char*     msg,
+                                             bool                   isLIR);
 
     void                    gtDispVN        (GenTreePtr             tree);
     void                    gtDispConst     (GenTreePtr             tree);
@@ -2097,7 +2098,8 @@ public:
     void                    gtDispTree      (GenTreePtr             tree,
                                              IndentStack*           indentStack = nullptr,
                                              __in_opt const char*   msg = nullptr,
-                                             bool                   topOnly = false);
+                                             bool                   topOnly = false,
+                                             bool                   isLIR = false);
     void                    gtGetLclVarNameInfo(unsigned            lclNum,
                                              const char**           ilKindOut,
                                              const char**           ilNameOut,
@@ -2133,6 +2135,8 @@ public:
                                              __in_opt const char*   msg = nullptr);
     GenTreePtr              gtDispLinearStmt(GenTreeStmt*           stmt,
                                              IndentStack*           indentStack = nullptr);
+
+    void                    gtDispLIRNode   (GenTree*               node);
 #endif
 
     // For tree walks
@@ -4279,6 +4283,7 @@ public:
                                            bool         dumpTrees);
     void                fgDispBasicBlocks (bool dumpTrees = false);
     void                fgDumpStmtTree    (GenTreePtr stmt, unsigned blkNum);
+    void                fgDumpBlock       (BasicBlock*  block);
     void                fgDumpTrees       (BasicBlock*  firstBlock,
                                            BasicBlock*  lastBlock);
 

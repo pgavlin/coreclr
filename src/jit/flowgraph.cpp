@@ -19883,6 +19883,32 @@ void                Compiler::fgDumpStmtTree(GenTreePtr stmt, unsigned blkNum)
     }
 }
 
+//TODO(pdg): comment
+void                Compiler::fgDumpBlock(BasicBlock* block)
+{
+    printf("\n------------ ");
+    block->dspBlockHeader(this);
+
+    if (!block->IsLIR())
+    {
+        for (GenTreeStmt* stmt = block->firstStmt(); stmt != nullptr; stmt = stmt->gtNextStmt)
+        {
+            fgDumpStmtTree(stmt, block->bbNum);
+            if (stmt == block->bbTreeList)
+            {
+                block->bbStmtNum = compCurStmtNum;  // Set the block->bbStmtNum
+            }
+        }
+    }
+    else
+    {
+        for (GenTree* node = block->bbTreeList; node != nullptr; node = node->gtNext)
+        {
+            gtDispLIRNode(node);
+        }
+    }
+}
+
 /*****************************************************************************/
 //  Walk the BasicBlock list calling fgDumpTree once per Stmt
 //
@@ -19898,17 +19924,8 @@ void                Compiler::fgDumpTrees(BasicBlock*  firstBlock,
     //
     for (BasicBlock* block = firstBlock; block; block = block->bbNext)
     {
-        printf("\n------------ ");
-        block->dspBlockHeader(this);
+        fgDumpBlock(block);
 
-        for (GenTreeStmt* stmt = block->firstStmt(); stmt; stmt = stmt->gtNextStmt)
-        {
-            fgDumpStmtTree(stmt, block->bbNum);
-            if (stmt == block->bbTreeList)
-            {
-                block->bbStmtNum = compCurStmtNum;  // Set the block->bbStmtNum
-            }
-        }
         if (block == lastBlock)
             break;
     }
@@ -20041,15 +20058,14 @@ void                Compiler::fgDebugCheckBBlist(bool checkBBNum  /* = false */,
 
         if (block->bbJumpKind == BBJ_COND)
         {
-            noway_assert(block->lastStmt()->gtNext == NULL &&
-                         block->lastTopLevelStmt()->gtStmtExpr->gtOper == GT_JTRUE);
+            noway_assert(block->lastNode()->gtNext == nullptr && block->lastNode()->gtOper == GT_JTRUE);
         }
         else if (block->bbJumpKind == BBJ_SWITCH)
         {
 #ifndef LEGACY_BACKEND
-            noway_assert(block->lastStmt()->gtNext == NULL &&
-                         (block->lastTopLevelStmt()->gtStmtExpr->gtOper == GT_SWITCH ||
-                          block->lastTopLevelStmt()->gtStmtExpr->gtOper == GT_SWITCH_TABLE));
+            noway_assert(block->lastNode()->gtNext == nullptr &&
+                         (block->lastNode()->gtOper == GT_SWITCH ||
+                          block->lastNode()->gtOper == GT_SWITCH_TABLE));
 #else // LEGACY_BACKEND
             noway_assert(block->lastStmt()->gtNext == NULL &&
                          block->lastTopLevelStmt()->gtStmtExpr->gtOper == GT_SWITCH);
@@ -20656,6 +20672,12 @@ void                Compiler::fgDebugCheckFlags(GenTreePtr tree)
 // This calls an alternate method for FGOrderLinear.
 void Compiler::fgDebugCheckNodeLinks(BasicBlock* block, GenTree* node)
 {
+    // LIR blocks are checked using BasicBlock::CheckLIR().
+    if (block->IsLIR())
+    {
+        block->CheckLIR(this);
+    }
+
     GenTreeStmt* stmt = node->AsStmt();
 
     assert(fgStmtListThreaded);
@@ -20842,6 +20864,7 @@ void Compiler::fgDebugCheckLinearNodeLinks(BasicBlock* block,
                                            GenTreePtr topLevelStmt,
                                            bool printNodes)
 {
+    assert(!block->IsLIR());
     assert(fgStmtListThreaded);
     assert(fgOrder == FGOrderLinear);
     assert(topLevelStmt->gtOper == GT_STMT);
@@ -20983,60 +21006,66 @@ void                Compiler::fgDebugCheckLinks(bool morphTrees)
     for (BasicBlock* block = fgFirstBB; block; block = block->bbNext)
     {
 PROCESS_BLOCK_AGAIN:;
-
-        for (GenTreeStmt* stmt = block->firstStmt(); stmt; stmt = stmt->gtNextStmt)
+        if (block->IsLIR())
         {
-            /* Verify that bbTreeList is threaded correctly */
-            /* Note that for the GT_STMT list, the gtPrev list is circular. The gtNext list is not: gtNext of the last GT_STMT in a block is nullptr. */
-
-            noway_assert(stmt->gtPrev);
-
-            if  (stmt == block->bbTreeList)
+            block->CheckLIR(this);
+        }
+        else
+        {
+            for (GenTreeStmt* stmt = block->firstStmt(); stmt; stmt = stmt->gtNextStmt)
             {
-                noway_assert(stmt->gtPrev->gtNext == nullptr);
-            }
-            else
-            {
-                noway_assert(stmt->gtPrev->gtNext == stmt);
-            }
+                /* Verify that bbTreeList is threaded correctly */
+                /* Note that for the GT_STMT list, the gtPrev list is circular. The gtNext list is not: gtNext of the last GT_STMT in a block is nullptr. */
 
-            if  (stmt->gtNext)
-            {
-                noway_assert(stmt->gtNext->gtPrev == stmt);
-            }
-            else
-            {
-                noway_assert(block->lastStmt() == stmt);
-            }
+                noway_assert(stmt->gtPrev);
 
-            /* For each statement check that the exception flags are properly set */
-
-            noway_assert(stmt->gtStmtExpr);
-
-            if (verbose && 0)
-            {
-                gtDispTree(stmt->gtStmtExpr);
-            }
-
-            fgDebugCheckFlags(stmt->gtStmtExpr);
-
-            // Not only will this stress fgMorphBlockStmt(), but we also get all the checks
-            // done by fgMorphTree()
-
-            if (morphTrees)
-            {
-                // If 'stmt' is removed from the block, restart
-                if (fgMorphBlockStmt(block, stmt DEBUGARG("test morphing")))
+                if  (stmt == block->bbTreeList)
                 {
-                    goto PROCESS_BLOCK_AGAIN;
+                    noway_assert(stmt->gtPrev->gtNext == nullptr);
                 }
-            }
+                else
+                {
+                    noway_assert(stmt->gtPrev->gtNext == stmt);
+                }
 
-            /* For each GT_STMT node check that the nodes are threaded correcly - gtStmtList */
+                if  (stmt->gtNext)
+                {
+                    noway_assert(stmt->gtNext->gtPrev == stmt);
+                }
+                else
+                {
+                    noway_assert(block->lastStmt() == stmt);
+                }
 
-            if (fgStmtListThreaded)
-            {
-                fgDebugCheckNodeLinks(block, stmt);
+                /* For each statement check that the exception flags are properly set */
+
+                noway_assert(stmt->gtStmtExpr);
+
+                if (verbose && 0)
+                {
+                    gtDispTree(stmt->gtStmtExpr);
+                }
+
+                fgDebugCheckFlags(stmt->gtStmtExpr);
+
+                // Not only will this stress fgMorphBlockStmt(), but we also get all the checks
+                // done by fgMorphTree()
+
+                if (morphTrees)
+                {
+                    // If 'stmt' is removed from the block, restart
+                    if (fgMorphBlockStmt(block, stmt DEBUGARG("test morphing")))
+                    {
+                        goto PROCESS_BLOCK_AGAIN;
+                    }
+                }
+
+                /* For each GT_STMT node check that the nodes are threaded correcly - gtStmtList */
+
+                if (fgStmtListThreaded)
+                {
+                    fgDebugCheckNodeLinks(block, stmt);
+                }
             }
         }
     }
