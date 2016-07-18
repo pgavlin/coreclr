@@ -20310,8 +20310,8 @@ PRED_OK:;
     if (genReturnBB)
     {
         noway_assert(genReturnBB->bbTreeList);
-        noway_assert(genReturnBB->bbTreeList->gtOper == GT_STMT);
-        noway_assert(genReturnBB->bbTreeList->gtType == TYP_VOID);
+        noway_assert(genReturnBB->IsLIR() || genReturnBB->bbTreeList->gtOper == GT_STMT);
+        noway_assert(genReturnBB->IsLIR() || genReturnBB->bbTreeList->gtType == TYP_VOID);
     }
 
     // The general encoder/decoder (currently) only reports "this" as a generics context as a stack location,
