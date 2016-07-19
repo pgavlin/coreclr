@@ -612,8 +612,9 @@ typedef unsigned weight_t;             // Type used to hold block and edge weigh
         return bbRefs;
     }
 
-    GenTree*            bbTreeList; // the body of the block
-    GenTree*            bbLastNode; // the last node in the body of the block
+
+    GenTree*            bbTreeList; // the body of the block.
+    GenTree*            bbLastNode; // last LIR node in the body of the block.
     EntryState*         bbEntryState; // verifier tracked state of all entries in stack.
 
 #define NO_BASE_TMP     UINT_MAX    // base# to use when we have none
@@ -995,21 +996,9 @@ public:
     // Assumes that "to" is an empty block.
     static void CloneBlockState(Compiler* compiler, BasicBlock* to, const BasicBlock* from);
 
-    // LIR helper methods
     bool IsLIR();
-
-    void InsertNodeBefore(GenTree* node, GenTree* insertionPoint);
-    void InsertNodeAfter(GenTree* node, GenTree* insertionPoint);
-    void RemoveNode(GenTree* node);
-
-    bool TryGetUse(GenTree* node, GenTree*** use);
-    bool TryGetUse(GenTree* node, GenTree** user, GenTree*** use);
-    void ReplaceUseWith(GenTree** use, GenTree* replacement);
-
-#ifdef DEBUG
-    bool ContainsNode(GenTree* node);
-    bool CheckLIR(Compiler* compiler);
-#endif // DEBUG
+    GenTree** FirstLIRNodeSlot();
+    GenTree** LastLIRNodeSlot();
 };
 
 template <>

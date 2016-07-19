@@ -1748,7 +1748,10 @@ public:
         gtFlags &= ~GTF_REUSE_REG_VAL;
     }
 
+    bool Precedes(GenTree* other);
+
 #ifdef DEBUG
+
   private:
     GenTree& operator=(const GenTree& gt) {
         assert(!"Don't copy");

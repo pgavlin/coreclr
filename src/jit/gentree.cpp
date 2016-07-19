@@ -8203,6 +8203,21 @@ case GT_SIMD_CHK:
     unreached();
 }
 
+bool GenTree::Precedes(GenTree* other)
+{
+    assert(other != nullptr);
+
+    for (GenTree* node = gtNext; node != nullptr; node = node->gtNext)
+    {
+        if (node == other)
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 #ifdef DEBUG
 
 /* static */ int GenTree::gtDispFlags(unsigned flags, unsigned debugFlags)

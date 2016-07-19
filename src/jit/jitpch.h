@@ -22,6 +22,7 @@
 #endif
 #include "jitconfig.h"
 #include "jit.h"
+#include "lir.h"
 #include "iallocator.h"
 #include "hashbv.h"
 #include "compiler.h"

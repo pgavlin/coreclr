@@ -8,7 +8,7 @@
 class Rationalizer : public Phase
 {
 private:
-    BasicBlock* m_block;
+    LIR::Range m_range;
     GenTreeStmt* m_statement;
 
 public:
@@ -31,9 +31,9 @@ public:
 
 private:
     // SIMD related transformations
-    void RewriteInitBlk(GenTree** use);
-    void RewriteCopyBlk(GenTree** use);
-    void RewriteObj(GenTree** use);
+    void RewriteInitBlk(LIR::Use& use);
+    void RewriteCopyBlk(LIR::Use& use);
+    void RewriteObj(LIR::Use& use);
     void FixupIfSIMDLocal(GenTreeLclVarCommon* node);
 
     // Intrinsic related transformations
@@ -47,11 +47,11 @@ private:
     static void RewriteIntrinsicAsUserCall(GenTreePtr* ppTree, Compiler::fgWalkData* data);    
 
     // Other transformations
-    void RewriteAssignment(GenTree** use);
-    void RewriteAddress(GenTree** use);
+    void RewriteAssignment(LIR::Use& use);
+    void RewriteAddress(LIR::Use& use);
 
     // Root visitor
-    Compiler::fgWalkResult RewriteNode(GenTree** use, ArrayStack<GenTree*>& parents);
+    Compiler::fgWalkResult RewriteNode(GenTree** useEdge, ArrayStack<GenTree*>& parents);
 };
 
 inline Rationalizer::Rationalizer(Compiler* _comp)

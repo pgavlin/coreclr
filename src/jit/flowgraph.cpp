@@ -20675,7 +20675,7 @@ void Compiler::fgDebugCheckNodeLinks(BasicBlock* block, GenTree* node)
     // LIR blocks are checked using BasicBlock::CheckLIR().
     if (block->IsLIR())
     {
-        block->CheckLIR(this);
+        LIR::AsRange(block).CheckLIR(this);
     }
 
     GenTreeStmt* stmt = node->AsStmt();
@@ -21008,7 +21008,7 @@ void                Compiler::fgDebugCheckLinks(bool morphTrees)
 PROCESS_BLOCK_AGAIN:;
         if (block->IsLIR())
         {
-            block->CheckLIR(this);
+            LIR::AsRange(block).CheckLIR(this);
         }
         else
         {

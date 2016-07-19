@@ -4525,10 +4525,12 @@ private:
                                          GenTree *oldChild, 
                                          GenTree *newChild);
     
+public:
     void                fgFixupArgTabEntryPtr(GenTreePtr parentCall,
                                               GenTreePtr oldArg,
                                               GenTreePtr newArg);
 
+private:
     //                  Recognize a bitwise rotation pattern and convert into a GT_ROL or a GT_ROR node.
     GenTreePtr          fgRecognizeAndMorphBitwiseRotation(GenTreePtr tree);
     bool                fgOperIsBitwiseRotationRoot(genTreeOps oper);

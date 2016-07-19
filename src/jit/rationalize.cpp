@@ -428,7 +428,7 @@ void Compiler::fgFixupArgTabEntryPtr(GenTreePtr parentCall,
 // TODO-Cleanup: Once SIMD types are plumbed through the frontend, this will no longer
 // be required.
 //
-void Rationalizer::RewriteInitBlk(GenTree** use)
+void Rationalizer::RewriteInitBlk(LIR::Use& use)
 {   
 #ifdef FEATURE_SIMD
     // No lowering is needed for non-SIMD nodes, so early out if featureSIMD is not enabled.
@@ -438,7 +438,7 @@ void Rationalizer::RewriteInitBlk(GenTree** use)
     }
 
     // See if this is a SIMD initBlk that needs to be changed to a simple st.lclVar.
-    GenTreeInitBlk* initBlk = (*use)->AsInitBlk();
+    GenTreeInitBlk* initBlk = use.Def()->AsInitBlk();
 
     // Is the dstAddr is addr of a SIMD type lclVar?
     GenTree* dstAddr = initBlk->Dest();
@@ -477,17 +477,17 @@ void Rationalizer::RewriteInitBlk(GenTree** use)
     store->gtFlags |= (simdNode->gtFlags & GTF_ALL_EFFECT);
 
     // Insert the new nodes into the block
-    m_block->InsertNodeAfter(simdNode, initVal);
-    m_block->InsertNodeAfter(store, simdNode);
-    m_block->ReplaceUseWith(use, store);
+    m_range.InsertAfter(simdNode, initVal);
+    m_range.InsertAfter(store, simdNode);
+    use.ReplaceWith(comp, store);
 
     // Remove the old GT_ADDR, size, and GT_INITBLK nodes.
-    m_block->RemoveNode(dstAddr);
-    m_block->RemoveNode(sizeNode);
-    m_block->RemoveNode(initBlk);
+    m_range.Remove(dstAddr);
+    m_range.Remove(sizeNode);
+    m_range.Remove(initBlk);
 
     JITDUMP("After rewriting SIMD InitBlk:\n");
-    DISPTREE(*use);
+    DISPTREE(use.Def());
     JITDUMP("\n");
 #endif // FEATURE_SIMD
 }
@@ -515,7 +515,7 @@ void Rationalizer::RewriteInitBlk(GenTree** use)
 // TODO-Cleanup: Once SIMD types are plumbed through the frontend, this will no longer
 // be required.
 //
-void Rationalizer::RewriteCopyBlk(GenTree** use)
+void Rationalizer::RewriteCopyBlk(LIR::Use& use)
 {   
 #ifdef FEATURE_SIMD
     // No need to transofrm non-SIMD nodes, if featureSIMD is not enabled.
@@ -525,7 +525,7 @@ void Rationalizer::RewriteCopyBlk(GenTree** use)
     }
 
     // See if this is a SIMD copyBlk
-    GenTreeCpBlk* cpBlk = (*use)->AsCpBlk();
+    GenTreeCpBlk* cpBlk = use.Def()->AsCpBlk();
     GenTreePtr dstAddr = cpBlk->Dest();
     GenTree* srcAddr = cpBlk->Source();
 
@@ -548,7 +548,7 @@ void Rationalizer::RewriteCopyBlk(GenTree** use)
     var_types simdType = comp->getSIMDTypeForSize((unsigned int) sizeNode->IconValue());
 
     // Remove 'size' from execution order
-    m_block->RemoveNode(sizeNode);
+    m_range.Remove(sizeNode);
 
     // Is destination a lclVar which is not an arg?
     // If yes then we can turn it to a stlcl.var, otherwise turn into stind.
@@ -557,7 +557,7 @@ void Rationalizer::RewriteCopyBlk(GenTree** use)
     if (dstAddr->OperGet() == GT_ADDR && comp->isSIMDTypeLocal(dstAddr->gtGetOp1()))
     {
         // Get rid of parent node in GT_ADDR(GT_LCL_VAR)
-        m_block->RemoveNode(dstAddr);
+        m_range.Remove(dstAddr);
 
         simdDst = dstAddr->gtGetOp1();
         simdDst->gtType = simdType;
@@ -578,7 +578,7 @@ void Rationalizer::RewriteCopyBlk(GenTree** use)
     GenTree* simdSrc = nullptr;
     if (srcAddr->OperGet() == GT_ADDR && varTypeIsSIMD(srcAddr->gtGetOp1()))
     {
-        m_block->RemoveNode(srcAddr);
+        m_range.Remove(srcAddr);
         simdSrc = srcAddr->gtGetOp1();
     }
     else
@@ -592,7 +592,7 @@ void Rationalizer::RewriteCopyBlk(GenTree** use)
         // but setting them to a reasonable value based on the logic in gtSetEvalOrder().
         GenTree* indir = comp->gtNewOperNode(GT_IND, simdType, srcAddr);
         indir->SetCosts(IND_COST_EX, 2);
-        m_block->InsertNodeAfter(indir, srcAddr);
+        m_range.InsertAfter(indir, srcAddr);
         
         cpBlk->gtGetOp1()->gtOp.gtOp2 = indir;
         simdSrc = indir;
@@ -612,7 +612,7 @@ void Rationalizer::RewriteCopyBlk(GenTree** use)
     if (oper == GT_STORE_LCL_VAR)
     {
         // get rid of the list node
-        m_block->RemoveNode(list);
+        m_range.Remove(list);
 
         newNode = simdDst;
         newNode->SetOper(oper);
@@ -622,8 +622,8 @@ void Rationalizer::RewriteCopyBlk(GenTree** use)
         store->gtType = simdType;
         store->gtFlags |= (simdSrc->gtFlags & GTF_ALL_EFFECT);
 
-        m_block->RemoveNode(simdDst);
-        m_block->InsertNodeAfter(simdDst, simdSrc);
+        m_range.Remove(simdDst);
+        m_range.InsertAfter(simdDst, simdSrc);
     }
     else
     {
@@ -639,11 +639,11 @@ void Rationalizer::RewriteCopyBlk(GenTree** use)
         storeInd->gtOp2 = simdSrc;
     } 
 
-    m_block->ReplaceUseWith(use, newNode);
-    m_block->RemoveNode(cpBlk);
+    use.ReplaceWith(comp, newNode);
+    m_range.Remove(cpBlk);
 
     JITDUMP("After rewriting SIMD CopyBlk:\n");
-    DISPTREE(*use);
+    DISPTREE(use.Def());
     JITDUMP("\n");
 #endif // FEATURE_SIMD
 }
@@ -660,10 +660,10 @@ void Rationalizer::RewriteCopyBlk(GenTree** use)
 // TODO-Cleanup: Once SIMD types are plumbed through the frontend, this will no longer
 // be required.
 //
-void Rationalizer::RewriteObj(GenTree** use)
+void Rationalizer::RewriteObj(LIR::Use& use)
 {    
 #ifdef FEATURE_SIMD
-    GenTreeObj* obj = (*use)->AsObj();
+    GenTreeObj* obj = use.Def()->AsObj();
 
     // For UNIX struct passing, we can have Obj nodes for arguments.
     // For other cases, we should never see a non-SIMD type here.
@@ -686,12 +686,12 @@ void Rationalizer::RewriteObj(GenTree** use)
     GenTree* srcAddr = obj->gtGetOp1();
     if (srcAddr->OperGet() == GT_ADDR && comp->isSIMDTypeLocal(srcAddr->gtGetOp1()))
     {
-        m_block->RemoveNode(srcAddr);
-        m_block->RemoveNode(obj);
+        m_range.Remove(srcAddr);
+        m_range.Remove(obj);
 
         GenTree* src = srcAddr->gtGetOp1();
         src->gtType = simdType;
-        m_block->ReplaceUseWith(use, src);
+        use.ReplaceWith(comp, src);
     }
     else 
     {
@@ -997,11 +997,11 @@ void Rationalizer::RewriteAssignmentIntoStoreLcl(GenTreeOp* assignment)
     RewriteAssignmentIntoStoreLclCore(assignment, location, value, location->OperGet());
 }
 
-void Rationalizer::RewriteAssignment(GenTree** use)
+void Rationalizer::RewriteAssignment(LIR::Use& use)
 {
-    assert(use != nullptr);
+    assert(use.IsValid());
 
-    GenTreeOp* assignment = (*use)->AsOp();
+    GenTreeOp* assignment = use.Def()->AsOp();
     assert(assignment->OperGet() == GT_ASG);
 
     GenTree* location = assignment->gtGetOp1();
@@ -1015,7 +1015,7 @@ void Rationalizer::RewriteAssignment(GenTree** use)
     case GT_REG_VAR:
     case GT_PHI_ARG:
         RewriteAssignmentIntoStoreLclCore(assignment, location, value, locationOp);
-        m_block->RemoveNode(location);
+        m_range.Remove(location);
         break;
 
     case GT_IND:
@@ -1033,10 +1033,10 @@ void Rationalizer::RewriteAssignment(GenTree** use)
             // TODO: JIT dump
 
             // Remove the GT_IND node and replace the assignment node with the store
-            m_block->RemoveNode(location);
-            m_block->InsertNodeBefore(store, assignment);
-            m_block->ReplaceUseWith(use, store);
-            m_block->RemoveNode(assignment);
+            m_range.Remove(location);
+            m_range.InsertBefore(store, assignment);
+            use.ReplaceWith(comp, store);
+            m_range.Remove(assignment);
         }
         break;
 
@@ -1057,11 +1057,11 @@ void Rationalizer::RewriteAssignment(GenTree** use)
     }
 }
 
-void Rationalizer::RewriteAddress(GenTree** use)
+void Rationalizer::RewriteAddress(LIR::Use& use)
 {
-    assert(use != nullptr);
+    assert(use.IsValid());
 
-    GenTreeUnOp* address = (*use)->AsUnOp();
+    GenTreeUnOp* address = use.Def()->AsUnOp();
     assert(address->OperGet() == GT_ADDR);
 
     GenTree* location = address->gtGetOp1();
@@ -1087,8 +1087,8 @@ void Rationalizer::RewriteAddress(GenTree** use)
         location->gtType = TYP_BYREF;
         copyFlags(location, address, GTF_ALL_EFFECT);
 
-        m_block->ReplaceUseWith(use, location);
-        m_block->RemoveNode(address);
+        use.ReplaceWith(comp, location);
+        m_range.Remove(address);
     }
     else if (locationOp == GT_CLS_VAR)
     {
@@ -1096,34 +1096,46 @@ void Rationalizer::RewriteAddress(GenTree** use)
         location->gtType = TYP_BYREF;
         copyFlags(location, address, GTF_ALL_EFFECT);
 
-        m_block->ReplaceUseWith(use, location);
-        m_block->RemoveNode(address);
+        use.ReplaceWith(comp, location);
+        m_range.Remove(address);
 
         JITDUMP("Rewriting GT_ADDR(GT_CLS_VAR) to GT_CLS_VAR_ADDR:\n");
     }
     else if (locationOp == GT_IND)
     {
-        m_block->ReplaceUseWith(use, location->gtGetOp1());
-        m_block->RemoveNode(location);
-        m_block->RemoveNode(address);
+        use.ReplaceWith(comp, location->gtGetOp1());
+        m_range.Remove(location);
+        m_range.Remove(address);
 
         JITDUMP("Rewriting GT_ADDR(GT_IND(X)) to X:\n");
     }
 
-    DISPTREE(*use);
+    DISPTREE(use.Def());
     JITDUMP("\n");
 }
 
-Compiler::fgWalkResult Rationalizer::RewriteNode(GenTree** use, ArrayStack<GenTree*>& parentStack)
+Compiler::fgWalkResult Rationalizer::RewriteNode(GenTree** useEdge, ArrayStack<GenTree*>& parentStack)
 {
-    assert(use != nullptr);
+    assert(useEdge != nullptr);
 
-    GenTree* node = *use;
+    LIR::Use use;
+    if (parentStack.Height() < 2)
+    {
+        use = LIR::Use::GetDummyUse(m_range, *useEdge);
+    }
+    else
+    {
+        use = LIR::Use(m_range, useEdge, parentStack.Index(1));
+    }
+
+    GenTree* node = use.Def();
 
     // First, remove any preceeding GT_LIST nodes, which are not otherwise visited by the tree walk.
+    //
+    // NOTE: GT_LIST nodes that are used by block ops and phi nodes will in fact be visited.
     for (GenTree* prev = node->gtPrev; prev != nullptr && prev->OperGet() == GT_LIST; prev = node->gtPrev)
     {
-        m_block->RemoveNode(prev);
+        m_range.Remove(prev);
     }
 
     switch (node->OperGet())
@@ -1134,8 +1146,8 @@ Compiler::fgWalkResult Rationalizer::RewriteNode(GenTree** use, ArrayStack<GenTr
 
     case GT_BOX:
         // GT_BOX at this level just passes through so get rid of it
-        m_block->ReplaceUseWith(use, node->gtGetOp1());
-        m_block->RemoveNode(node);
+        use.ReplaceWith(comp, node->gtGetOp1());
+        m_range.Remove(node);
         break;
 
     case GT_ADDR:
@@ -1148,8 +1160,8 @@ Compiler::fgWalkResult Rationalizer::RewriteNode(GenTree** use, ArrayStack<GenTr
         // NOP.
         if (node->gtGetOp1() != nullptr)
         {
-            m_block->ReplaceUseWith(use, node->gtGetOp1());
-            m_block->RemoveNode(node);
+            use.ReplaceWith(comp, node->gtGetOp1());
+            m_range.Remove(node);
         }
         break;
 
@@ -1166,14 +1178,15 @@ Compiler::fgWalkResult Rationalizer::RewriteNode(GenTree** use, ArrayStack<GenTr
                 replacement = node->gtGetOp1();
             }
 
-            m_block->ReplaceUseWith(use, replacement);
-            m_block->RemoveNode(node);
+            use.ReplaceWith(comp, replacement);
+            m_range.Remove(node);
         }
         break;
 
     case GT_ARGPLACE:
-        // Remove argplace nodes from the LIR.
-        m_block->RemoveNode(node);
+    case GT_LIST:
+        // Remove argplace and list nodes from the LIR.
+        m_range.Remove(node);
         break;
 
 #ifdef _TARGET_XARCH_
@@ -1185,8 +1198,8 @@ Compiler::fgWalkResult Rationalizer::RewriteNode(GenTree** use, ArrayStack<GenTr
             GenTree* ind = comp->gtNewOperNode(GT_IND, node->TypeGet(), node);
             ind->CopyCosts(node);
 
-            m_block->InsertNodeAfter(ind, node);
-            m_block->ReplaceUseWith(use, ind);
+            m_range.InsertAfter(ind, node);
+            use.ReplaceWith(comp, ind);
 
             // TODO: JIT dump
         }
@@ -1234,10 +1247,7 @@ Compiler::fgWalkResult Rationalizer::RewriteNode(GenTree** use, ArrayStack<GenTr
             else
             {
                 // If the address is not a local var, assert that the user of this IND is an ADDR node.
-                GenTree* user;
-                GenTree** unused;
-                bool foundUse = m_block->TryGetUse(node, &user, &unused);
-                assert(foundUse && user->OperGet() == GT_ADDR);
+                assert(use.User()->OperGet() == GT_ADDR);
             }
 #endif
         }
@@ -1274,10 +1284,10 @@ Compiler::fgWalkResult Rationalizer::RewriteNode(GenTree** use, ArrayStack<GenTr
                 address->CopyCosts(simdNode);
                 ind->CopyCosts(simdNode);
 
-                m_block->InsertNodeBefore(address, simdNode);
-                m_block->InsertNodeBefore(ind, simdNode);
-                m_block->ReplaceUseWith(use, ind);
-                m_block->RemoveNode(simdNode);
+                m_range.InsertBefore(address, simdNode);
+                m_range.InsertBefore(ind, simdNode);
+                use.ReplaceWith(comp, ind);
+                m_range.Remove(simdNode);
 
                 //DISPTREE(tmpState->root);
                 //JITDUMP("\n");
@@ -1307,12 +1317,6 @@ Compiler::fgWalkResult Rationalizer::RewriteNode(GenTree** use, ArrayStack<GenTr
     default:
         // Nothing to do for most nodes.
         break;
-    }
-
-    GenTree* newNode = *use;
-    if (newNode != node)
-    {
-        comp->fgFixupIfCallArg(&parentStack, node, newNode);
     }
 
     return Compiler::WALK_CONTINUE;
@@ -1385,7 +1389,7 @@ void Rationalizer::DoPhase()
         }
 
         // Rewrite HIR nodes into LIR nodes.
-        m_block = block;
+        m_range = LIR::AsRange(block);
         for (GenTreeStmt* statement = firstStatement, *nextStatement; statement != nullptr; statement = nextStatement)
         {
             nextStatement = statement->getNextStmt();
@@ -1395,7 +1399,7 @@ void Rationalizer::DoPhase()
             statement->gtNext = nullptr;
             statement->gtPrev = nullptr;
 
-            block->InsertNodeBefore(statement, statement->gtStmtList);
+            m_range.InsertBefore(statement, statement->gtStmtList);
 
             m_statement = statement;
             comp->fgWalkTreePost(&statement->gtStmtExpr,
@@ -1407,7 +1411,7 @@ void Rationalizer::DoPhase()
                 true);
         }
 
-        assert(block->CheckLIR(comp));
+        assert(m_range.CheckLIR(comp));
     }
 
     comp->compRationalIRForm = true;
