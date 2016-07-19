@@ -20,11 +20,14 @@ public:
         GenTree** m_edge;
         GenTree* m_user;
 
-        bool IsDummyUse() const;
 
     public:
         Use();
+        Use(const Use& other);
         Use(Range& range, GenTree** edge, GenTree* user);
+
+        Use& operator=(const Use& other);
+        Use& operator=(Use&& other);
 
         static Use GetDummyUse(Range& range, GenTree* node);
 
@@ -32,6 +35,7 @@ public:
         GenTree* User() const;
 
         bool IsValid() const;
+        bool IsDummyUse() const;
 
         void ReplaceWith(Compiler* compiler, GenTree* replacement);
         unsigned ReplaceWithLclVar(Compiler* compiler, unsigned blockWeight, unsigned lclNum = BAD_VAR_NUM);
@@ -53,6 +57,9 @@ public:
 
     public:
         Range();
+
+        GenTree* Start() const;
+        GenTree* End() const;
 
         bool IsValid() const;
         bool IsEmpty() const;

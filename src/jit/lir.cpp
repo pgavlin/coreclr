@@ -14,6 +14,11 @@ LIR::Use::Use()
 {
 }
 
+LIR::Use::Use(const Use& other)
+{
+    *this = other;
+}
+
 LIR::Use::Use(Range& range, GenTree** edge, GenTree* user)
     : m_range(&range)
     , m_edge(edge)
@@ -29,6 +34,22 @@ LIR::Use::Use(Range& range, GenTree** edge, GenTree* user)
 
     assert(IsValid());
 #endif
+}
+
+LIR::Use& LIR::Use::operator=(const Use& other)
+{
+    m_range = other.m_range;
+    m_user = other.m_user;
+    m_edge = other.IsDummyUse() ? &m_user : other.m_edge;
+
+    assert(IsDummyUse() == other.IsDummyUse());
+    return *this;
+}
+
+LIR::Use& LIR::Use::operator=(Use&& other)
+{
+    *this = other;
+    return *this;
 }
 
 LIR::Use LIR::Use::GetDummyUse(Range& range, GenTree* node)
@@ -67,7 +88,7 @@ GenTree* LIR::Use::User() const
 
 bool LIR::Use::IsValid() const
 {
-    return m_range != nullptr && m_edge != nullptr && m_user != nullptr;
+    return (m_range != nullptr) && (m_edge != nullptr) && (m_user != nullptr);
 }
 
 void LIR::Use::ReplaceWith(Compiler* compiler, GenTree* replacement)
@@ -75,7 +96,7 @@ void LIR::Use::ReplaceWith(Compiler* compiler, GenTree* replacement)
     assert(IsValid());
     assert(compiler != nullptr);
     assert(replacement != nullptr);
-    assert(m_range->ContainsNode(m_user));
+    assert(IsDummyUse() || m_range->ContainsNode(m_user));
     assert(m_range->ContainsNode(replacement));
 
     GenTree* replacedNode = *m_edge;
@@ -165,6 +186,16 @@ bool LIR::Range::IsEmpty() const
 bool LIR::Range::IsSubRange() const
 {
     return !IsEmpty() && ((FirstNode()->gtPrev != nullptr) || (LastNode()->gtNext != nullptr));
+}
+
+GenTree* LIR::Range::Start() const
+{
+    return FirstNode();
+}
+
+GenTree* LIR::Range::End() const
+{
+    return LastNode();
 }
 
 void LIR::Range::InsertBefore(GenTree* node, GenTree* insertionPoint)
