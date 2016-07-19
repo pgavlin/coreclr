@@ -31,32 +31,31 @@ public:
 private:
 
     // Driver functions
-    static Compiler::fgWalkResult DecompNodeHelper(GenTree** ppTree, Compiler::fgWalkData* data);
-    void DecomposeStmt(GenTreeStmt* stmt);
-    void DecomposeNode(GenTree** ppTree, Compiler::fgWalkData* data);
+    static Compiler::fgWalkResult DecompNodeHelper(LIR::Use& use);
+    void DecomposeNode(LIR::Use& use);
 
     // Per-node type decompose cases
-    void DecomposeLclVar(GenTree** ppTree, Compiler::fgWalkData* data);
-    void DecomposeLclFld(GenTree** ppTree, Compiler::fgWalkData* data);
-    void DecomposeStoreLclVar(GenTree** ppTree, Compiler::fgWalkData* data);
-    void DecomposeCast(GenTree** ppTree, Compiler::fgWalkData* data);
-    void DecomposeCnsLng(GenTree** ppTree, Compiler::fgWalkData* data);
-    void DecomposeCall(GenTree** ppTree, Compiler::fgWalkData* data);
-    void DecomposeStoreInd(GenTree** ppTree, Compiler::fgWalkData* data);
-    void DecomposeNot(GenTree** ppTree, Compiler::fgWalkData* data);
-    void DecomposeNeg(GenTree** ppTree, Compiler::fgWalkData* data);
-    void DecomposeArith(GenTree** ppTree, Compiler::fgWalkData* data);
+    void DecomposeLclVar(LIR::Use& use);
+    void DecomposeLclFld(LIR::Use& use);
+    void DecomposeStoreLclVar(LIR::Use& use);
+    void DecomposeCast(LIR::Use& use);
+    void DecomposeCnsLng(LIR::Use& use);
+    void DecomposeCall(LIR::Use& use);
+    void DecomposeStoreInd(LIR::Use& use);
+    void DecomposeNot(LIR::Use& use);
+    void DecomposeNeg(LIR::Use& use);
+    void DecomposeArith(LIR::Use& use);
 
     // Helper functions
-    void FinalizeDecomposition(GenTree** ppTree, Compiler::fgWalkData* data, GenTree* loResult, GenTree* hiResult);
-    void InsertNodeAsStmt(GenTree* node);
-    GenTreeStmt* CreateTemporary(GenTree** ppTree);
+    void FinalizeDecomposition(LIR::Use& use, GenTree* loResult, GenTree* hiResult);
+
     static genTreeOps GetHiOper(genTreeOps oper);
     static genTreeOps GetLoOper(genTreeOps oper);
-    void SimpleLinkNodeAfter(GenTree* insertionPoint, GenTree* node);
 
     // Data
     Compiler* m_compiler;
+    BasicBlock* m_block;
+    LIR::Range m_range;
 };
 
 #endif // _DECOMPOSELONGS_H_
