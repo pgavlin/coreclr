@@ -13,6 +13,11 @@ class LIR final
 public:
     class Range;
 
+    //------------------------------------------------------------------------
+    // LIR::Use: Represents a use <-> def edge between two nodes in a range
+    //           of LIR. Provides utilities to point the use to a different
+    //           def.
+    //
     class Use final
     {
     private:
@@ -41,6 +46,11 @@ public:
         unsigned ReplaceWithLclVar(Compiler* compiler, unsigned blockWeight, unsigned lclNum = BAD_VAR_NUM);
     };
 
+    //------------------------------------------------------------------------
+    // LIR::Range: Represents a contiguous range of LIR nodes. Provides a
+    //             variety of utilites that modify the LIR contained in the
+    //             range.
+    //
     class Range
     {
         friend class LIR;
@@ -80,6 +90,12 @@ public:
     };
 
 private:
+    //------------------------------------------------------------------------
+    // LIR::SimpleRange: Provides storage for a simple range defined only by
+    //                   a start and end node. Can be used in order to
+    //                   incrementally build up a range of IR to be inserted
+    //                   into another range.
+    //
     class SimpleRange final : public Range
     {
     private:
@@ -94,8 +110,35 @@ public:
     static Range EmptyRange();
     static Range AsRange(GenTree* firstNode, GenTree* lastNode);
 
+    //------------------------------------------------------------------------
+    // LIR::AsRange: Constructs and returns an LIR::Range value given a value
+    //               of a type that provides the storage for the first and
+    //               last nodes of the range.
+    //
+    // TContainer must implement the folliwing methods:
+    //    GenTree** TContainer::FirstLIRNodeSlot();
+    //    GenTree** TContainer::LastLIRNodeSlot();
+    //
+    // Arguments:
+    //    container - The value that will provide the storage for the range's
+    //                first and last nodes.
+    //
+    // Return Value: The newly constructed range.
+    //
     template<typename TContainer>
     static Range AsRange(TContainer& container)
+    {
+        return Range(container->FirstLIRNodeSlot(), container->LastLIRNodeSlot());
+    }
+
+    //------------------------------------------------------------------------
+    // LIR::AsRange: See the overload of AsRange() above. This overload
+    //               accepts a pointer-typed argument so that the `this`
+    //               parameter of a calling member method can be provided as
+    //               the argument to `container`.
+    //
+    template<typename TContainer>
+    static Range AsRange(TContainer* container)
     {
         return Range(container->FirstLIRNodeSlot(), container->LastLIRNodeSlot());
     }
