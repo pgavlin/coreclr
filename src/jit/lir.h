@@ -58,12 +58,14 @@ public:
     public:
         Range();
 
-        GenTree* Start() const;
+        GenTree* Begin() const;
         GenTree* End() const;
 
         bool IsValid() const;
         bool IsEmpty() const;
         bool IsSubRange() const;
+
+        GenTree* FirstNonPhiNode() const;
 
         void InsertBefore(GenTree* node, GenTree* insertionPoint);
         void InsertAfter(GenTree* node, GenTree* insertionPoint);

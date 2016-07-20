@@ -664,4 +664,14 @@ unsigned PtrKeyFuncs<BasicBlock>::GetHashCode(const BasicBlock* ptr)
     return ptr->bbNum;
 }
 
+bool BasicBlock::isEmpty()
+{
+    if (!IsLIR())
+    {
+        return (this->FirstNonPhiDef() == nullptr);
+    }
+
+    LIR::Range range = LIR::AsRange(this);
+    return range.FirstNonPhiNode() == range.End();
+}
 

@@ -521,10 +521,7 @@ typedef unsigned weight_t;             // Type used to hold block and edge weigh
 
     // Returns "true" if the block is empty. Empty here means there are no statement
     // trees *except* PHI definitions.
-    bool isEmpty()
-    {
-        return (this->FirstNonPhiDef() == nullptr);
-    }
+    bool isEmpty();
 
     // Returns "true" iff "this" is the first block of a BBJ_CALLFINALLY/BBJ_ALWAYS pair --
     // a block corresponding to an exit from the try of a try/finally.  In the flow graph,

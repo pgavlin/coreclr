@@ -67,8 +67,6 @@ LIR::Use LIR::Use::GetDummyUse(Range& range, GenTree* node)
 
 bool LIR::Use::IsDummyUse() const
 {
-    assert(IsValid());
-
     return m_edge == &m_user;
 }
 
@@ -154,9 +152,7 @@ LIR::Range::Range(GenTree** firstNodeSlot, GenTree** lastNodeSlot)
     assert(lastNodeSlot != nullptr);
     assert(firstNodeSlot != lastNodeSlot);
 
-    assert(FirstNode() != nullptr);
-    assert(LastNode() != nullptr);
-
+    assert((FirstNode() != nullptr) == (LastNode() != nullptr));
     assert((FirstNode() == LastNode()) || FirstNode()->Precedes(LastNode()));
 }
 
@@ -188,14 +184,30 @@ bool LIR::Range::IsSubRange() const
     return !IsEmpty() && ((FirstNode()->gtPrev != nullptr) || (LastNode()->gtNext != nullptr));
 }
 
-GenTree* LIR::Range::Start() const
+GenTree* LIR::Range::Begin() const
 {
     return FirstNode();
 }
 
 GenTree* LIR::Range::End() const
 {
-    return LastNode();
+    return IsEmpty() ? nullptr : LastNode()->gtNext;
+}
+
+GenTree* LIR::Range::FirstNonPhiNode() const
+{
+    assert(IsValid());
+
+    GenTree* end = End();
+    for (GenTree* node = Begin(); node != end; node = node->gtNext)
+    {
+        if ((node->OperGet() != GT_PHI_ARG) && (node->OperGet() != GT_PHI) && !node->IsPhiDefn())
+        {
+            return node;
+        }
+    }
+
+    return end;
 }
 
 void LIR::Range::InsertBefore(GenTree* node, GenTree* insertionPoint)
@@ -300,13 +312,17 @@ bool LIR::Range::TryGetUse(GenTree* node, Use* use)
     assert(use != nullptr);
     assert(ContainsNode(node));
 
-    GenTree** edge;
-    for (GenTree* n = node->gtNext; n != nullptr; n = n->gtNext)
+    // Don't bother looking for uses of nodes that are not values.
+    if (node->IsValue())
     {
-        if (n->TryGetUse(node, &edge))
+        for (GenTree* n = node->gtNext, *end = End(); n != end; n = n->gtNext)
         {
-            *use = Use(*this, edge, n);
-            return true;
+            GenTree** edge;
+            if (n->TryGetUse(node, &edge))
+            {
+                *use = Use(*this, edge, n);
+                return true;
+            }
         }
     }
 
@@ -319,7 +335,7 @@ bool LIR::Range::ContainsNode(GenTree* node) const
 {
     assert(node != nullptr);
 
-    for (GenTree* n = FirstNode(); n != nullptr; n = n->gtNext)
+    for (GenTree* n = Begin(), *end = End(); n != end; n = n->gtNext)
     {
         if (n == node)
         {
@@ -374,11 +390,22 @@ bool LIR::Range::CheckLIR(Compiler* compiler) const
         return false;
     };
 
+    bool pastPhis = false;
     GenTree* prev = nullptr;
-    for (GenTree* node = FirstNode(); node != nullptr; prev = node, node = node->gtNext)
+    for (GenTree* node = Begin(), *end = End(); node != end; prev = node, node = node->gtNext)
     {
         // Verify that the node is allowed in LIR.
         assert(node->IsLIR());
+
+        // Check that all phi nodes (if any) occur at the start of the range.
+        if ((node->OperGet() == GT_PHI_ARG) || (node->OperGet() == GT_PHI) || node->IsPhiDefn())
+        {
+            assert(!pastPhis);
+        }
+        else
+        {
+            pastPhis = true;
+        }
 
         // Skip nodes that do not produce values.
         if (!node->IsValue())
@@ -430,6 +457,8 @@ bool LIR::Range::CheckLIR(Compiler* compiler) const
 
         recordDef(node);
     }
+
+    assert(prev == LastNode());
 
     return true;
 }

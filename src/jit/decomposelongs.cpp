@@ -67,11 +67,11 @@ void DecomposeLongs::PrepareForDecomposition()
 void DecomposeLongs::DecomposeBlock(BasicBlock* block)
 {
     assert(block == m_compiler->compCurBB); // compCurBB must already be set.
-    assert(block->IsLIR());
+    assert(block->isEmpty() || block->IsLIR());
 
     m_block = block;
     m_range = LIR::AsRange(block);
-    for (GenTree* node = m_range.Start(); node != nullptr; node = node->gtNext)
+    for (GenTree* node = m_range.FirstNonPhiNode(), *end = m_range.End(); node != end; node = node->gtNext)
     {
         LIR::Use use;
         if (!m_range.TryGetUse(node, &use))
@@ -79,8 +79,7 @@ void DecomposeLongs::DecomposeBlock(BasicBlock* block)
             use = LIR::Use::GetDummyUse(m_range, node);
         }
 
-        DecomposeNode(use);
-        node = use.Def();
+        node = DecomposeNode(use);
     }
 
     assert(m_range.CheckLIR(m_compiler));
@@ -97,7 +96,7 @@ void DecomposeLongs::DecomposeBlock(BasicBlock* block)
 // Return Value:
 //    None. It the tree at *ppTree is of TYP_LONG, it will generally be replaced.
 //
-void DecomposeLongs::DecomposeNode(LIR::Use& use)
+GenTree* DecomposeLongs::DecomposeNode(LIR::Use& use)
 {
     GenTree* tree = use.Def();
 
@@ -118,13 +117,13 @@ void DecomposeLongs::DecomposeNode(LIR::Use& use)
             unsigned loVarNum = varDsc->lvFieldLclStart;
             tree->AsLclVarCommon()->SetLclNum(loVarNum);
             m_compiler->lvaIncRefCnts(tree);
-            return;
+            return tree;
         }
     }
 
     if (tree->TypeGet() != TYP_LONG)
     {
-        return;
+        return tree;
     }
 
 #ifdef DEBUG
@@ -142,27 +141,27 @@ void DecomposeLongs::DecomposeNode(LIR::Use& use)
         break;
 
     case GT_LCL_VAR:
-        DecomposeLclVar(use);
+        tree = DecomposeLclVar(use);
         break;
 
     case GT_LCL_FLD:
-        DecomposeLclFld(use);
+        tree = DecomposeLclFld(use);
         break;
 
     case GT_STORE_LCL_VAR:
-        DecomposeStoreLclVar(use);
+        tree = DecomposeStoreLclVar(use);
         break;
 
     case GT_CAST:
-        DecomposeCast(use);
+        tree = DecomposeCast(use);
         break;
 
     case GT_CNS_LNG:
-        DecomposeCnsLng(use);
+        tree = DecomposeCnsLng(use);
         break;
 
     case GT_CALL:
-        DecomposeCall(use);
+        tree = DecomposeCall(use);
         break;
 
     case GT_RETURN:
@@ -170,7 +169,7 @@ void DecomposeLongs::DecomposeNode(LIR::Use& use)
         break;
 
     case GT_STOREIND:
-        DecomposeStoreInd(use);
+        tree = DecomposeStoreInd(use);
         break;
 
     case GT_STORE_LCL_FLD:
@@ -183,11 +182,11 @@ void DecomposeLongs::DecomposeNode(LIR::Use& use)
         break;
 
     case GT_NOT:
-        DecomposeNot(use);
+        tree = DecomposeNot(use);
         break;
 
     case GT_NEG:
-        DecomposeNeg(use);
+        tree = DecomposeNeg(use);
         break;
 
     // Binary operators. Those that require different computation for upper and lower half are
@@ -197,7 +196,7 @@ void DecomposeLongs::DecomposeNode(LIR::Use& use)
     case GT_OR:
     case GT_XOR:
     case GT_AND:
-        DecomposeArith(use);
+        tree = DecomposeArith(use);
         break;
 
     case GT_MUL:
@@ -257,6 +256,8 @@ void DecomposeLongs::DecomposeNode(LIR::Use& use)
         m_compiler->gtDispTree(use.Def());
     }
 #endif
+
+    return tree;
 }
  
 
@@ -274,7 +275,7 @@ void DecomposeLongs::DecomposeNode(LIR::Use& use)
 // Return Value:
 //    None.
 //
-void DecomposeLongs::FinalizeDecomposition(LIR::Use& use, GenTree* loResult, GenTree* hiResult)
+GenTree* DecomposeLongs::FinalizeDecomposition(LIR::Use& use, GenTree* loResult, GenTree* hiResult)
 {
     assert(use.IsValid());
     assert(loResult != nullptr);
@@ -283,14 +284,12 @@ void DecomposeLongs::FinalizeDecomposition(LIR::Use& use, GenTree* loResult, Gen
     assert(m_range.ContainsNode(hiResult));
     assert(loResult->Precedes(hiResult));
 
-    GenTree* tree = use.Def();
-    hiResult->CopyCosts(tree);
-
     GenTree* gtLong = new (m_compiler, GT_LONG) GenTreeOp(GT_LONG, TYP_LONG, loResult, hiResult);
-    gtLong->CopyCosts(tree);
-
     m_range.InsertAfter(gtLong, hiResult);
+
     use.ReplaceWith(m_compiler, gtLong);
+
+    return gtLong;
 }
 
 
@@ -304,7 +303,7 @@ void DecomposeLongs::FinalizeDecomposition(LIR::Use& use, GenTree* loResult, Gen
 // Return Value:
 //    None.
 //
-void DecomposeLongs::DecomposeLclVar(LIR::Use& use)
+GenTree* DecomposeLongs::DecomposeLclVar(LIR::Use& use)
 {
     assert(use.IsValid());
     assert(use.Def()->OperGet() == GT_LCL_VAR);
@@ -316,7 +315,9 @@ void DecomposeLongs::DecomposeLclVar(LIR::Use& use)
 
     GenTree* loResult = tree;
     loResult->gtType = TYP_INT;
+
     GenTree* hiResult = m_compiler->gtNewLclLNode(varNum, TYP_INT);
+    m_range.InsertAfter(hiResult, loResult);
 
     if (varDsc->lvPromoted)
     {
@@ -342,7 +343,7 @@ void DecomposeLongs::DecomposeLclVar(LIR::Use& use)
     m_compiler->lvaIncRefCnts(loResult);
     m_compiler->lvaIncRefCnts(hiResult);
 
-    FinalizeDecomposition(use, loResult, hiResult);
+    return FinalizeDecomposition(use, loResult, hiResult);
 }
 
 
@@ -356,7 +357,7 @@ void DecomposeLongs::DecomposeLclVar(LIR::Use& use)
 // Return Value:
 //    None.
 //
-void DecomposeLongs::DecomposeLclFld(LIR::Use& use)
+GenTree* DecomposeLongs::DecomposeLclFld(LIR::Use& use)
 {
     assert(use.IsValid());
     assert(use.Def()->OperGet() == GT_LCL_FLD);
@@ -368,8 +369,9 @@ void DecomposeLongs::DecomposeLclFld(LIR::Use& use)
     GenTree* hiResult = m_compiler->gtNewLclFldNode(loResult->gtLclNum,
                                               TYP_INT,
                                               loResult->gtLclOffs + 4);
+    m_range.InsertAfter(hiResult, loResult);
 
-    FinalizeDecomposition(use, loResult, hiResult);
+    return FinalizeDecomposition(use, loResult, hiResult);
 }
 
 
@@ -383,7 +385,7 @@ void DecomposeLongs::DecomposeLclFld(LIR::Use& use)
 // Return Value:
 //    None.
 //
-void DecomposeLongs::DecomposeStoreLclVar(LIR::Use& use)
+GenTree* DecomposeLongs::DecomposeStoreLclVar(LIR::Use& use)
 {
     assert(use.IsValid());
     assert(use.Def()->OperGet() == GT_STORE_LCL_VAR);
@@ -394,7 +396,7 @@ void DecomposeLongs::DecomposeStoreLclVar(LIR::Use& use)
     {
         // GT_CALLs are not decomposed, so will not be converted to GT_LONG
         // GT_STORE_LCL_VAR = GT_CALL are handled in genMultiRegCallStoreToLocal
-        return;
+        return tree;
     }
 
     noway_assert(rhs->OperGet() == GT_LONG);
@@ -432,17 +434,15 @@ void DecomposeLongs::DecomposeStoreLclVar(LIR::Use& use)
     tree->gtOp.gtOp1 = loRhs;
     tree->gtType = TYP_INT;
 
-    m_range.InsertBefore(loRhs, tree);
-
     hiStore->gtOp.gtOp1 = hiRhs;
-    hiStore->CopyCosts(tree);
     hiStore->gtFlags |= GTF_VAR_DEF;
 
     m_compiler->lvaIncRefCnts(tree);
     m_compiler->lvaIncRefCnts(hiStore);
 
-    m_range.InsertAfter(hiRhs, tree);
     m_range.InsertAfter(hiStore, tree);
+
+    return hiStore;
 }
 
 
@@ -456,7 +456,7 @@ void DecomposeLongs::DecomposeStoreLclVar(LIR::Use& use)
 // Return Value:
 //    None.
 //
-void DecomposeLongs::DecomposeCast(LIR::Use& use)
+GenTree* DecomposeLongs::DecomposeCast(LIR::Use& use)
 {
     assert(use.IsValid());
     assert(use.Def()->OperGet() == GT_CAST);
@@ -473,8 +473,10 @@ void DecomposeLongs::DecomposeCast(LIR::Use& use)
         if (tree->gtFlags & GTF_UNSIGNED)
         {
             loResult = tree->gtGetOp1();
+            m_range.Remove(tree);
+
             hiResult = new (m_compiler, GT_CNS_INT) GenTreeIntCon(TYP_INT, 0);
-            m_range.InsertAfter(hiResult, tree);
+            m_range.InsertAfter(hiResult, loResult);
         }
         else
         {
@@ -487,7 +489,7 @@ void DecomposeLongs::DecomposeCast(LIR::Use& use)
         break;
     }
 
-    FinalizeDecomposition(use, loResult, hiResult);
+    return FinalizeDecomposition(use, loResult, hiResult);
 }
 
 
@@ -501,7 +503,7 @@ void DecomposeLongs::DecomposeCast(LIR::Use& use)
 // Return Value:
 //    None.
 //
-void DecomposeLongs::DecomposeCnsLng(LIR::Use& use)
+GenTree* DecomposeLongs::DecomposeCnsLng(LIR::Use& use)
 {
     assert(use.IsValid());
     assert(use.Def()->OperGet() == GT_CNS_LNG);
@@ -516,7 +518,7 @@ void DecomposeLongs::DecomposeCnsLng(LIR::Use& use)
     GenTree* hiResult = new (m_compiler, GT_CNS_INT) GenTreeIntCon(TYP_INT, hiVal);
     m_range.InsertAfter(hiResult, loResult);
 
-    FinalizeDecomposition(use, loResult, hiResult);
+    return FinalizeDecomposition(use, loResult, hiResult);
 }
 
 
@@ -530,14 +532,14 @@ void DecomposeLongs::DecomposeCnsLng(LIR::Use& use)
 // Return Value:
 //    None.
 //
-void DecomposeLongs::DecomposeCall(LIR::Use& use)
+GenTree* DecomposeLongs::DecomposeCall(LIR::Use& use)
 {
     assert(use.IsValid());
     assert(use.Def()->OperGet() == GT_CALL);
 
     // We only need to force var = call() if the call's result is used.
     if (use.IsDummyUse())
-        return;
+        return use.Def();
 
     GenTree* user = use.User();
     if (user->OperGet() == GT_STORE_LCL_VAR)
@@ -547,13 +549,13 @@ void DecomposeLongs::DecomposeCall(LIR::Use& use)
         unsigned varNum = user->AsLclVarCommon()->gtLclNum;
         if (m_compiler->lvaTable[varNum].lvIsMultiRegRet)
         {
-            return;
+            return use.Def();
         }
         else if (!m_compiler->lvaTable[varNum].lvPromoted)
         {
             // If var wasn't promoted, we can just set lvIsMultiRegRet.
             m_compiler->lvaTable[varNum].lvIsMultiRegRet = true;
-            return;
+            return use.Def();
         }
     }
 
@@ -564,7 +566,7 @@ void DecomposeLongs::DecomposeCall(LIR::Use& use)
     m_compiler->lvaTable[varNum].lvIsMultiRegRet = true;
 
     // Decompose the new LclVar use
-    DecomposeLclVar(use);
+    return DecomposeLclVar(use);
 }
 
 
@@ -577,7 +579,7 @@ void DecomposeLongs::DecomposeCall(LIR::Use& use)
 // Return Value:
 //    None.
 //
-void DecomposeLongs::DecomposeStoreInd(LIR::Use& use)
+GenTree* DecomposeLongs::DecomposeStoreInd(LIR::Use& use)
 {
     assert(use.IsValid());
     assert(use.Def()->OperGet() == GT_STOREIND);
@@ -616,7 +618,7 @@ void DecomposeLongs::DecomposeStoreInd(LIR::Use& use)
     GenTree* gtLong = tree->gtOp.gtOp2;
 
     // Save address to a temp. It is used in storeIndLow and storeIndHigh trees.
-    LIR::Use address(m_range, &tree->gtOp.gtOp2, tree);
+    LIR::Use address(m_range, &tree->gtOp.gtOp1, tree);
     address.ReplaceWithLclVar(m_compiler, m_block->getBBWeight(m_compiler));
     JITDUMP("[DecomposeStoreInd]: Saving address tree to a temp var:\n");
     DISPTREE(address.Def());
@@ -711,12 +713,13 @@ void DecomposeLongs::DecomposeStoreInd(LIR::Use& use)
     GenTree* storeIndHigh = new(m_compiler, GT_STOREIND) GenTreeStoreInd(TYP_INT, addrHigh, dataHigh);
     storeIndHigh->gtFlags = (storeIndLow->gtFlags & (GTF_ALL_EFFECT | GTF_LIVENESS_MASK));
     storeIndHigh->gtFlags |= GTF_REVERSE_OPS;
-    storeIndHigh->CopyCosts(storeIndLow);
 
     m_range.InsertAfter(dataHigh, storeIndLow);
     m_range.InsertAfter(addrBaseHigh, dataHigh);
     m_range.InsertAfter(addrHigh, addrBaseHigh);
     m_range.InsertAfter(storeIndHigh, addrHigh);
+
+    return storeIndHigh;
 
     // Example final output 
     //
@@ -772,7 +775,7 @@ void DecomposeLongs::DecomposeStoreInd(LIR::Use& use)
 // Return Value:
 //    None.
 //
-void DecomposeLongs::DecomposeNot(LIR::Use& use)
+GenTree* DecomposeLongs::DecomposeNot(LIR::Use& use)
 {
     assert(use.IsValid());
     assert(use.Def()->OperGet() == GT_NOT);
@@ -790,9 +793,9 @@ void DecomposeLongs::DecomposeNot(LIR::Use& use)
     loResult->gtOp.gtOp1 = loOp1;
 
     GenTree* hiResult = new (m_compiler, GT_NOT) GenTreeOp(GT_NOT, TYP_INT, hiOp1, nullptr);
-    m_range.InsertAfter(hiResult, hiOp1);
+    m_range.InsertAfter(hiResult, loResult);
 
-    FinalizeDecomposition(use, loResult, hiResult);
+    return FinalizeDecomposition(use, loResult, hiResult);
 }
 
 //------------------------------------------------------------------------
@@ -805,7 +808,7 @@ void DecomposeLongs::DecomposeNot(LIR::Use& use)
 // Return Value:
 //    None.
 //
-void DecomposeLongs::DecomposeNeg(LIR::Use& use)
+GenTree* DecomposeLongs::DecomposeNeg(LIR::Use& use)
 {
     assert(use.IsValid());
     assert(use.Def()->OperGet() == GT_NEG);
@@ -840,7 +843,7 @@ void DecomposeLongs::DecomposeNeg(LIR::Use& use)
     m_range.InsertAfter(hiAdjust, zero);
     m_range.InsertAfter(hiResult, hiAdjust);
 
-    FinalizeDecomposition(use, loResult, hiResult);
+    return FinalizeDecomposition(use, loResult, hiResult);
 }
 
 //------------------------------------------------------------------------
@@ -853,7 +856,7 @@ void DecomposeLongs::DecomposeNeg(LIR::Use& use)
 // Return Value:
 //    None.
 //
-void DecomposeLongs::DecomposeArith(LIR::Use& use)
+GenTree* DecomposeLongs::DecomposeArith(LIR::Use& use)
 {
     assert(use.IsValid());
 
@@ -927,7 +930,7 @@ void DecomposeLongs::DecomposeArith(LIR::Use& use)
         }
     }
 
-    FinalizeDecomposition(use, loResult, hiResult);
+    return FinalizeDecomposition(use, loResult, hiResult);
 }
 
 

@@ -8877,10 +8877,16 @@ void Compiler::fgSimpleLowering()
         // Walk the statement trees in this basic block, converting ArrLength nodes.
         compCurBB = block; // Used in fgRngChkTarget.
 
+#ifdef LEGACY_BACKEND
         for (GenTreeStmt* stmt = block->FirstNonPhiDef(); stmt; stmt = stmt->gtNextStmt)
         {
             for (GenTreePtr tree = stmt->gtStmtList; tree; tree = tree->gtNext)
             {
+#else
+        LIR::Range range = LIR::AsRange(block);
+        for (GenTree* tree = range.Begin(), *end = range.End(); tree != end; tree = tree->gtNext)
+        {
+#endif
                 if (tree->gtOper == GT_ARR_LENGTH)
                 {
                     GenTreeArrLen*  arrLen = tree->AsArrLen();
@@ -8914,6 +8920,7 @@ void Compiler::fgSimpleLowering()
                         add->gtRsvdRegs = arr->gtRsvdRegs;
                         add->gtCopyFPlvl(arr);
                         add->CopyCosts(arr);
+#ifdef LEGACY_BACKEND
                         arr->gtNext = con;
                         con->gtPrev = arr;
 
@@ -8922,6 +8929,10 @@ void Compiler::fgSimpleLowering()
 
                         add->gtNext = tree;
                         tree->gtPrev = add;
+#else
+                        range.InsertAfter(con, arr);
+                        range.InsertAfter(add, con);
+#endif
                     }
 
                     // Change to a GT_IND.
@@ -8939,7 +8950,9 @@ void Compiler::fgSimpleLowering()
                     fgSetRngChkTarget(tree, false);
                 }
             }
+#ifdef LEGACY_BACKEND
         }
+#endif
     }
 
 #ifdef DEBUG

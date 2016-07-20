@@ -4296,8 +4296,6 @@ void                 Compiler::compCompile(void * * methodCodePtr,
     // rationalize trees
     Rationalizer rat(this); // PHASE_RATIONALIZE
     rat.Run();
-
-    NYI("later phases cannot yet process LIR!");
 #endif // !LEGACY_BACKEND
 
     // Here we do "simple lowering".  When the RyuJIT backend works for all

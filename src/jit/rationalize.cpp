@@ -1185,7 +1185,9 @@ Compiler::fgWalkResult Rationalizer::RewriteNode(GenTree** useEdge, ArrayStack<G
 
     case GT_ARGPLACE:
     case GT_LIST:
-        // Remove argplace and list nodes from the LIR.
+        // Remove argplace and list nodes from the execution order.
+        //
+        // TODO: remove phi args and phi nodes as well?
         m_range.Remove(node);
         break;
 
@@ -1394,12 +1396,17 @@ void Rationalizer::DoPhase()
         {
             nextStatement = statement->getNextStmt();
 
-            // Change this statement into an IL offset node and insert it into the LIR.
-            statement->SetOper(GT_IL_OFFSET);
-            statement->gtNext = nullptr;
-            statement->gtPrev = nullptr;
+            // If this statement has correct offset information, change it into an IL offset
+            // node and insert it into the LIR.
+            if (statement->gtStmtILoffsx != BAD_IL_OFFSET)
+            {
+                assert(!statement->IsPhiDefnStmt());
+                statement->SetOper(GT_IL_OFFSET);
+                statement->gtNext = nullptr;
+                statement->gtPrev = nullptr;
 
-            m_range.InsertBefore(statement, statement->gtStmtList);
+                m_range.InsertBefore(statement, statement->gtStmtList);
+            }
 
             m_statement = statement;
             comp->fgWalkTreePost(&statement->gtStmtExpr,

@@ -214,8 +214,8 @@ GTNODE(COPYOBJ    , "copyObj"    ,0,GTK_BINOP|GTK_NOVALUE)
 //  Nodes used for optimizations.
 //-----------------------------------------------------------------------------
 
-GTNODE(PHI        , "phi"        ,0,GTK_UNOP)              // phi node for ssa.
-GTNODE(PHI_ARG    , "phiArg"     ,0,GTK_LEAF|GTK_LOCAL)    // phi(phiarg, phiarg, phiarg)
+GTNODE(PHI        , "phi"        ,0,GTK_UNOP)            // phi node for ssa.
+GTNODE(PHI_ARG    , "phiArg"     ,0,GTK_LEAF|GTK_LOCAL)  // phi(phiarg, phiarg, phiarg)
 
 //-----------------------------------------------------------------------------
 //  Nodes used by Lower to generate a closer CPU representation of other nodes

@@ -3704,6 +3704,7 @@ void Lowering::DoPhase()
         decomp.DecomposeBlock(block);
 #endif //!_TARGET_64BIT_
 
+#if 0 // NOTE(pdg): ifdef'd out for better testing of decomp
         // Walk the statement trees in this basic block 
         for (stmt = block->bbTreeList; stmt; stmt = stmt->gtNext)
         {
@@ -3722,7 +3723,10 @@ void Lowering::DoPhase()
             // We may have removed "stmt" in LowerNode().
             stmt = comp->compCurStmt;
         }
+#endif
     }
+
+    NYI("later phases cannot yet process LIR!");
 
     // If we have any PInvoke calls, insert the one-time prolog code. We've already inserted the epilog code in the appropriate spots.
     // NOTE: there is a minor optimization opportunity here, as we still create p/invoke data structures and setup/teardown

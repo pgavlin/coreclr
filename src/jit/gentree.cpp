@@ -690,45 +690,6 @@ Compiler::fgWalkResult Compiler::fgWalkTreePostRec(GenTreePtr *pTree, fgWalkData
 
     fgWalkData->parent = tree;
 
-    if (kind & GTK_SMPOP)
-    {
-        GenTree** op1Slot = &tree->gtOp.gtOp1;
-
-        GenTree** op2Slot;
-        if (tree->OperIsBinary())
-        {
-            if ((tree->gtFlags & GTF_REVERSE_OPS) == 0)
-            {
-                op2Slot = &tree->gtOp.gtOp2;
-            }
-            else
-            {
-                op2Slot = op1Slot;
-                op1Slot = &tree->gtOp.gtOp2;
-            }
-        }
-        else
-        {
-            op2Slot = nullptr;
-        }
-
-        if (*op1Slot != nullptr)
-        {
-            result = fgWalkTreePostRec<computeStack>(op1Slot, fgWalkData);
-            if  (result == WALK_ABORT)
-                return result;
-        }
-
-        if (op2Slot != nullptr && *op2Slot != nullptr)
-        {
-            result = fgWalkTreePostRec<computeStack>(op2Slot, fgWalkData);
-            if  (result == WALK_ABORT)
-                return result;
-        }
-
-        goto DONE;
-    }
-
     /* See what kind of a special operator we have here */
 
     switch  (oper)
@@ -839,11 +800,93 @@ Compiler::fgWalkResult Compiler::fgWalkTreePostRec(GenTreePtr *pTree, fgWalkData
             return result;
         break;
 
+    case GT_PHI:
+        {
+            GenTreeUnOp* phi = tree->AsUnOp();
+            if (phi->gtOp1 != nullptr)
+            {
+                for (GenTreeArgList* args = phi->gtOp1->AsArgList(); args != nullptr; args = args->Rest())
+                {
+                    result = fgWalkTreePostRec<computeStack>(&args->gtOp1, fgWalkData);
+                    if (result == WALK_ABORT)
+                    {
+                        return result;
+                    }
+                }
+            }
+        }
+        break;
+
+    case GT_INITBLK:
+    case GT_COPYBLK:
+    case GT_COPYOBJ:
+        {
+            GenTreeBlkOp* blkOp = tree->AsBlkOp();
+            result = fgWalkTreePostRec<computeStack>(&blkOp->gtOp1->AsArgList()->gtOp1, fgWalkData);
+            if (result == WALK_ABORT)
+            {
+                return result;
+            }
+
+            result = fgWalkTreePostRec<computeStack>(&blkOp->gtOp1->AsArgList()->gtOp2, fgWalkData);
+            if (result == WALK_ABORT)
+            {
+                return result;
+            }
+
+            result = fgWalkTreePostRec<computeStack>(&blkOp->gtOp2, fgWalkData);
+            if (result == WALK_ABORT)
+            {
+                return result;
+            }
+        }
+        break;
+
     default:
+        if (kind & GTK_SMPOP)
+        {
+            GenTree** op1Slot = &tree->gtOp.gtOp1;
+
+            GenTree** op2Slot;
+            if (tree->OperIsBinary())
+            {
+                if ((tree->gtFlags & GTF_REVERSE_OPS) == 0)
+                {
+                    op2Slot = &tree->gtOp.gtOp2;
+                }
+                else
+                {
+                    op2Slot = op1Slot;
+                    op1Slot = &tree->gtOp.gtOp2;
+                }
+            }
+            else
+            {
+                op2Slot = nullptr;
+            }
+
+            if (*op1Slot != nullptr)
+            {
+                result = fgWalkTreePostRec<computeStack>(op1Slot, fgWalkData);
+                if  (result == WALK_ABORT)
+                    return result;
+            }
+
+            if (op2Slot != nullptr && *op2Slot != nullptr)
+            {
+                result = fgWalkTreePostRec<computeStack>(op2Slot, fgWalkData);
+                if  (result == WALK_ABORT)
+                    return result;
+            }
+        }
 #ifdef  DEBUG
-        fgWalkData->compiler->gtDispTree(tree);
+        else
+        {
+            fgWalkData->compiler->gtDispTree(tree);
+            assert(!"unexpected operator");
+        }
 #endif
-        assert(!"unexpected operator");
+        break;
     }
 
 DONE:
@@ -5227,14 +5270,9 @@ bool              GenTree::TryGetUse(GenTree* def, GenTree*** use)
         if (def == gtOp.gtOp2)                    return (*use = &(gtOp.gtOp2), true);
         break;
 
-#if !FEATURE_MULTIREG_ARGS
-        // Note that when FEATURE_MULTIREG_ARGS==1 
-        //  a GT_OBJ node is handled above by the default case
     case GT_OBJ:
-        // Any GT_OBJ with a field must be lowered before def point.
-        noway_assert(!"GT_OBJ encountered in GenTree::TryGetUse");
+        if (def == gtOp.gtOp1)                    return (*use = &(gtOp.gtOp1), true);
         break;
-#endif // !FEATURE_MULTIREG_ARGS
 
     case GT_CMPXCHG:
         if (def == gtCmpXchg.gtOpLocation)        return (*use = &(gtCmpXchg.gtOpLocation), true);
@@ -8031,7 +8069,7 @@ GenTree** GenTree::GetOperand(unsigned operandNum)
         }
     case GT_ARR_BOUNDS_CHECK:
 #ifdef FEATURE_SIMD
-case GT_SIMD_CHK:
+    case GT_SIMD_CHK:
 #endif // FEATURE_SIMD
         switch (operandNum)
         {
@@ -10331,7 +10369,7 @@ GenTreePtr          Compiler::gtDispLinearTree(GenTreeStmt* curStmt,
 
                             // Skip the GT_LIST nodes, as we do not print them, and the next node to print will occur
                             // after the list.
-                            while (nextLinearNode->OperGet() == GT_LIST)
+                            while (nextLinearNode != nullptr && nextLinearNode->OperGet() == GT_LIST)
                             {
                                 nextLinearNode = nextLinearNode->gtNext;
                             }
@@ -13440,11 +13478,9 @@ bool GenTree::IsRegOptional() const
 
 bool GenTree::IsPhiDefn()
 {
-    bool res = 
-        OperGet() == GT_ASG
-        && gtOp.gtOp2 != NULL
-        && gtOp.gtOp2->OperGet() == GT_PHI;
-    assert(!res || gtOp.gtOp1->OperGet() == GT_LCL_VAR);
+    bool res = ((OperGet() == GT_ASG) && (gtOp.gtOp2 != nullptr) && (gtOp.gtOp2->OperGet() == GT_PHI)) ||
+            ((OperGet() == GT_STORE_LCL_VAR) && (gtOp.gtOp1 != nullptr) && (gtOp.gtOp1->OperGet() == GT_PHI));
+    assert(!res || OperGet() == GT_STORE_LCL_VAR || gtOp.gtOp1->OperGet() == GT_LCL_VAR);
     return res;
 }
 

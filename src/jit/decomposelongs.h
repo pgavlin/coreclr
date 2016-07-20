@@ -31,23 +31,22 @@ public:
 private:
 
     // Driver functions
-    static Compiler::fgWalkResult DecompNodeHelper(LIR::Use& use);
-    void DecomposeNode(LIR::Use& use);
+    GenTree* DecomposeNode(LIR::Use& use);
 
     // Per-node type decompose cases
-    void DecomposeLclVar(LIR::Use& use);
-    void DecomposeLclFld(LIR::Use& use);
-    void DecomposeStoreLclVar(LIR::Use& use);
-    void DecomposeCast(LIR::Use& use);
-    void DecomposeCnsLng(LIR::Use& use);
-    void DecomposeCall(LIR::Use& use);
-    void DecomposeStoreInd(LIR::Use& use);
-    void DecomposeNot(LIR::Use& use);
-    void DecomposeNeg(LIR::Use& use);
-    void DecomposeArith(LIR::Use& use);
+    GenTree* DecomposeLclVar(LIR::Use& use);
+    GenTree* DecomposeLclFld(LIR::Use& use);
+    GenTree* DecomposeStoreLclVar(LIR::Use& use);
+    GenTree* DecomposeCast(LIR::Use& use);
+    GenTree* DecomposeCnsLng(LIR::Use& use);
+    GenTree* DecomposeCall(LIR::Use& use);
+    GenTree* DecomposeStoreInd(LIR::Use& use);
+    GenTree* DecomposeNot(LIR::Use& use);
+    GenTree* DecomposeNeg(LIR::Use& use);
+    GenTree* DecomposeArith(LIR::Use& use);
 
     // Helper functions
-    void FinalizeDecomposition(LIR::Use& use, GenTree* loResult, GenTree* hiResult);
+    GenTree* FinalizeDecomposition(LIR::Use& use, GenTree* loResult, GenTree* hiResult);
 
     static genTreeOps GetHiOper(genTreeOps oper);
     static genTreeOps GetLoOper(genTreeOps oper);
