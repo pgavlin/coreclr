@@ -477,6 +477,7 @@ CodeGenInterface::genUpdateLife       (VARSET_VALARG_TP newLife)
     compiler->compUpdateLife</*ForCodeGen*/true>(newLife);
 }
 
+#ifdef LEGACY_BACKEND
 // Returns the liveSet after tree has executed.
 // "tree" MUST occur in the current statement, AFTER the most recent
 // update of compiler->compCurLifeTree and compiler->compCurLife.
@@ -514,6 +515,7 @@ CodeGen::genNewLiveRegMask(GenTreePtr first, GenTreePtr second)
     regMaskTP newLiveMask = genLiveMask(VarSetOps::Diff(compiler, secondLiveSet, firstLiveSet));
     return newLiveMask;
 }
+#endif
 
 // Return the register mask for the given register variable
 // inline
@@ -1185,6 +1187,8 @@ void                Compiler::compChangeLife(VARSET_VALARG_TP newLife DEBUGARG(G
 // Need an explicit instantiation.
 template void Compiler::compChangeLife<true>(VARSET_VALARG_TP newLife DEBUGARG(GenTreePtr tree));
 
+#ifdef LEGACY_BACKEND
+
 /*****************************************************************************
  *
  *  Get the mask of integer registers that contain 'live' enregistered 
@@ -1346,6 +1350,8 @@ regMaskTP CodeGenInterface::genLiveMask(VARSET_VALARG_TP liveSet)
 
     return liveMask;
 }
+
+#endif
 
 /*****************************************************************************
  *
