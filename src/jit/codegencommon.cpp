@@ -8948,12 +8948,7 @@ void                CodeGen::genFnEpilog(BasicBlock* block)
 
         /* figure out what jump we have */
 
-        GenTreePtr jmpNode = block->lastTopLevelStmt();
-
-        noway_assert(jmpNode && (jmpNode->gtNext == 0));
-        noway_assert(jmpNode->gtOper == GT_STMT);
-
-        jmpNode = jmpNode->gtStmt.gtStmtExpr;
+        GenTree* jmpNode = block->bbLastNode;
         noway_assert(jmpNode->gtOper == GT_JMP);
 
         CORINFO_METHOD_HANDLE  methHnd    = (CORINFO_METHOD_HANDLE)jmpNode->gtVal.gtVal1;
@@ -9077,18 +9072,14 @@ void                CodeGen::genFnEpilog(BasicBlock* block)
         noway_assert(block->bbTreeList != nullptr);
 
         // figure out what jump we have
-        GenTreePtr jmpStmt = block->lastTopLevelStmt();
-        noway_assert(jmpStmt && (jmpStmt->gtOper == GT_STMT));
+        GenTree* jmpNode = block->bbLastNode;
 #if !FEATURE_FASTTAILCALL
-        noway_assert(jmpStmt->gtNext == nullptr);
-        GenTreePtr jmpNode = jmpStmt->gtStmt.gtStmtExpr;
         noway_assert(jmpNode->gtOper == GT_JMP);
 #else
         // arm64
         // If jmpNode is GT_JMP then gtNext must be null.
         // If jmpNode is a fast tail call, gtNext need not be null since it could have embedded stmts.
-        GenTreePtr jmpNode = jmpStmt->gtStmt.gtStmtExpr;
-        noway_assert((jmpNode->gtOper != GT_JMP) || (jmpStmt->gtNext == nullptr));
+        noway_assert((jmpNode->gtOper != GT_JMP) || (jmpNode->gtNext == nullptr));
 
         // Could either be a "jmp method" or "fast tail call" implemented as epilog+jmp
         noway_assert((jmpNode->gtOper == GT_JMP) || ((jmpNode->gtOper == GT_CALL) && jmpNode->AsCall()->IsFastTailCall()));
@@ -9352,20 +9343,15 @@ void                CodeGen::genFnEpilog(BasicBlock* block)
         noway_assert(block->bbTreeList);
 
         // figure out what jump we have
-        GenTreePtr jmpStmt = block->lastTopLevelStmt();        
-        noway_assert(jmpStmt && (jmpStmt->gtOper == GT_STMT));
-
+        GenTree* jmpNode = block->bbLastNode;
 #if !FEATURE_FASTTAILCALL
         // x86                        
-        noway_assert(jmpStmt->gtNext == nullptr);
-        GenTreePtr jmpNode = jmpStmt->gtStmt.gtStmtExpr;
         noway_assert(jmpNode->gtOper == GT_JMP);                
 #else 
         // amd64                 
         // If jmpNode is GT_JMP then gtNext must be null.
         // If jmpNode is a fast tail call, gtNext need not be null since it could have embedded stmts.
-        GenTreePtr jmpNode = jmpStmt->gtStmt.gtStmtExpr;
-        noway_assert((jmpNode->gtOper != GT_JMP) || (jmpStmt->gtNext == nullptr)); 
+        noway_assert((jmpNode->gtOper != GT_JMP) || (jmpNode->gtNext == nullptr)); 
 
         // Could either be a "jmp method" or "fast tail call" implemented as epilog+jmp
         noway_assert((jmpNode->gtOper == GT_JMP) || ((jmpNode->gtOper == GT_CALL) && jmpNode->AsCall()->IsFastTailCall()));
