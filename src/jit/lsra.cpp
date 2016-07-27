@@ -2493,6 +2493,48 @@ void LinearScan::addRefsForPhysRegMask(regMaskTP mask,
 regMaskTP
 LinearScan::getKillSetForNode(GenTree* tree)
 {
+    regMaskTP killSet = getKillSetForNode(compiler, tree);
+
+    switch (tree->OperGet())
+    {
+    case GT_MOD:
+    case GT_DIV:
+    case GT_UMOD:
+    case GT_UDIV:
+        if (!varTypeIsFloating(tree->TypeGet()))
+        {
+            // RDX needs to be killed early, because it must not be used as a source register
+            // (unlike most cases, where the kill happens AFTER the uses).  So for this kill,
+            // we add the RefPosition at the tree loc (where the uses are located) instead of the
+            // usual kill location which is the same as the defs at tree loc+1.
+            // Note that we don't have to add interference for the live vars, because that
+            // will be done below, and is not sensitive to the precise location.
+            LsraLocation currentLoc = tree->gtLsraInfo.loc;
+            assert(currentLoc != 0);
+            addRefsForPhysRegMask(RBM_RDX, currentLoc, RefTypeKill, true);
+            assert(killSet == (RBM_RAX | RBM_RDX));
+        }
+        break;
+
+    default:
+        break;
+    }
+
+    return killSet;
+}
+
+//------------------------------------------------------------------------ 
+// getKillSetForNode:   Return the registers killed by the given tree node.
+//
+// Arguments: 
+//    compiler   - the compiler context to use
+//    tree       - the tree for which the kill set is needed.
+//
+// Return Value:    a register mask of the registers killed
+//
+regMaskTP
+LinearScan::getKillSetForNode(Compiler* compiler, GenTree* tree)
+{
     regMaskTP killMask = RBM_NONE;
     switch (tree->OperGet())
     {
@@ -2517,16 +2559,6 @@ LinearScan::getKillSetForNode(GenTree* tree)
     case GT_UDIV:
         if (!varTypeIsFloating(tree->TypeGet()))
         {
-            // RDX needs to be killed early, because it must not be used as a source register
-            // (unlike most cases, where the kill happens AFTER the uses).  So for this kill,
-            // we add the RefPosition at the tree loc (where the uses are located) instead of the
-            // usual kill location which is the same as the defs at tree loc+1.
-            // Note that we don't have to add interference for the live vars, because that
-            // will be done below, and is not sensitive to the precise location.
-            LsraLocation currentLoc = tree->gtLsraInfo.loc;
-            assert(currentLoc != 0);
-            addRefsForPhysRegMask(RBM_RDX, currentLoc, RefTypeKill, true);
-            // Both RAX and RDX are killed by the operation
             killMask = RBM_RAX|RBM_RDX;
         }
         break;
