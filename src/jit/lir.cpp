@@ -36,16 +36,7 @@ LIR::Use::Use(Range& range, GenTree** edge, GenTree* user)
     , m_edge(edge)
     , m_user(user)
 {
-#if DEBUG
-    assert(range.ContainsNode(user));
-
-    GenTree** userEdge;
-    bool foundUse = user->TryGetUse(*edge, &userEdge);
-    assert(foundUse);
-    assert(userEdge == edge);
-
-    assert(IsValid());
-#endif
+    AssertIsValid();
 }
 
 LIR::Use& LIR::Use::operator=(const Use& other)
@@ -86,7 +77,7 @@ LIR::Use LIR::Use::GetDummyUse(Range& range, GenTree* node)
     dummyUse.m_user = node;
     dummyUse.m_edge = &dummyUse.m_user;
 
-    assert(dummyUse.IsValid());
+    dummyUse.AssertIsValid();
     return dummyUse;
 }
 
@@ -108,7 +99,7 @@ bool LIR::Use::IsDummyUse() const
 //
 GenTree* LIR::Use::Def() const
 {
-    assert(IsValid());
+    assert(IsInitialized());
 
     return *m_edge;
 }
@@ -118,18 +109,35 @@ GenTree* LIR::Use::Def() const
 ///
 GenTree* LIR::Use::User() const
 {
-    assert(IsValid());
+    assert(IsInitialized());
     assert(!IsDummyUse());
 
     return m_user;
 }
 
 //------------------------------------------------------------------------
-// LIR::Use::IsValid: Returns true if the use is valid; false otherwise.
+// LIR::Use::IsInitialized: Returns true if the use is minimally valid; false otherwise.
 //
-bool LIR::Use::IsValid() const
+bool LIR::Use::IsInitialized() const
 {
-    return (m_range != nullptr) && (m_edge != nullptr) && (m_user != nullptr);
+    return (m_range != nullptr) &&
+           (m_user != nullptr) &&
+           (m_edge != nullptr);
+}
+
+//------------------------------------------------------------------------
+// LIR::Use::AssertIsValid: DEBUG function to assert on many validity conditions.
+//
+void LIR::Use::AssertIsValid() const
+{
+    assert(IsInitialized());
+    assert(m_range->IsValid());
+    assert(m_range->ContainsNode(m_user));
+    assert(Def() != nullptr);
+
+    GenTree** useEdge = nullptr;
+    assert(m_user->TryGetUse(Def(), &useEdge));
+    assert(useEdge == m_edge);
 }
 
 //------------------------------------------------------------------------
@@ -183,7 +191,7 @@ bool LIR::Use::IsValid() const
 //
 void LIR::Use::ReplaceWith(Compiler* compiler, GenTree* replacement)
 {
-    assert(IsValid());
+    assert(IsInitialized());
     assert(compiler != nullptr);
     assert(replacement != nullptr);
     assert(IsDummyUse() || m_range->ContainsNode(m_user));
@@ -250,7 +258,7 @@ void LIR::Use::ReplaceWith(Compiler* compiler, GenTree* replacement)
 //
 unsigned LIR::Use::ReplaceWithLclVar(Compiler* compiler, unsigned blockWeight, unsigned lclNum)
 {
-    assert(IsValid());
+    assert(IsInitialized());
     assert(compiler != nullptr);
     assert(m_range->ContainsNode(m_user));
     assert(m_range->ContainsNode(*m_edge));
@@ -370,13 +378,29 @@ GenTree*& LIR::Range::LastNode() const
 // or not the first and last nodes actually define a range.
 //
 // Arguments:
+//     None.
 //
 // Return Value:
+//     'true' if the Range is valid.
 //
 bool LIR::Range::IsValid() const
 {
-    return (m_firstNodeSlot != nullptr) && (m_lastNodeSlot != nullptr) && 
-        (IsEmpty() || ((FirstNode() != nullptr) && (LastNode() != nullptr)));
+    if ((m_firstNodeSlot == nullptr) || (m_lastNodeSlot == nullptr))
+    {
+        return false;
+    }
+
+    if (IsEmpty())
+    {
+        return true;
+    }
+
+    if ((FirstNode() == nullptr) || (LastNode() == nullptr))
+    {
+        return false;
+    }
+
+    return true;
 }
 
 //------------------------------------------------------------------------
@@ -385,7 +409,15 @@ bool LIR::Range::IsValid() const
 //
 bool LIR::Range::IsEmpty() const
 {
-    return FirstNode() == nullptr;
+    if (FirstNode() == nullptr)
+    {
+        assert(LastNode() == nullptr);
+        return true;
+    }
+    else
+    {
+        return false;
+    }
 }
 
 //------------------------------------------------------------------------
@@ -444,6 +476,24 @@ LIR::Range::Iterator LIR::Range::begin() const
 LIR::Range::Iterator LIR::Range::end() const
 {
     return Iterator(End());
+}
+
+//------------------------------------------------------------------------
+// LIR::Range::rbegin: Returns an iterator positioned at the last node in
+//                    the range.
+//
+LIR::Range::ReverseIterator LIR::Range::rbegin() const
+{
+    return ReverseIterator(End());
+}
+
+//------------------------------------------------------------------------
+// LIR::Range::rend: Returns an iterator positioned at the first node in the
+//                  range.
+//
+LIR::Range::ReverseIterator LIR::Range::rend() const
+{
+    return ReverseIterator(Begin());
 }
 
 //------------------------------------------------------------------------
@@ -648,6 +698,51 @@ void LIR::Range::InsertAfter(const Range& range, GenTree* insertionPoint)
     range.FirstNode()->gtPrev = insertionPoint;
     insertionPoint->gtNext = range.FirstNode();
 }
+
+//------------------------------------------------------------------------
+// LIR::Range::InsertAtBeginning: Inserts a node at the beginning of this range.
+//
+// Arguments:
+//    node - The node to insert. Must not be part of any range.
+//
+void LIR::Range::InsertAtBeginning(GenTree* node)
+{
+    InsertBefore(node, FirstNode());
+}
+
+//------------------------------------------------------------------------
+// LIR::Range::InsertAtEnd: Inserts a node at the end of this range.
+//
+// Arguments:
+//    node - The node to insert. Must not be part of any range.
+//
+void LIR::Range::InsertAtEnd(GenTree* node)
+{
+    InsertAfter(node, LastNode());
+}
+
+//------------------------------------------------------------------------
+// LIR::Range::InsertAtBeginning: Inserts a range at the beginning of `this` range.
+//
+// Arguments:
+//    range - The range to splice in.
+//
+void LIR::Range::InsertAtBeginning(const Range& range)
+{
+    InsertBefore(range, FirstNode());
+}
+
+//------------------------------------------------------------------------
+// LIR::Range::InsertAtEnd: Inserts a range at the end of `this` range.
+//
+// Arguments:
+//    range - The range to splice in.
+//
+void LIR::Range::InsertAtEnd(const Range& range)
+{
+    InsertAfter(range, LastNode());
+}
+
 
 //------------------------------------------------------------------------
 // LIR::Range::Remove: Removes a node from this range.
@@ -886,7 +981,7 @@ bool LIR::Range::ContainsNode(GenTree* node) const
 // - If any phi nodes are present in the range, they precede all other
 //   nodes
 //
-// The first four properties are verified by walking the block's LIR in execution order,
+// The first four properties are verified by walking the range's LIR in execution order,
 // inserting defs into a set as they are visited, and removing them as they are used. The
 // different cases are distinguished only when an error is detected.
 //
@@ -894,12 +989,16 @@ bool LIR::Range::ContainsNode(GenTree* node) const
 //    compiler - A compiler context.
 //
 // Return Value:
+//    'true' if the LIR for the specified range is legal.
 //
 bool LIR::Range::CheckLIR(Compiler* compiler) const
 {
     // The check that uses are correctly linked into this range may fail
     // erroneously if this range is a sub-range.
     assert(!IsSubRange());
+
+    // Make sure the range itself is valid.
+    assert(IsValid());
 
     // This code uses a stack as a map. Lookup is accomplished by scanning downward from the top.
     // This relies on defs being near uses for efficiency.
@@ -916,6 +1015,12 @@ bool LIR::Range::CheckLIR(Compiler* compiler) const
         {
             if (unusedDefs.Index(i) == def)
             {
+                // REVIEW: isn't this the reverse? Shouldn't it be:
+                // for (; i < height - 1; i++) {
+                //    unusedDefs.IndexRef(i) = unusedDefs.Index(i + 1);
+                // }
+                // unusedDefs.Pop();
+                // --- better, just add an unusedDefs.Remove(i) member function.
                 for (; i > 0; i--)
                 {
                     unusedDefs.IndexRef(i) = unusedDefs.Index(i - 1);
@@ -1029,10 +1134,10 @@ LIR::Range LIR::AsRange(GenTree* firstNode, GenTree* lastNode)
 }
 
 //------------------------------------------------------------------------
-// LIR::SetTreeSeq: Given a newly created, unsequenced HIR tree, sequence
-// the tree (set gtNext/gtPrev pointers), and return a Range representing
-// the list of nodes. It is expected this will later be spliced into the
-// LIR graph afterwards.
+// LIR::SeqTree: Given a newly created, unsequenced HIR tree, set the evaluation
+// order (call gtSetEvalOrder) and sequence the tree (set gtNext/gtPrev pointers
+// by calling fgSetTreeSeq), and return a Range representing the list of nodes.
+// It is expected this will later be spliced into the LIR graph afterwards.
 //
 // Arguments:
 //    compiler - The Compiler context.
@@ -1040,8 +1145,14 @@ LIR::Range LIR::AsRange(GenTree* firstNode, GenTree* lastNode)
 //
 // Return Value: The newly constructed range.
 //
-LIR::Range LIR::SetTreeSeq(Compiler* compiler, GenTree* tree)
+// static
+LIR::Range LIR::SeqTree(Compiler* compiler, GenTree* tree)
 {
+    compiler->gtSetEvalOrder(tree);
     compiler->fgSetTreeSeq(tree);
+
+    // fgSetTreeSeq() sets the Compiler::fgTreeSeqBeg member to point at the
+    // first node in execution order of the sequenced tree. Use that to
+    // create a Range of the sequenced nodes.
     return AsRange(compiler->fgTreeSeqBeg, tree);
 }

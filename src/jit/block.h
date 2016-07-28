@@ -615,7 +615,7 @@ typedef unsigned weight_t;             // Type used to hold block and edge weigh
 
 
     GenTree*            bbTreeList; // the body of the block.
-    GenTree*            bbLastNode; // last LIR node in the body of the block.
+    GenTree*            bbLastNode; // last LIR node in the body of the block. // REVIEW: should we just have gtPrev links be circular, like statment links are?
     EntryState*         bbEntryState; // verifier tracked state of all entries in stack.
 
 #define NO_BASE_TMP     UINT_MAX    // base# to use when we have none

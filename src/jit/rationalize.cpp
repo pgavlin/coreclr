@@ -909,6 +909,7 @@ void Rationalizer::ValidateStatement(GenTree *tree, BasicBlock *block)
 // sanity checks that apply to all kinds of IR
 void Rationalizer::SanityCheck()
 {
+    // TODO: assert(!IsLIR());
     BasicBlock * block;
     foreach_block(comp, block)
     {
@@ -999,7 +1000,7 @@ void Rationalizer::RewriteAssignmentIntoStoreLcl(GenTreeOp* assignment)
 
 void Rationalizer::RewriteAssignment(LIR::Use& use)
 {
-    assert(use.IsValid());
+    assert(use.IsInitialized());
 
     GenTreeOp* assignment = use.Def()->AsOp();
     assert(assignment->OperGet() == GT_ASG);
@@ -1059,7 +1060,7 @@ void Rationalizer::RewriteAssignment(LIR::Use& use)
 
 void Rationalizer::RewriteAddress(LIR::Use& use)
 {
-    assert(use.IsValid());
+    assert(use.IsInitialized());
 
     GenTreeUnOp* address = use.Def()->AsUnOp();
     assert(address->OperGet() == GT_ADDR);

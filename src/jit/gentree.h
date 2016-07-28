@@ -853,9 +853,11 @@ public:
 
     #define GTF_STMT_CMPADD     0x80000000  // GT_STMT    -- added by compiler
     #define GTF_STMT_HAS_CSE    0x40000000  // GT_STMT    -- CSE def or use was subsituted
+    // TODO: remove GTF_STMT_TOP_LEVEL when LIR removes embedded statements
     #define GTF_STMT_TOP_LEVEL  0x20000000  // GT_STMT    -- Top-level statement - 
                                             //               true iff gtStmtList->gtPrev == nullptr
                                             //               True for all stmts when in FGOrderTree
+    // TODO: remove GTF_STMT_SKIP_LOWER when LIR is complete?
     #define GTF_STMT_SKIP_LOWER 0x10000000  // GT_STMT    -- Skip lowering if we already lowered an embedded stmt.
 
     //----------------------------------------------------------------
@@ -3816,16 +3818,19 @@ struct GenTreeStmt: public GenTree
     IL_OFFSET       gtStmtLastILoffs;// instr offset at end of stmt
 #endif
 
+    // TODO-LIR: remove function
     bool            gtStmtIsTopLevel()
     {
         return (gtFlags & GTF_STMT_TOP_LEVEL) != 0;
     }
 
+    // TODO-LIR: remove function
     bool            gtStmtIsEmbedded()
     {
         return !gtStmtIsTopLevel();
     }
 
+    // TODO-LIR: remove function
     // Return the next statement, if it is embedded, otherwise nullptr
     GenTreeStmt*    gtStmtNextIfEmbedded()
     {
@@ -3840,6 +3845,7 @@ struct GenTreeStmt: public GenTree
         }
     }
 
+    // TODO-LIR: remove function
     GenTree*    gtStmtNextTopLevelStmt()
     {
         GenTree* nextStmt = gtNext;

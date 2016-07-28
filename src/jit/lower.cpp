@@ -254,11 +254,12 @@ void Lowering::LowerNode(GenTree* node)
  *     Now, the way we morph a GT_SWITCH node into this lowered switch table node form is the following:
  *
  *    Input:     GT_SWITCH (inside a basic block whose Branch Type is BBJ_SWITCH)
- *                    |_____ expr (an arbitrary complex GT_NODE that represents the switch index)
+ *                    |_____ expr (an arbitrarily complex GT_NODE that represents the switch index)
  *
  *    This gets transformed into the following statements inside a BBJ_COND basic block (the target would be
  *    the default case of the switch in case the conditional is evaluated to true).
  *
+ *     ----- original block, transformed
  *     GT_ASG
  *        |_____ tempLocal (a new temporary local variable used to store the switch index)
  *        |_____ expr      (the index expression)
@@ -270,6 +271,7 @@ void Lowering::LowerNode(GenTree* node)
  *                                               that happens to be the highest index in the jump table).
  *                           |___ tempLocal     (The local variable were we stored the index expression).
  *
+ *     ----- new basic block
  *     GT_SWITCH_TABLE
  *        |_____ tempLocal
  *        |_____ jumpTable (a new jump table node that now LSRA can allocate registers for explicitly
@@ -297,14 +299,13 @@ void Lowering::LowerSwitch(GenTree* node)
 
     assert(node->gtOper == GT_SWITCH);
 
-    NYI("switch lowering in LIR");
-
     // The first step is to build the default case conditional construct that is
     // shared between both kinds of expansion of the switch node.
 
     // To avoid confusion, we'll alias m_block to originalSwitchBB
     // that represents the node we're morphing.
     BasicBlock* originalSwitchBB = m_block;
+    LIR::Range switchBBRange = LIR::AsRange(originalSwitchBB);
 
     // jumpCnt is the number of elements in the jump table array.
     // jumpTab is the actual pointer to the jump table array.
@@ -317,7 +318,7 @@ void Lowering::LowerSwitch(GenTree* node)
 #ifdef DEBUG
     {
         LIR::Use use;
-        assert(!m_blockRange.TryGetUse(node, &use));
+        assert(!switchBBRange.TryGetUse(node, &use));
     }
 #endif
 
@@ -360,8 +361,8 @@ void Lowering::LowerSwitch(GenTree* node)
         store->gtFlags = (rhs->gtFlags & GTF_COMMON_MASK);
         store->gtFlags |= GTF_VAR_DEF;
 
-        m_blockRange.InsertAfter(store, node);
-        m_blockRange.Remove(node);
+        switchBBRange.InsertAfter(store, node);
+        switchBBRange.Remove(node);
 
         return;
     }
@@ -370,9 +371,18 @@ void Lowering::LowerSwitch(GenTree* node)
 
     // Spill the argument to the switch node into a local so that it can be used later.
     unsigned blockWeight = originalSwitchBB->getBBWeight(comp);
-    LIR::Use use(m_blockRange, &(node->gtOp.gtOp1), node);
-    unsigned tempLclNum = use.ReplaceWithLclVar(comp, blockWeight);
 
+    LIR::Use use(switchBBRange, &(node->gtOp.gtOp1), node);
+    use.ReplaceWithLclVar(comp, blockWeight);
+
+    // GT_SWITCH(indexExpression) is now two statements:
+    //   1. a statement containing 'asg' (for temp = indexExpression) 
+    //   2. and a statement with GT_SWITCH(temp)
+
+    assert(node->gtOper == GT_SWITCH);
+    GenTreePtr temp = node->gtOp.gtOp1;
+    assert(temp->gtOper == GT_LCL_VAR);
+    unsigned tempLclNum = temp->gtLclVarCommon.gtLclNum;
     LclVarDsc* tempVarDsc = comp->lvaTable + tempLclNum;
     var_types tempLclType = tempVarDsc->TypeGet();
 
@@ -415,26 +425,24 @@ void Lowering::LowerSwitch(GenTree* node)
     GenTreePtr gtDefaultCaseJump = comp->gtNewOperNode(GT_JTRUE, TYP_VOID, gtDefaultCaseCond);
     gtDefaultCaseJump->gtFlags = node->gtFlags;
 
-    // LIR: don't create new statement!
-    comp->gtSetEvalOrder(gtDefaultCaseJump);
-    comp->fgSetStmtSeq(gtDefaultCaseJump);
-    GenTreePtr condStmt = comp->fgNewStmtFromTree(gtDefaultCaseJump, originalSwitchBB, comp->compCurStmt->gtStmt.gtStmtILoffsx);
+    LIR::Range condRange = LIR::SeqTree(comp, gtDefaultCaseJump);
+    switchBBRange.InsertAtEnd(condRange);
 
-#ifdef DEBUG
-    condStmt->gtStmt.gtStmtLastILoffs = comp->compCurStmt->gtStmt.gtStmtLastILoffs;
-#endif // DEBUG
-
-    comp->fgInsertStmtAfter(originalSwitchBB, comp->compCurStmt, condStmt);
-
-    // LIR: split block after node? Need to ensure no 
-    BasicBlock* afterDefaultCondBlock = comp->fgSplitBlockAfterStatement(originalSwitchBB, condStmt);
+    //TODO(btf): we can't use fgSplitBlockAfterStatement/condStmt -- no statements left.
+    // TODO-LIR: I really just want to use LastNode(), but that's private. 'EndExclusive' doesn't quite have the same
+    // ring to it, but gives the right answer.
+    BasicBlock* afterDefaultCondBlock = comp->fgSplitBlockAfterNode(originalSwitchBB, condRange.EndExclusive());
 
     // afterDefaultCondBlock is now the switch, and all the switch targets have it as a predecessor.
     // originalSwitchBB is now a BBJ_NONE, and there is a predecessor edge in afterDefaultCondBlock
     // representing the fall-through flow from originalSwitchBB.
     assert(originalSwitchBB->bbJumpKind == BBJ_NONE);
+    assert(originalSwitchBB->bbNext == afterDefaultCondBlock);
     assert(afterDefaultCondBlock->bbJumpKind == BBJ_SWITCH);
     assert(afterDefaultCondBlock->bbJumpSwt->bbsHasDefault);
+    assert(afterDefaultCondBlock->isEmpty()); // Nothing here yet.
+
+    // The GT_SWITCH code is still in originalSwitchBB (it will be removed later).
 
     // Turn originalSwitchBB into a BBJ_COND.
     originalSwitchBB->bbJumpKind = BBJ_COND;
@@ -508,6 +516,7 @@ void Lowering::LowerSwitch(GenTree* node)
         // we'll delete it.
         bool fUsedAfterDefaultCondBlock = false;
         BasicBlock* currentBlock = afterDefaultCondBlock;
+        LIR::Range currentBBRange = LIR::AsRange(currentBlock);
 
         // Walk to entries 0 to jumpCnt - 1. If a case target follows, ignore it and let it fall through.
         // If no case target follows, the last one doesn't need to be a compare/branch: it can be an
@@ -535,6 +544,7 @@ void Lowering::LowerSwitch(GenTree* node)
                 BasicBlock* newBlock = comp->fgNewBBafter(BBJ_NONE, currentBlock, true);
                 comp->fgAddRefPred(newBlock, currentBlock); // The fall-through predecessor.
                 currentBlock = newBlock;
+                currentBBRange = LIR::AsRange(currentBlock);
             }
             else
             {
@@ -578,8 +588,8 @@ void Lowering::LowerSwitch(GenTree* node)
                 tempVarDsc->incRefCnts(blockWeight, comp);
 
                 GenTreePtr gtCaseBranch = comp->gtNewOperNode(GT_JTRUE, TYP_VOID, gtCaseCond);
-                GenTreePtr gtCaseStmt = comp->fgNewStmtFromTree(gtCaseBranch, currentBlock);
-                comp->fgInsertStmtAtEnd(currentBlock, gtCaseStmt);
+                LIR::Range caseRange = LIR::SeqTree(comp, gtCaseBranch);
+                currentBBRange.InsertAtEnd(condRange);
             }
         }
 
@@ -630,12 +640,14 @@ void Lowering::LowerSwitch(GenTree* node)
         afterDefaultCondBlock->bbJumpSwt->removeDefault();
         comp->fgInvalidateSwitchDescMapEntry(afterDefaultCondBlock);
 
-        GenTreeStmt* stmt = comp->fgNewStmtFromTree(gtTableSwitch);
-        comp->fgInsertStmtAtEnd(afterDefaultCondBlock, stmt);
+        LIR::Range afterDefaultCondBBRange = LIR::AsRange(afterDefaultCondBlock);
+        LIR::Range tableSwitchRange = LIR::SeqTree(comp, gtTableSwitch);
+        afterDefaultCondBBRange.InsertAtEnd(tableSwitchRange);
     }
 
-    // Get rid of the original GT_SWITCH.
-    comp->fgRemoveStmt(originalSwitchBB, comp->compCurStmt, false);
+    // Get rid of the GT_SWITCH(temp).
+    switchBBRange.Remove(node->gtOp.gtOp1);
+    switchBBRange.Remove(node);
 }
 
 // NOTE: this method deliberately does not update the call arg table. It must only
@@ -1221,8 +1233,7 @@ void Lowering::LowerCall(GenTree* node)
     
     if (result != nullptr)
     {
-        comp->gtSetEvalOrder(result);
-        LIR::Range resultRange = LIR::SetTreeSeq(comp, result);
+        LIR::Range resultRange = LIR::SeqTree(comp, result);
 
         JITDUMP("results of lowering call:\n");
         DISPTREE(result);
@@ -1632,7 +1643,7 @@ void Lowering::LowerFastTailCall(GenTreeCall *call)
             assert(tmpType != TYP_UNDEF);
             GenTreeLclVar* local = new(comp, GT_LCL_VAR) GenTreeLclVar(GT_LCL_VAR, tmpType, callerArgLclNum, BAD_IL_OFFSET);
             GenTree* assignExpr = comp->gtNewTempAssign(tmpLclNum, local);
-            m_blockRange.InsertBefore(LIR::SetTreeSeq(comp, assignExpr), firstPutArgStk);
+            m_blockRange.InsertBefore(LIR::SeqTree(comp, assignExpr), firstPutArgStk);
         }
     }
 
@@ -1750,9 +1761,7 @@ GenTree* Lowering::LowerTailCallViaHelper(GenTreeCall* call, GenTree *callTarget
     else
     {
         assert(call->gtCallAddr == nullptr);
-
-        comp->gtSetEvalOrder(callTarget);
-        callTargetRange = LIR::SetTreeSeq(comp, callTarget);
+        callTargetRange = LIR::SeqTree(comp, callTarget);
     }
 
     fgArgTabEntry* argEntry;
@@ -2315,8 +2324,7 @@ void Lowering::InsertPInvokeMethodProlog()
     GenTree* insertionPoint = m_blockRange.FirstNonPhiOrCatchArgNode();
 
     comp->fgMorphTree(store);
-    comp->gtSetEvalOrder(store);
-    m_blockRange.InsertAfter(LIR::SetTreeSeq(comp, store), insertionPoint);
+    m_blockRange.InsertAfter(LIR::SeqTree(comp, store), insertionPoint);
     insertionPoint = store;
 
     DISPTREE(store);
@@ -2331,8 +2339,7 @@ void Lowering::InsertPInvokeMethodProlog()
                                                     callFrameInfo.offsetOfCallSiteSP);
     storeSP->gtOp1 = PhysReg(REG_SPBASE);
 
-    comp->gtSetEvalOrder(storeSP);
-    m_blockRange.InsertAfter(LIR::SetTreeSeq(comp, storeSP), insertionPoint);
+    m_blockRange.InsertAfter(LIR::SeqTree(comp, storeSP), insertionPoint);
     insertionPoint = storeSP;
 
     DISPTREE(storeSP);
@@ -2347,8 +2354,7 @@ void Lowering::InsertPInvokeMethodProlog()
                                                     callFrameInfo.offsetOfCalleeSavedFP);
     storeFP->gtOp1 = PhysReg(REG_FPBASE);
 
-    comp->gtSetEvalOrder(storeFP);
-    m_blockRange.InsertAfter(LIR::SetTreeSeq(comp, storeFP), insertionPoint);
+    m_blockRange.InsertAfter(LIR::SeqTree(comp, storeFP), insertionPoint);
     insertionPoint = storeFP;
 
     DISPTREE(storeFP);
@@ -2360,9 +2366,7 @@ void Lowering::InsertPInvokeMethodProlog()
         // Push a frame - if we are NOT in an IL stub, this is done right before the call
         // The init routine sets InlinedCallFrame's m_pNext, so we just set the thead's top-of-stack
         GenTree* frameUpd = CreateFrameLinkUpdate(PushFrame);
-
-        comp->gtSetEvalOrder(frameUpd);
-        m_blockRange.InsertAfter(LIR::SetTreeSeq(comp, frameUpd), insertionPoint);
+        m_blockRange.InsertAfter(LIR::SeqTree(comp, frameUpd), insertionPoint);
         DISPTREE(frameUpd);
     }
 }
@@ -2423,13 +2427,13 @@ void Lowering::InsertPInvokeMethodEpilog(BasicBlock *returnBB
     // Thread.offsetOfGcState = 0/1 
     // That is [tcb + offsetOfGcState] = 1
     GenTree* storeGCState = SetGCState(1);
-    m_blockRange.InsertBefore(LIR::SetTreeSeq(comp, storeGCState), insertionPoint);
+    m_blockRange.InsertBefore(LIR::SeqTree(comp, storeGCState), insertionPoint);
 
     if (comp->opts.eeFlags & CORJIT_FLG_IL_STUB)
     {
         // Pop the frame, in non-stubs we do this around each PInvoke call
         GenTree* frameUpd = CreateFrameLinkUpdate(PopFrame);
-        m_blockRange.InsertBefore(LIR::SetTreeSeq(comp, frameUpd), insertionPoint);
+        m_blockRange.InsertBefore(LIR::SeqTree(comp, frameUpd), insertionPoint);
     }
 }
 
@@ -2474,7 +2478,7 @@ void Lowering::InsertPInvokeCallProlog(GenTreeCall* call)
         GenTree* helperCall = comp->gtNewHelperCallNode(CORINFO_HELP_JIT_PINVOKE_BEGIN, TYP_VOID, 0, comp->gtNewArgList(frameAddr));
 
         comp->fgMorphTree(helperCall);
-        m_blockRange.InsertBefore(LIR::SetTreeSeq(comp, helperCall), insertBefore);
+        m_blockRange.InsertBefore(LIR::SeqTree(comp, helperCall), insertBefore);
         return;
     }
 #endif
@@ -2534,7 +2538,7 @@ void Lowering::InsertPInvokeCallProlog(GenTreeCall* call)
                           callFrameInfo.offsetOfCallTarget);
         store->gtOp1 = src;
 
-        m_blockRange.InsertBefore(LIR::SetTreeSeq(comp, store), insertBefore);
+        m_blockRange.InsertBefore(LIR::SeqTree(comp, store), insertBefore);
     }
 
 #ifdef _TARGET_X86_
@@ -2550,7 +2554,7 @@ void Lowering::InsertPInvokeCallProlog(GenTreeCall* call)
 
     storeCallSiteSP->gtOp1 = PhysReg(REG_SPBASE);
 
-    m_blockRange.InsertBefore(LIR::SetTreeSeq(comp, storeCallSiteSP), insertBefore);
+    m_blockRange.InsertBefore(LIR::SeqTree(comp, storeCallSiteSP), insertBefore);
 
 #endif
 
@@ -2569,7 +2573,7 @@ void Lowering::InsertPInvokeCallProlog(GenTreeCall* call)
     labelRef->gtType = TYP_I_IMPL;
     storeLab->gtOp1 = labelRef;
 
-    m_blockRange.InsertBefore(LIR::SetTreeSeq(comp, storeLab), insertBefore);
+    m_blockRange.InsertBefore(LIR::SeqTree(comp, storeLab), insertBefore);
 
     if (!(comp->opts.eeFlags & CORJIT_FLG_IL_STUB))
     {
@@ -2579,7 +2583,7 @@ void Lowering::InsertPInvokeCallProlog(GenTreeCall* call)
         //
         // Stubs do this once per stub, not once per call.
         GenTree* frameUpd = CreateFrameLinkUpdate(PushFrame);
-        m_blockRange.InsertBefore(LIR::SetTreeSeq(comp, frameUpd), insertBefore);
+        m_blockRange.InsertBefore(LIR::SeqTree(comp, frameUpd), insertBefore);
     }
 
     // IMPORTANT **** This instruction must come last!!! ****
@@ -2588,7 +2592,7 @@ void Lowering::InsertPInvokeCallProlog(GenTreeCall* call)
     //  [tcb + offsetOfGcState] = 0
 
     GenTree* storeGCState = SetGCState(0);
-    m_blockRange.InsertBefore(LIR::SetTreeSeq(comp, storeGCState), insertBefore);
+    m_blockRange.InsertBefore(LIR::SeqTree(comp, storeGCState), insertBefore);
 }
 
 
@@ -2619,7 +2623,7 @@ void Lowering::InsertPInvokeCallEpilog(GenTreeCall* call)
         GenTree* helperCall = comp->gtNewHelperCallNode(CORINFO_HELP_JIT_PINVOKE_END, TYP_VOID, 0, comp->gtNewArgList(frameAddr));
 
         comp->fgMorphTree(helperCall);
-        m_blockRange.InsertAfter(LIR::SetTreeSeq(comp, helperCall), call);
+        m_blockRange.InsertAfter(LIR::SeqTree(comp, helperCall), call);
         return;
     }
 #endif
@@ -2628,18 +2632,18 @@ void Lowering::InsertPInvokeCallEpilog(GenTreeCall* call)
     GenTree* insertionPoint = call;
 
     GenTree* tree = SetGCState(1);
-    m_blockRange.InsertAfter(LIR::SetTreeSeq(comp, tree), insertionPoint);
+    m_blockRange.InsertAfter(LIR::SeqTree(comp, tree), insertionPoint);
     insertionPoint = tree;
 
     tree = CreateReturnTrapSeq();
-    m_blockRange.InsertAfter(LIR::SetTreeSeq(comp, tree), insertionPoint);
+    m_blockRange.InsertAfter(LIR::SeqTree(comp, tree), insertionPoint);
     insertionPoint = tree;
 
     // Pop the frame if necessasry
     if (!(comp->opts.eeFlags & CORJIT_FLG_IL_STUB))
     {
         tree = CreateFrameLinkUpdate(PopFrame);
-        m_blockRange.InsertAfter(LIR::SetTreeSeq(comp, tree), insertionPoint);
+        m_blockRange.InsertAfter(LIR::SeqTree(comp, tree), insertionPoint);
     }
 }
 
@@ -3360,8 +3364,7 @@ void Lowering::LowerSignedDivOrMod(GenTreePtr node)
     m_blockRange.Remove(dividend);
 
     // linearize and insert the new tree before the original divMod node
-    comp->gtSetEvalOrder(newDivMod);
-    LIR::Range range = LIR::SetTreeSeq(comp, newDivMod);
+    LIR::Range range = LIR::SeqTree(comp, newDivMod);
     m_blockRange.InsertBefore(range, divMod);
     m_blockRange.Remove(divMod);
 

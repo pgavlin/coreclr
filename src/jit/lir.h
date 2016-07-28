@@ -56,7 +56,8 @@ public:
         GenTree* Def() const;
         GenTree* User() const;
 
-        bool IsValid() const;
+        bool IsInitialized() const;
+        void AssertIsValid() const;
         bool IsDummyUse() const;
 
         void ReplaceWith(Compiler* compiler, GenTree* replacement);
@@ -132,6 +133,50 @@ public:
             }
         };
 
+        class ReverseIterator
+        {
+            friend class Range;
+
+            GenTree* m_node;
+
+            ReverseIterator(GenTree* begin)
+                : m_node(begin)
+            {
+            }
+
+        public:
+            ReverseIterator()
+                : m_node(nullptr)
+            {
+            }
+
+            inline GenTree* operator*()
+            {
+                return m_node;
+            }
+
+            inline GenTree* operator->()
+            {
+                return m_node;
+            }
+
+            inline bool operator==(const ReverseIterator& other) const
+            {
+                return m_node == other.m_node;
+            }
+
+            inline bool operator!=(const ReverseIterator& other) const
+            {
+                return m_node != other.m_node;
+            }
+
+            inline ReverseIterator& operator++()
+            {
+                m_node = (m_node == nullptr) ? nullptr : m_node->gtPrev;
+                return *this;
+            }
+        };
+
         Range();
 
         GenTree* Begin() const;
@@ -140,6 +185,9 @@ public:
 
         Iterator begin() const;
         Iterator end() const;
+
+        ReverseIterator rbegin() const;
+        ReverseIterator rend() const;
 
         bool IsValid() const;
         bool IsEmpty() const;
@@ -153,6 +201,12 @@ public:
 
         void InsertBefore(const Range& range, GenTree* insertionPoint);
         void InsertAfter(const Range& range, GenTree* insertionPoint);
+
+        void InsertAtBeginning(GenTree* node);
+        void InsertAtEnd(GenTree* node);
+
+        void InsertAtBeginning(const Range& range);
+        void InsertAtEnd(const Range& range);
 
         void Remove(GenTree* node);
         void Remove(const Range& range);
@@ -170,7 +224,7 @@ public:
 public:
     static Range EmptyRange();
     static Range AsRange(GenTree* firstNode, GenTree* lastNode);
-    static Range SetTreeSeq(Compiler* compiler, GenTree* tree);
+    static Range SeqTree(Compiler* compiler, GenTree* tree);
 
     //------------------------------------------------------------------------
     // LIR::AsRange: Constructs and returns an LIR::Range value given a value

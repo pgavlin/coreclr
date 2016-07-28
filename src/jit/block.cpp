@@ -500,6 +500,7 @@ void BasicBlock::CloneBlockState(Compiler* compiler, BasicBlock* to, const Basic
 // LIR helpers
 bool BasicBlock::IsLIR()
 {
+    // TODO(btf): why can't you have empty LIR blocks?
     return bbTreeList != nullptr && !bbTreeList->IsStatement();
 }
 
