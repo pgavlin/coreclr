@@ -1256,7 +1256,7 @@ public:
     static
     bool            OperIsIndir(genTreeOps gtOper)
     {
-        return  gtOper == GT_IND || gtOper == GT_STOREIND || gtOper == GT_NULLCHECK;
+        return  gtOper == GT_IND || gtOper == GT_STOREIND || gtOper == GT_NULLCHECK || gtOper == GT_OBJ;
     }
 
     bool            OperIsIndir() const
@@ -2479,8 +2479,12 @@ public:
         Reset();
     }
 
-    // Initialize the return type descriptor given its type handle
-    void InitializeReturnType(Compiler* comp, CORINFO_CLASS_HANDLE retClsHnd);
+    // Initialize the Return Type Descriptor for a method that returns a struct type
+    void InitializeStructReturnType(Compiler* comp, CORINFO_CLASS_HANDLE retClsHnd);
+
+    // Initialize the Return Type Descriptor for a method that returns a TYP_LONG
+    // Only needed for X86 
+    void InitializeLongReturnType(Compiler* comp);
 
     // Reset type descriptor to defaults
     void Reset()
@@ -2899,14 +2903,13 @@ struct GenTreeCall final : public GenTree
     //     This is implemented only for x64 Unix and yet to be implemented for
     //     other multi-reg return target arch (arm64/arm32/x86).
     //
-    // TODO-ARM: Implement this routine for Arm64 and Arm32
     bool HasMultiRegRetVal() const 
-    { 
-#ifdef FEATURE_UNIX_AMD64_STRUCT_PASSING
-        return varTypeIsStruct(gtType) && !HasRetBufArg(); 
-#elif defined(_TARGET_X86_) && !defined(LEGACY_BACKEND)
+    {
+#if defined(_TARGET_X86_) && !defined(LEGACY_BACKEND)
         // LEGACY_BACKEND does not use multi reg returns for calls with long return types
         return varTypeIsLong(gtType);
+#elif FEATURE_MULTIREG_RET
+        return varTypeIsStruct(gtType) && !HasRetBufArg();
 #else
         return false;
 #endif
@@ -3387,27 +3390,6 @@ protected:
 #endif // DEBUGGABLE_GENTREE
 };
 
-// gtObj  -- 'object' (GT_OBJ). */
-
-struct GenTreeObj: public GenTreeUnOp
-{
-    // The address of the block.
-    GenTreePtr&     Addr()          { return gtOp1; }
-
-    CORINFO_CLASS_HANDLE gtClass;   // the class of the object
-
-    GenTreeObj(var_types type, GenTreePtr addr, CORINFO_CLASS_HANDLE cls) : 
-        GenTreeUnOp(GT_OBJ, type, addr),
-        gtClass(cls)
-        {
-            gtFlags |= GTF_GLOB_REF; // An Obj is always a global reference.
-        }
-
-#if DEBUGGABLE_GENTREE
-    GenTreeObj() : GenTreeUnOp() {}
-#endif
-};
-
 // Represents a CpObj MSIL Node.
 struct GenTreeCpObj : public GenTreeBlkOp
 {
@@ -3613,6 +3595,25 @@ protected:
     friend GenTree;
     // Used only for GenTree::GetVtableForOper()
     GenTreeIndir() : GenTreeOp() {}
+#endif
+};
+
+// gtObj  -- 'object' (GT_OBJ). */
+
+struct GenTreeObj: public GenTreeIndir
+{
+    CORINFO_CLASS_HANDLE gtClass;   // the class of the object
+
+    GenTreeObj(var_types type, GenTreePtr addr, CORINFO_CLASS_HANDLE cls) : 
+        GenTreeIndir(GT_OBJ, type, addr, nullptr),
+        gtClass(cls)
+        {
+            // By default, an OBJ is assumed to be a global reference.
+            gtFlags |= GTF_GLOB_REF;
+        }
+
+#if DEBUGGABLE_GENTREE
+    GenTreeObj() : GenTreeIndir() {}
 #endif
 };
 

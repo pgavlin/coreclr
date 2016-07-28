@@ -657,10 +657,6 @@ bool   Compiler::VarTypeIsMultiByteAndCanEnreg(var_types type,
     if (varTypeIsStruct(type))
     {
         size = info.compCompHnd->getClassSize(typeClass);
-#ifdef FEATURE_UNIX_AMD64_STRUCT_PASSING
-        // Account for the classification of the struct.
-        result = IsRegisterPassable(typeClass);
-#else // !FEATURE_UNIX_AMD64_STRUCT_PASSING
         if (forReturn)
         {
             structPassingKind howToReturnStruct;
@@ -675,7 +671,6 @@ bool   Compiler::VarTypeIsMultiByteAndCanEnreg(var_types type,
         {
             result = true;
         }
-#endif // !FEATURE_UNIX_AMD64_STRUCT_PASSING
     }
     else
     {
@@ -752,27 +747,27 @@ unsigned __int8     getU1LittleEndian(const BYTE * ptr)
 
 inline
 unsigned __int16    getU2LittleEndian(const BYTE * ptr)
-{ return *(UNALIGNED unsigned __int16 *)ptr; }
+{ return GET_UNALIGNED_VAL16(ptr); }
 
 inline
 unsigned __int32    getU4LittleEndian(const BYTE * ptr)
-{ return *(UNALIGNED unsigned __int32*)ptr; }
+{ return GET_UNALIGNED_VAL32(ptr); }
 
 inline
   signed __int8     getI1LittleEndian(const BYTE * ptr)
-{ return * (UNALIGNED signed __int8 *)ptr; }
+{ return *(UNALIGNED signed __int8 *)ptr; }
 
 inline
   signed __int16    getI2LittleEndian(const BYTE * ptr)
-{ return * (UNALIGNED signed __int16 *)ptr; }
+{ return GET_UNALIGNED_VAL16(ptr); }
 
 inline
   signed __int32    getI4LittleEndian(const BYTE * ptr)
-{ return *(UNALIGNED signed __int32*)ptr; }
+{ return GET_UNALIGNED_VAL32(ptr); }
 
 inline
   signed __int64    getI8LittleEndian(const BYTE * ptr)
-{ return *(UNALIGNED signed __int64*)ptr; }
+{ return GET_UNALIGNED_VAL64(ptr); }
 
 inline
 float               getR4LittleEndian(const BYTE * ptr)
@@ -1517,10 +1512,13 @@ void                GenTree::ChangeOperUnchecked(genTreeOps oper)
 inline
 bool                GenTree::IsVarAddr() const
 {
-    if (gtOper == GT_ADDR && (gtFlags & GTF_ADDR_ONSTACK))
+    if (gtOper == GT_ADDR)
     {
-        assert((gtType == TYP_BYREF) || (gtType == TYP_I_IMPL));
-        return true;
+        if (gtFlags & GTF_ADDR_ONSTACK)
+        {
+            assert((gtType == TYP_BYREF) || (gtType == TYP_I_IMPL));
+            return true;
+        }
     }
     return false;
 }
@@ -3476,8 +3474,9 @@ void                Compiler::optAssertionReset(AssertionIndex limit)
 
     while (optAssertionCount > limit)
     {
-        AssertionIndex index  = optAssertionCount--;
+        AssertionIndex index  = optAssertionCount;
         AssertionDsc* curAssertion = optGetAssertion(index);
+        optAssertionCount--;
         unsigned lclNum = curAssertion->op1.lcl.lclNum;
         assert(lclNum < lvaTableCnt);
         BitVecOps::RemoveElemD(apTraits, GetAssertionDep(lclNum), index - 1);

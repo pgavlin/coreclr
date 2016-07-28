@@ -178,7 +178,7 @@ GenTree* DecomposeLongs::DecomposeNode(LIR::Use& use)
         break;
 
     case GT_IND:
-        NYI("GT_IND of TYP_LONG");
+        DecomposeInd(use);
         break;
 
     case GT_NOT:
@@ -764,6 +764,41 @@ GenTree* DecomposeLongs::DecomposeStoreInd(LIR::Use& use)
     // (editor brace matching compensation: }}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}})
 }
 
+
+//------------------------------------------------------------------------
+// DecomposeInd: Decompose GT_IND.
+//
+// Arguments:
+//    tree - the tree to decompose
+//
+// Return Value:
+//    None.
+//
+void DecomposeLongs::DecomposeInd(LIR::Use& use)
+{
+    GenTree* indLow = use.Def();
+
+    LIR::Use address(m_range, &indLow->gtOp.gtOp1, indLow);
+    address.ReplaceWithLclVar(m_compiler, m_block->getBBWeight(m_compiler));
+    JITDUMP("[DecomposeInd]: Saving addr tree to a temp var:\n");
+    DISPTREE(address.Def());
+
+    // Change the type of lower ind.
+    indLow->gtType = TYP_INT;
+
+    // Create tree of ind(addr+4)
+    GenTreePtr addrBase = indLow->gtGetOp1();
+    GenTreePtr addrBaseHigh = new(m_compiler, GT_LCL_VAR) GenTreeLclVar(GT_LCL_VAR,
+        addrBase->TypeGet(), addrBase->AsLclVarCommon()->GetLclNum(), BAD_IL_OFFSET);
+    GenTreePtr addrHigh = new(m_compiler, GT_LEA) GenTreeAddrMode(TYP_REF, addrBaseHigh, nullptr, 0, genTypeSize(TYP_INT));
+    GenTreePtr indHigh = new (m_compiler, GT_IND) GenTreeIndir(GT_IND, TYP_INT, addrHigh, nullptr);
+    
+    // Insert the nodes into the block
+    m_range.InsertAfter(addrHigh, addrBaseHigh);
+    m_range.InsertAfter(indHigh, addrHigh);
+
+    FinalizeDecomposition(use, indLow, indHigh);
+}
 
 //------------------------------------------------------------------------
 // DecomposeNot: Decompose GT_NOT.

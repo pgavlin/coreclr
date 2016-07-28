@@ -681,27 +681,6 @@ public:
         return (unsigned)(roundUp(lvExactSize, TARGET_POINTER_SIZE));
     }
 
-    bool                lvIsMultiregStruct()
-    {
-#if FEATURE_MULTIREG_ARGS_OR_RET
-        if (TypeGet() == TYP_STRUCT)
-        {
-            if (lvIsHfa() && (lvHfaSlots() > 1))
-            {
-                return true;
-            }
-#if defined(_TARGET_ARM64_)
-            // lvSize() performs a roundUp operation so it only returns multiples of TARGET_POINTER_SIZE
-            else if (lvSize() == (2 * TARGET_POINTER_SIZE))
-            {
-                return true;
-            }
-#endif // _TARGET_ARM64_
-        }
-#endif  // FEATURE_MULTIREG_ARGS_OR_RET
-        return false;
-    }
-
 #if defined(DEBUGGING_SUPPORT) || defined(DEBUG)
     unsigned            lvSlotNum;      // original slot # (if remapped)
 #endif
@@ -1140,7 +1119,7 @@ struct fgArgTabEntry
     bool           processed    :1; // True when we have decided the evaluation order for this argument in the gtCallLateArgs 
     bool           isHfaRegArg  :1; // True when the argument is passed as a HFA in FP registers.
     bool           isBackFilled :1; // True when the argument fills a register slot skipped due to alignment requirements of previous arguments.
-    bool           isNonStandard:1; // True if it is an arg that is passed in a reg other than a standard arg reg
+    bool           isNonStandard:1; // True if it is an arg that is passed in a reg other than a standard arg reg, or is forced to be on the stack despite its arg list position.
 
 #if defined(FEATURE_UNIX_AMD64_STRUCT_PASSING)
     bool           isStruct     :1; // True if this is a struct arg
@@ -1279,7 +1258,6 @@ public:
     unsigned            GetNextSlotNum() { return nextSlotNum; }
     bool                HasRegArgs()     { return hasRegArgs; } 
     bool                HasStackArgs()   { return hasStackArgs; }
-
 };
 
 
@@ -1455,23 +1433,17 @@ public:
     // floating-point registers instead of the general purpose registers.
     //
 
-    bool                            IsHfa(CORINFO_CLASS_HANDLE hClass);
-    bool                            IsHfa(GenTreePtr tree);
+    bool           IsHfa(CORINFO_CLASS_HANDLE hClass);
+    bool           IsHfa(GenTreePtr tree);
 
-    var_types                       GetHfaType(GenTreePtr tree);
-    unsigned                        GetHfaCount(GenTreePtr tree);
+    var_types      GetHfaType(GenTreePtr tree);
+    unsigned       GetHfaCount(GenTreePtr tree);
 
-    var_types                       GetHfaType(CORINFO_CLASS_HANDLE hClass);
-    unsigned                        GetHfaCount(CORINFO_CLASS_HANDLE hClass);
+    var_types      GetHfaType(CORINFO_CLASS_HANDLE hClass);
+    unsigned       GetHfaCount(CORINFO_CLASS_HANDLE hClass);
 
-    //-------------------------------------------------------------------------
-    // The following is used for struct passing on System V system.
-    //
-#ifdef FEATURE_UNIX_AMD64_STRUCT_PASSING
-    bool                            IsRegisterPassable(CORINFO_CLASS_HANDLE hClass);
-    bool                            IsRegisterPassable(GenTreePtr tree);
-    bool                            IsMultiRegReturnedType(CORINFO_CLASS_HANDLE hClass);
-#endif // FEATURE_UNIX_AMD64_STRUCT_PASSING
+    bool           IsMultiRegPassedType  (CORINFO_CLASS_HANDLE hClass);
+    bool           IsMultiRegReturnedType(CORINFO_CLASS_HANDLE hClass);
 
     //-------------------------------------------------------------------------
     // The following is used for validating format of EH table
@@ -1926,8 +1898,7 @@ public:
     bool                    gtArgIsThisPtr    (fgArgTabEntryPtr argEntry);
 
     GenTreePtr              gtNewAssignNode (GenTreePtr     dst,
-                                             GenTreePtr     src
-                                             DEBUGARG(bool isPhiDefn = false));
+                                             GenTreePtr     src);
 
     GenTreePtr              gtNewTempAssign (unsigned       tmp,
                                              GenTreePtr     val);
@@ -2006,12 +1977,16 @@ public:
     GenTreePtr              gtWalkOpEffectiveVal(GenTreePtr op);
 #endif
 
-    void                    gtPrepareCost   (GenTree *      tree);
-    bool                    gtIsLikelyRegVar(GenTree *      tree);
+    void                    gtPrepareCost   (GenTree*       tree);
+    bool                    gtIsLikelyRegVar(GenTree*       tree);
 
     unsigned                gtSetEvalOrderAndRestoreFPstkLevel(GenTree *      tree);
 
-    unsigned                gtSetEvalOrder  (GenTree *      tree);
+    // Returns true iff the secondNode can be swapped with firstNode.
+    bool                    gtCanSwapOrder  (GenTree*       firstNode,
+                                             GenTree*       secondNode);
+
+    unsigned                gtSetEvalOrder  (GenTree*       tree);
 
 #if FEATURE_STACK_FP_X87
     bool                    gtFPstLvlRedo;
@@ -2546,6 +2521,9 @@ public :
         return false;
     }
 
+    // Returns true if this local var is a multireg struct
+    bool                 lvaIsMultiregStruct(LclVarDsc*   varDsc);
+
     // If the class is a TYP_STRUCT, get/set a class handle describing it
 
     CORINFO_CLASS_HANDLE lvaGetStruct       (unsigned varNum);
@@ -2764,14 +2742,13 @@ protected :
 
     bool                impMethodInfo_hasRetBuffArg(CORINFO_METHOD_INFO * methInfo);
 
-    GenTreePtr          impFixupCallStructReturn(GenTreePtr           call,
-                                                 CORINFO_CLASS_HANDLE retClsHnd);
+    GenTreePtr          impFixupCallStructReturn(GenTreePtr            call,
+                                                 CORINFO_CLASS_HANDLE  retClsHnd);
 
-    GenTreePtr          impInitCallReturnTypeDesc(GenTreePtr           call,
-                                                  CORINFO_CLASS_HANDLE retClsHnd);
+    GenTreePtr          impInitCallLongReturn   (GenTreePtr            call);
 
-    GenTreePtr          impFixupStructReturnType(GenTreePtr       op,
-                                                 CORINFO_CLASS_HANDLE retClsHnd);
+    GenTreePtr          impFixupStructReturnType(GenTreePtr            op,
+                                                 CORINFO_CLASS_HANDLE  retClsHnd);
 
 #ifdef DEBUG
     var_types           impImportJitTestLabelMark(int numArgs);
@@ -4763,11 +4740,11 @@ private:
     void                fgInsertInlineeBlocks (InlineInfo* pInlineInfo);
     GenTreePtr          fgInlinePrependStatements(InlineInfo* inlineInfo);
 
-#if defined(FEATURE_HFA) || defined(FEATURE_UNIX_AMD64_STRUCT_PASSING)
+#if FEATURE_MULTIREG_RET
     GenTreePtr          fgGetStructAsStructPtr(GenTreePtr tree);
     GenTreePtr          fgAssignStructInlineeToVar(GenTreePtr child, CORINFO_CLASS_HANDLE retClsHnd);
     void                fgAttachStructInlineeToAsg(GenTreePtr tree, GenTreePtr child, CORINFO_CLASS_HANDLE retClsHnd);
-#endif // defined(FEATURE_HFA) || defined(FEATURE_UNIX_AMD64_STRUCT_PASSING)
+#endif // FEATURE_MULTIREG_RET
 
     static fgWalkPreFn  fgUpdateInlineReturnExpressionPlaceHolder;
 
@@ -4779,7 +4756,7 @@ private:
     fgWalkResult        fgMorphStructField(GenTreePtr tree, fgWalkData *fgWalkPre);
     fgWalkResult        fgMorphLocalField(GenTreePtr tree, fgWalkData *fgWalkPre);
     void                fgMarkImplicitByRefArgs();
-    bool                fgMorphImplicitByRefArgs(GenTreePtr tree, fgWalkData *fgWalkPre);
+    bool                fgMorphImplicitByRefArgs(GenTree** pTree, fgWalkData *fgWalkPre);
     static fgWalkPreFn  fgMarkAddrTakenLocalsPreCB;
     static fgWalkPostFn fgMarkAddrTakenLocalsPostCB;
     void                fgMarkAddressExposedLocals();
@@ -5412,8 +5389,9 @@ protected :
     //
     void                optCSE_GetMaskData (GenTreePtr tree, optCSE_MaskData* pMaskData);
 
-    // Given a binary tree node return true if it is safe to swap the order of evaluation for op1 and op2
-    bool                optCSE_canSwap (GenTreePtr tree);
+    // Given a binary tree node return true if it is safe to swap the order of evaluation for op1 and op2.
+    bool                optCSE_canSwap(GenTree* firstNode, GenTree* secondNode);
+    bool                optCSE_canSwap(GenTree* tree);
 
     static fgWalkPostFn optPropagateNonCSE;
     static fgWalkPreFn  optHasNonCSEChild;
@@ -5547,7 +5525,7 @@ public:
     };
 
 #define OMF_HAS_NEWARRAY    0x00000001  // Method contains 'new' of an array
-#define OMF_HAS_NEWOBJ      0x00800002  // Method contains 'new' of an object type. 
+#define OMF_HAS_NEWOBJ      0x00000002  // Method contains 'new' of an object type.
 #define OMF_HAS_ARRAYREF    0x00000004  // Method contains array element loads or stores.
 #define OMF_HAS_VTABLEREF   0x00000008  // Method contains method table reference.
 
@@ -5564,8 +5542,6 @@ public:
         OPK_OBJ_GETTYPE
     };
 
-    bool impHasArrayRef;
-
     bool       gtIsVtableRef(GenTreePtr tree);
     GenTreePtr getArrayLengthFromAllocation(GenTreePtr tree);
     GenTreePtr getObjectHandleNodeFromAllocation(GenTreePtr tree);
@@ -5575,7 +5551,6 @@ public:
     bool       optDoEarlyPropForBlock(BasicBlock* block);
     bool       optDoEarlyPropForFunc();
     void       optEarlyProp();
-
 
 #if ASSERTION_PROP
     /**************************************************************************
@@ -5592,7 +5567,8 @@ public:
                             OAK_EQUAL,
                             OAK_NOT_EQUAL, 
                             OAK_SUBRANGE,
-                            OAK_NO_THROW };
+                            OAK_NO_THROW,
+                            OAK_COUNT };
 
     enum optOp1Kind       { O1K_INVALID,
                             O1K_LCLVAR,
@@ -5601,7 +5577,8 @@ public:
                             O1K_ARRLEN_LOOP_BND,
                             O1K_CONSTANT_LOOP_BND,
                             O1K_EXACT_TYPE,
-                            O1K_SUBTYPE };
+                            O1K_SUBTYPE,
+                            O1K_COUNT };
 
     enum optOp2Kind       { O2K_INVALID,
                             O2K_LCLVAR_COPY,
@@ -5610,7 +5587,8 @@ public:
                             O2K_CONST_LONG,
                             O2K_CONST_DOUBLE,
                             O2K_ARR_LEN,
-                            O2K_SUBRANGE };
+                            O2K_SUBRANGE,
+                            O2K_COUNT };
     struct AssertionDsc
     {
         optAssertionKind        assertionKind;
@@ -5786,6 +5764,10 @@ public:
             case O2K_INVALID:
                 // we will return false
                 break;
+
+            default:
+                assert(!"Unexpected value for op2.kind in AssertionDsc.");
+                break;
             }
             return false;
         }
@@ -5924,6 +5906,7 @@ public :
 
 #ifdef DEBUG
     void optPrintAssertion(AssertionDsc*  newAssertion, AssertionIndex assertionIndex=0);
+    void optDebugCheckAssertion(AssertionDsc* assertion);
     void optDebugCheckAssertions(AssertionIndex AssertionIndex);
 #endif
     void optAddCopies();
@@ -8055,22 +8038,19 @@ public :
     bool                compMethodReturnsMultiRegRetType() 
     {       
 #if FEATURE_MULTIREG_RET 
-
-#if (defined(FEATURE_UNIX_AMD64_STRUCT_PASSING) || defined(_TARGET_ARM_))
-        // Methods returning a struct in two registers is considered having a return value of TYP_STRUCT.
+#if   defined(_TARGET_X86_)
+        // On x86 only 64-bit longs are returned in multiple registers
+        return varTypeIsLong(info.compRetNativeType);
+#else // targets: X64-UNIX, ARM64 or ARM32
+        // On all other targets that support multireg return values:
+        // Methods returning a struct in multiple registers have a return value of TYP_STRUCT.
         // Such method's compRetNativeType is TYP_STRUCT without a hidden RetBufArg
         return varTypeIsStruct(info.compRetNativeType) && (info.compRetBuffArg == BAD_VAR_NUM);
-#elif defined(_TARGET_X86_)
-        // Longs are returned in two registers on x86
-        return varTypeIsLong(info.compRetNativeType);
-#else
-        unreached();
-#endif
-
-#else
+#endif // TARGET_XXX
+#else // not FEATURE_MULTIREG_RET
+        // For this architecture there are no multireg returns
         return false;
-#endif // FEATURE_MULTIREG_RET
-
+#endif // FEATURE_MULTIREG_RET 
     }
 
 #if FEATURE_MULTIREG_ARGS
