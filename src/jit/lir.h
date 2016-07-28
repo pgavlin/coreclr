@@ -66,10 +66,57 @@ public:
         GenTree*& LastNode() const;
 
     public:
+        class Iterator
+        {
+            friend class Range;
+
+            GenTree* m_node;
+
+            Iterator(GenTree* begin)
+                : m_node(begin)
+            {
+            }
+
+        public:
+            Iterator()
+                : m_node(nullptr)
+            {
+            }
+
+            inline GenTree* operator*()
+            {
+                return m_node;
+            }
+
+            inline GenTree* operator->()
+            {
+                return m_node;
+            }
+
+            inline bool operator==(const Iterator& other) const
+            {
+                return m_node == other.m_node;
+            }
+
+            inline bool operator!=(const Iterator& other) const
+            {
+                return m_node != other.m_node;
+            }
+
+            inline Iterator& operator++()
+            {
+                m_node = (m_node == nullptr) ? nullptr : m_node->gtNext;
+                return *this;
+            }
+        };
+
         Range();
 
         GenTree* Begin() const;
         GenTree* End() const;
+
+        Iterator begin() const;
+        Iterator end() const;
 
         bool IsValid() const;
         bool IsEmpty() const;

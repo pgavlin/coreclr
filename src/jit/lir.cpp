@@ -387,6 +387,25 @@ GenTree* LIR::Range::End() const
 }
 
 //------------------------------------------------------------------------
+// LIR::Range::begin: Returns an iterator positioned at the first node in
+//                    the range.
+//
+LIR::Range::Iterator LIR::Range::begin() const
+{
+    return Iterator(Begin());
+}
+
+//------------------------------------------------------------------------
+// LIR::Range::end: Returns an iterator positioned at the last node in the
+//                  range.
+//
+LIR::Range::Iterator LIR::Range::end() const
+{
+    return Iterator(End());
+}
+
+
+//------------------------------------------------------------------------
 // LIR::Range::FirstNonPhiNode: Returns the first non-phi node in the
 //                              range.
 //
@@ -394,8 +413,7 @@ GenTree* LIR::Range::FirstNonPhiNode() const
 {
     assert(IsValid());
 
-    GenTree* end = End();
-    for (GenTree* node = Begin(); node != end; node = node->gtNext)
+    for (GenTree* node : *this)
     {
         if ((node->OperGet() != GT_PHI_ARG) && (node->OperGet() != GT_PHI) && !node->IsPhiDefn())
         {
@@ -403,7 +421,7 @@ GenTree* LIR::Range::FirstNonPhiNode() const
         }
     }
 
-    return end;
+    return End();
 }
 
 //------------------------------------------------------------------------
@@ -545,7 +563,7 @@ bool LIR::Range::TryGetUse(GenTree* node, Use* use)
     // Don't bother looking for uses of nodes that are not values.
     if (node->IsValue())
     {
-        for (GenTree* n = node->gtNext, *end = End(); n != end; n = n->gtNext)
+        for (GenTree* n : LIR::AsRange(node->gtNext, End()))
         {
             GenTree** edge;
             if (n->TryGetUse(node, &edge))
@@ -576,7 +594,7 @@ bool LIR::Range::ContainsNode(GenTree* node) const
 {
     assert(node != nullptr);
 
-    for (GenTree* n = Begin(), *end = End(); n != end; n = n->gtNext)
+    for (GenTree* n : *this)
     {
         if (n == node)
         {
@@ -645,7 +663,7 @@ bool LIR::Range::CheckLIR(Compiler* compiler) const
 
     bool pastPhis = false;
     GenTree* prev = nullptr;
-    for (GenTree* node = Begin(), *end = End(); node != end; prev = node, node = node->gtNext)
+    for (Iterator node = begin(), end = this->end(); node != end; prev = *node, ++node)
     {
         // Verify that the node is allowed in LIR.
         assert(node->IsLIR());
@@ -688,7 +706,7 @@ bool LIR::Range::CheckLIR(Compiler* compiler) const
             if (!foundDef)
             {
                 // First, scan backwards and look for a preceding use.
-                for (GenTree* prev = node; prev != nullptr; prev = prev->gtPrev)
+                for (GenTree* prev = *node; prev != nullptr; prev = prev->gtPrev)
                 {
                     // TODO: dump the users and the def
                     GenTree** earlierUse;
@@ -711,7 +729,7 @@ bool LIR::Range::CheckLIR(Compiler* compiler) const
             }
         }
 
-        recordDef(node);
+        recordDef(*node);
     }
 
     assert(prev == LastNode());

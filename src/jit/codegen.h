@@ -163,6 +163,7 @@ private:
     void                genGenerateStackProbe();
 #endif
 
+#ifdef LEGACY_BACKEND
     regMaskTP           genNewLiveRegMask   (GenTreePtr first, GenTreePtr second);
 
     // During codegen, determine the LiveSet after tree.
@@ -170,6 +171,7 @@ private:
     // compCurLifeTree are being maintained, and tree must occur in the current
     // statement.
     VARSET_VALRET_TP    genUpdateLiveSetForward(GenTreePtr tree);
+#endif
 
     //-------------------------------------------------------------------------
 
