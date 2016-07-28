@@ -6771,13 +6771,23 @@ bool                Compiler::fgIsCommaThrow(GenTreePtr tree,
     return false;
 }
 
-
+//------------------------------------------------------------------------
+// fgIsIndirOfAddrOfLocal: Determine whether "tree" is an indirection of a local.
+//
+// Arguments:
+//    tree - The tree node under consideration
+//
+// Return Value:
+//    If "tree" is a indirection (GT_IND, GT_BLK, or GT_OBJ) whose arg is an ADDR,
+//    whose arg in turn is a LCL_VAR, return that LCL_VAR node, else nullptr.
+//
+// static
 GenTreePtr          Compiler::fgIsIndirOfAddrOfLocal(GenTreePtr tree)
 {
     GenTreePtr res = nullptr;
-    if (tree->OperGet() == GT_OBJ || tree->OperIsIndir())
+    if (tree->OperIsIndir())
     {
-        GenTreePtr addr = tree->gtOp.gtOp1;
+        GenTreePtr addr = tree->AsIndir()->Addr();
 
         // Post rationalization, we can have Indir(Lea(..) trees. Therefore to recognize
         // Indir of addr of a local, skip over Lea in Indir(Lea(base, index, scale, offset))
@@ -21490,7 +21500,7 @@ void Compiler::fgNoteNonInlineCandidate(GenTreePtr   tree,
 
 #endif
 
-#if defined(FEATURE_HFA) || defined(FEATURE_UNIX_AMD64_STRUCT_PASSING)
+#if FEATURE_MULTIREG_RET
 
 /*********************************************************************************
  *
@@ -21622,7 +21632,7 @@ void Compiler::fgAttachStructInlineeToAsg(GenTreePtr tree, GenTreePtr child, COR
     tree->CopyFrom(gtNewCpObjNode(dstAddr, srcAddr, retClsHnd, false), this);
 }
 
-#endif // defined(FEATURE_HFA) || defined(FEATURE_UNIX_AMD64_STRUCT_PASSING)
+#endif // FEATURE_MULTIREG_RET
 
 /*****************************************************************************
  * Callback to replace the inline return expression place holder (GT_RET_EXPR)
@@ -21634,15 +21644,17 @@ Compiler::fgWalkResult      Compiler::fgUpdateInlineReturnExpressionPlaceHolder(
 {
     GenTreePtr tree = *pTree;
     Compiler*  comp = data->compiler;
+    CORINFO_CLASS_HANDLE retClsHnd = NO_CLASS_HANDLE;
 
     if (tree->gtOper == GT_RET_EXPR)
     {
-#if defined(FEATURE_HFA) || defined(FEATURE_UNIX_AMD64_STRUCT_PASSING)
-        // We are going to copy the tree from the inlinee, so save the handle now.
-        CORINFO_CLASS_HANDLE retClsHnd = varTypeIsStruct(tree)
-                                       ? tree->gtRetExpr.gtRetClsHnd
-                                       : NO_CLASS_HANDLE;
-#endif // defined(FEATURE_HFA) || defined(FEATURE_UNIX_AMD64_STRUCT_PASSING)
+        // We are going to copy the tree from the inlinee, 
+        // so record the handle now.
+        //
+        if (varTypeIsStruct(tree))
+        {
+            retClsHnd = tree->gtRetExpr.gtRetClsHnd;
+        }
 
         do
         {
@@ -21674,15 +21686,19 @@ Compiler::fgWalkResult      Compiler::fgUpdateInlineReturnExpressionPlaceHolder(
 #endif // DEBUG
         }
         while (tree->gtOper == GT_RET_EXPR);
+    }
 
-#if defined(FEATURE_HFA) || defined(FEATURE_UNIX_AMD64_STRUCT_PASSING)
-#if defined(FEATURE_HFA)
-        if (retClsHnd != NO_CLASS_HANDLE && comp->IsHfa(retClsHnd))
-#elif defined(FEATURE_UNIX_AMD64_STRUCT_PASSING)
-        if (retClsHnd != NO_CLASS_HANDLE && comp->IsRegisterPassable(retClsHnd))
-#else
-        assert(!"Unhandled target");
-#endif // FEATURE_HFA 
+#if FEATURE_MULTIREG_RET
+
+    // Did we record a struct return class handle above?
+    //
+    if (retClsHnd != NO_CLASS_HANDLE)
+    {
+        // Is this a type that is returned in multiple registers?
+        // if so we need to force into into a form we accept.
+        // i.e. LclVar = call()
+        //
+        if (comp->IsMultiRegReturnedType(retClsHnd))
         {
             GenTreePtr parent = data->parent;
             // See assert below, we only look one level above for an asg parent.
@@ -21697,18 +21713,18 @@ Compiler::fgWalkResult      Compiler::fgUpdateInlineReturnExpressionPlaceHolder(
                 tree->CopyFrom(comp->fgAssignStructInlineeToVar(tree, retClsHnd), comp);
             }
         }
-#endif // defined(FEATURE_HFA) || defined(FEATURE_UNIX_AMD64_STRUCT_PASSING)
     }
 
-#if defined(DEBUG) && defined(FEATURE_HFA) || defined(FEATURE_UNIX_AMD64_STRUCT_PASSING)
+#if defined(DEBUG)
+
     // Make sure we don't have a tree like so: V05 = (, , , retExpr);
     // Since we only look one level above for the parent for '=' and
     // do not check if there is a series of COMMAs. See above.
     // Importer and FlowGraph will not generate such a tree, so just
     // leaving an assert in here. This can be fixed by looking ahead
     // when we visit GT_ASG similar to fgAttachStructInlineeToAsg.
-    else if (tree->gtOper == GT_ASG &&
-             tree->gtOp.gtOp2->gtOper == GT_COMMA)
+    //
+    if ((tree->gtOper == GT_ASG) && (tree->gtOp.gtOp2->gtOper == GT_COMMA))
     {
         GenTreePtr comma;
         for (comma = tree->gtOp.gtOp2;
@@ -21718,17 +21734,13 @@ Compiler::fgWalkResult      Compiler::fgUpdateInlineReturnExpressionPlaceHolder(
             // empty
         }
 
-#if defined(FEATURE_HFA)
         noway_assert(!varTypeIsStruct(comma) ||
                      comma->gtOper != GT_RET_EXPR ||
-                     (!comp->IsHfa(comma->gtRetExpr.gtRetClsHnd)));
-#elif defined(FEATURE_UNIX_AMD64_STRUCT_PASSING)
-        noway_assert(!varTypeIsStruct(comma) ||
-                     comma->gtOper != GT_RET_EXPR ||
-                     (!comp->IsRegisterPassable(comma->gtRetExpr.gtRetClsHnd)));
-#endif // defined(FEATURE_UNIX_AMD64_STRUCT_PASSING)
+                     !comp->IsMultiRegReturnedType(comma->gtRetExpr.gtRetClsHnd));
     }
-#endif // defined(DEBUG) && defined(FEATURE_HFA) || defined(FEATURE_UNIX_AMD64_STRUCT_PASSING)
+
+#endif // defined(DEBUG)
+#endif // FEATURE_MULTIREG_RET
 
     return WALK_CONTINUE;
 }
@@ -22054,6 +22066,12 @@ void Compiler::fgInsertInlineeBlocks(InlineInfo* pInlineInfo)
                 stmtAfter = fgInsertStmtListAfter(iciBlock,
                                                   stmtAfter,
                                                   InlineeCompiler->fgFirstBB->bbTreeList);
+
+                // Copy inlinee bbFlags to caller bbFlags.
+                const unsigned int inlineeBlockFlags = InlineeCompiler->fgFirstBB->bbFlags;
+                noway_assert((inlineeBlockFlags & BBF_HAS_JMP) == 0);
+                noway_assert((inlineeBlockFlags & BBF_KEEP_BBJ_ALWAYS) == 0);
+                iciBlock->bbFlags |= inlineeBlockFlags;
             }
 #ifdef DEBUG
             if (verbose)
@@ -22273,6 +22291,22 @@ _Done:
     compUnsafeCastUsed        |= InlineeCompiler->compUnsafeCastUsed;
     compNeedsGSSecurityCookie |= InlineeCompiler->compNeedsGSSecurityCookie;
     compGSReorderStackLayout  |= InlineeCompiler->compGSReorderStackLayout;
+
+    // Update optMethodFlags
+
+#ifdef DEBUG
+    unsigned optMethodFlagsBefore = optMethodFlags;
+#endif
+
+    optMethodFlags |= InlineeCompiler->optMethodFlags;
+
+#ifdef DEBUG
+    if (optMethodFlags != optMethodFlagsBefore)
+    {
+        JITDUMP("INLINER: Updating optMethodFlags --  root:%0x callee:%0x new:%0x\n",
+                optMethodFlagsBefore, InlineeCompiler->optMethodFlags, optMethodFlags);
+    }
+#endif
 
     // If there is non-NULL return, replace the GT_CALL with its return value expression,
     // so later it will be picked up by the GT_RET_EXPR node.

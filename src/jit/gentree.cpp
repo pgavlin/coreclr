@@ -3021,6 +3021,71 @@ bool                Compiler::gtIsLikelyRegVar(GenTree * tree)
     return true;
 }
 
+//------------------------------------------------------------------------
+// gtCanSwapOrder: Returns true iff the secondNode can be swapped with firstNode.
+//
+// Arguments:
+//    firstNode  - An operand of a tree that can have GTF_REVERSE_OPS set.
+//    secondNode - The other operand of the tree.
+//
+// Return Value:
+//    Returns a boolean indicating whether it is safe to reverse the execution
+//    order of the two trees, considering any exception, global effects, or
+//    ordering constraints.
+//
+bool
+Compiler::gtCanSwapOrder(GenTree* firstNode, GenTree*  secondNode)
+{
+    // Relative of order of global / side effects can't be swapped.
+
+    bool    canSwap = true;
+
+    if (optValnumCSE_phase)
+    {
+        canSwap = optCSE_canSwap(firstNode, secondNode);
+    }
+            
+    // We cannot swap in the presence of special side effects such as GT_CATCH_ARG.
+
+    if (canSwap &&
+        (firstNode->gtFlags & GTF_ORDER_SIDEEFF))
+    {
+        canSwap = false;
+    }
+
+    // When strict side effect order is disabled we allow GTF_REVERSE_OPS to be set
+    // when one or both sides contains a GTF_CALL or GTF_EXCEPT.
+    // Currently only the C and C++ languages allow non strict side effect order.
+
+    unsigned strictEffects = GTF_GLOB_EFFECT;
+
+    if (canSwap &&
+        (firstNode->gtFlags & strictEffects))
+    {
+        // op1 has side efects that can't be reordered.
+        // Check for some special cases where we still may be able to swap.
+
+        if (secondNode->gtFlags & strictEffects)
+        {
+            // op2 has also has non reorderable side effects - can't swap.
+            canSwap = false;
+        }
+        else
+        {
+            // No side effects in op2 - we can swap iff op1 has no way of modifying op2,
+            // i.e. through byref assignments or calls or op2 is a constant.
+
+            if (firstNode->gtFlags & strictEffects & GTF_PERSISTENT_SIDE_EFFECTS)
+            {
+                // We have to be conservative - can swap iff op2 is constant.
+                if (!secondNode->OperIsConst())
+                    canSwap = false;
+            }
+        }
+    }
+    return canSwap;
+}
+
 /*****************************************************************************
  *
  *  Given a tree, figure out the order in which its sub-operands should be
@@ -3586,17 +3651,18 @@ COMMON_CNS:
                     unsigned        mul;
 #endif
                     unsigned        cns;
-                    GenTreePtr      adr;
+                    GenTreePtr      base;
                     GenTreePtr      idx;
 
                     /* See if we can form a complex addressing mode? */
 
-                    if  (codeGen->genCreateAddrMode(op1,             // address
+                    GenTreePtr      addr = op1;
+                    if  (codeGen->genCreateAddrMode(addr,             // address
                                            0,               // mode
                                            false,           // fold
                                            RBM_NONE,        // reg mask
                                            &rev,            // reverse ops
-                                           &adr,            // base addr
+                                           &base,           // base addr
                                            &idx,            // index val
 #if SCALED_ADDR_MODES
                                            &mul,            // scaling
@@ -3607,17 +3673,17 @@ COMMON_CNS:
                         // We can form a complex addressing mode, so mark each of the interior
                         // nodes with GTF_ADDRMODE_NO_CSE and calculate a more accurate cost.
 
-                        op1->gtFlags |= GTF_ADDRMODE_NO_CSE;
+                        addr->gtFlags |= GTF_ADDRMODE_NO_CSE;
 #ifdef _TARGET_XARCH_
                         // addrmodeCount is the count of items that we used to form 
                         // an addressing mode.  The maximum value is 4 when we have
-                        // all of these:   { adr, idx, cns, mul }
+                        // all of these:   { base, idx, cns, mul }
                         //
                         unsigned addrmodeCount = 0;
-                        if (adr)
+                        if (base)
                         {
-                            costEx += adr->gtCostEx;
-                            costSz += adr->gtCostSz;
+                            costEx += base->gtCostEx;
+                            costSz += base->gtCostSz;
                             addrmodeCount++;
                         }
 
@@ -3647,7 +3713,7 @@ COMMON_CNS:
                         //                      /   \       --
                         //                  GT_ADD  'cns'   -- reduce this interior GT_ADD by (-2,-2)
                         //                  /   \           --
-                        //               'adr'  GT_LSL      -- reduce this interior GT_LSL by (-1,-1)
+                        //               'base'  GT_LSL     -- reduce this interior GT_LSL by (-1,-1)
                         //                      /   \       --
                         //                   'idx'  'mul'
                         //
@@ -3657,7 +3723,7 @@ COMMON_CNS:
                             //
                             addrmodeCount--;
 
-                            GenTreePtr tmp = op1;
+                            GenTreePtr tmp = addr;
                             while (addrmodeCount > 0)
                             {
                                 // decrement the gtCosts for the interior GT_ADD or GT_LSH node by the remaining addrmodeCount
@@ -3670,7 +3736,7 @@ COMMON_CNS:
                                     GenTreePtr tmpOp2 = tmp->gtGetOp2();
                                     assert(tmpOp2 != nullptr);
 
-                                    if ((tmpOp1 != adr) && (tmpOp1->OperGet() == GT_ADD))
+                                    if ((tmpOp1 != base) && (tmpOp1->OperGet() == GT_ADD))
                                     {
                                         tmp = tmpOp1;
                                     }
@@ -3696,11 +3762,11 @@ COMMON_CNS:
                             }
                         }
 #elif defined _TARGET_ARM_
-                        if (adr)
+                        if (base)
                         {
-                            costEx += adr->gtCostEx;
-                            costSz += adr->gtCostSz;
-                            if ((adr->gtOper == GT_LCL_VAR) &&
+                            costEx += base->gtCostEx;
+                            costSz += base->gtCostSz;
+                            if ((base->gtOper == GT_LCL_VAR) &&
                                 ((idx==NULL) || (cns==0)))
                             {
                                 costSz -= 1;
@@ -3734,10 +3800,10 @@ COMMON_CNS:
                             }
                         }
 #elif defined _TARGET_ARM64_
-                        if (adr)
+                        if (base)
                         {
-                            costEx += adr->gtCostEx;
-                            costSz += adr->gtCostSz;
+                            costEx += base->gtCostEx;
+                            costSz += base->gtCostSz;
                         }
 
                         if (idx)
@@ -3758,62 +3824,62 @@ COMMON_CNS:
 #error "Unknown _TARGET_"
 #endif
 
-                        assert(op1->gtOper == GT_ADD);
-                        assert(!op1->gtOverflow());
+                        assert(addr->gtOper == GT_ADD);
+                        assert(!addr->gtOverflow());
                         assert(op2 == NULL);
                         assert(mul != 1);
 
                         // If we have an addressing mode, we have one of:
-                        //   [adr             + cns]
-                        //   [      idx * mul      ]  // mul >= 2, else we would use adr instead of idx
-                        //   [      idx * mul + cns]  // mul >= 2, else we would use adr instead of idx
-                        //   [adr + idx * mul      ]  // mul can be 0, 2, 4, or 8
-                        //   [adr + idx * mul + cns]  // mul can be 0, 2, 4, or 8
+                        //   [base             + cns]
+                        //   [       idx * mul      ]  // mul >= 2, else we would use base instead of idx
+                        //   [       idx * mul + cns]  // mul >= 2, else we would use base instead of idx
+                        //   [base + idx * mul      ]  // mul can be 0, 2, 4, or 8
+                        //   [base + idx * mul + cns]  // mul can be 0, 2, 4, or 8
                         // Note that mul == 0 is semantically equivalent to mul == 1.
                         // Note that cns can be zero.
 #if SCALED_ADDR_MODES
-                        assert((adr != NULL) || (idx != NULL && mul >= 2));
+                        assert((base != NULL) || (idx != NULL && mul >= 2));
 #else
-                        assert(adr != NULL);
+                        assert(base != NULL);
 #endif
 
-                        INDEBUG(GenTreePtr op1Save = op1);
+                        INDEBUG(GenTreePtr op1Save = addr);
 
-                        /* Walk op1 looking for non-overflow GT_ADDs */
-                        gtWalkOp(&op1, &op2, adr, false);
+                        /* Walk addr looking for non-overflow GT_ADDs */
+                        gtWalkOp(&addr, &op2, base, false);
 
-                        // op1 and op2 are now children of the root GT_ADD of the addressing mode
-                        assert(op1 != op1Save);
+                        // addr and op2 are now children of the root GT_ADD of the addressing mode
+                        assert(addr != op1Save);
                         assert(op2 != NULL);
 
-                        /* Walk op1 looking for non-overflow GT_ADDs of constants */
-                        gtWalkOp(&op1, &op2, NULL, true);
+                        /* Walk addr looking for non-overflow GT_ADDs of constants */
+                        gtWalkOp(&addr, &op2, NULL, true);
 
                         // TODO-Cleanup: It seems very strange that we might walk down op2 now, even though the prior
                         //           call to gtWalkOp() may have altered op2.
 
                         /* Walk op2 looking for non-overflow GT_ADDs of constants */
-                        gtWalkOp(&op2, &op1, NULL, true);
+                        gtWalkOp(&op2, &addr, NULL, true);
 
                         // OK we are done walking the tree
-                        // Now assert that op1 and op2 correspond with adr and idx
+                        // Now assert that addr and op2 correspond with base and idx
                         // in one of the several acceptable ways.
 
-                        // Note that sometimes op1/op2 is equal to idx/adr
-                        // and other times op1/op2 is a GT_COMMA node with
-                        // an effective value that is idx/adr
+                        // Note that sometimes addr/op2 is equal to idx/base
+                        // and other times addr/op2 is a GT_COMMA node with
+                        // an effective value that is idx/base
 
                         if (mul > 1)
                         {
-                            if ((op1 != adr) && (op1->gtOper == GT_LSH))
+                            if ((addr != base) && (addr->gtOper == GT_LSH))
                             {
-                                op1->gtFlags |= GTF_ADDRMODE_NO_CSE;
-                                if (op1->gtOp.gtOp1->gtOper == GT_MUL)
+                                addr->gtFlags |= GTF_ADDRMODE_NO_CSE;
+                                if (addr->gtOp.gtOp1->gtOper == GT_MUL)
                                 {
-                                    op1->gtOp.gtOp1->gtFlags |= GTF_ADDRMODE_NO_CSE;
+                                    addr->gtOp.gtOp1->gtFlags |= GTF_ADDRMODE_NO_CSE;
                                 }
-                                assert((adr == NULL) || (op2 == adr) || (op2->gtEffectiveVal() == adr->gtEffectiveVal()) ||
-                                       (gtWalkOpEffectiveVal(op2) == gtWalkOpEffectiveVal(adr)));
+                                assert((base == NULL) || (op2 == base) || (op2->gtEffectiveVal() == base->gtEffectiveVal()) ||
+                                       (gtWalkOpEffectiveVal(op2) == gtWalkOpEffectiveVal(base)));
                             }
                             else
                             {
@@ -3828,7 +3894,7 @@ COMMON_CNS:
                                     op2op1->gtFlags |= GTF_ADDRMODE_NO_CSE;
                                     op2op1 = op2op1->gtOp.gtOp1;
                                 }
-                                assert(op1->gtEffectiveVal() == adr);
+                                assert(addr->gtEffectiveVal() == base);
                                 assert(op2op1 == idx);
                             }
                         }
@@ -3836,24 +3902,24 @@ COMMON_CNS:
                         {
                             assert(mul == 0);
 
-                            if      ((op1 == idx) || (op1->gtEffectiveVal() == idx))
+                            if ((addr == idx) || (addr->gtEffectiveVal() == idx))
                             {
                                 if (idx != NULL)
                                 {
-                                    if ((op1->gtOper == GT_MUL) || (op1->gtOper == GT_LSH))
+                                    if ((addr->gtOper == GT_MUL) || (addr->gtOper == GT_LSH))
                                     {
-                                        if ((op1->gtOp.gtOp1->gtOper == GT_NOP) || 
-                                            (op1->gtOp.gtOp1->gtOper == GT_MUL && op1->gtOp.gtOp1->gtOp.gtOp1->gtOper == GT_NOP))
+                                        if ((addr->gtOp.gtOp1->gtOper == GT_NOP) || 
+                                            (addr->gtOp.gtOp1->gtOper == GT_MUL && addr->gtOp.gtOp1->gtOp.gtOp1->gtOper == GT_NOP))
                                         {
-                                            op1->gtFlags |= GTF_ADDRMODE_NO_CSE;
-                                            if (op1->gtOp.gtOp1->gtOper == GT_MUL)
-                                                op1->gtOp.gtOp1->gtFlags |= GTF_ADDRMODE_NO_CSE;
+                                            addr->gtFlags |= GTF_ADDRMODE_NO_CSE;
+                                            if (addr->gtOp.gtOp1->gtOper == GT_MUL)
+                                                addr->gtOp.gtOp1->gtFlags |= GTF_ADDRMODE_NO_CSE;
                                         }
                                     }
                                 }
-                                assert((op2 == adr) || (op2->gtEffectiveVal() == adr));
+                                assert((op2 == base) || (op2->gtEffectiveVal() == base));
                             }
-                            else if ((op1 == adr) || (op1->gtEffectiveVal() == adr))
+                            else if ((addr == base) || (addr->gtEffectiveVal() == base))
                             {
                                 if (idx != NULL)
                                 {
@@ -3874,7 +3940,7 @@ COMMON_CNS:
                             }
                             else
                             {
-                                // op1 isn't adr or idx. Is this possible? Or should there be an assert?
+                                // addr isn't base or idx. Is this possible? Or should there be an assert?
                             }
                         }
                         goto DONE;
@@ -4345,60 +4411,7 @@ COMMON_CNS:
 
         if (tryToSwap)
         {
-            /* Relative of order of global / side effects can't be swapped */
-
-            bool    canSwap = true;
-
-            if (optValnumCSE_phase)
-            {
-                canSwap = optCSE_canSwap(tree);
-            }
-            
-            /* We cannot swap in the presence of special side effects such as GT_CATCH_ARG */
-
-            if (canSwap &&
-                (opA->gtFlags & GTF_ORDER_SIDEEFF))
-            {
-                canSwap = false;
-            }
-
-            /*  When strict side effect order is disabled we allow
-             *  GTF_REVERSE_OPS to be set when one or both sides contains
-             *  a GTF_CALL or GTF_EXCEPT.
-             *  Currently only the C and C++ languages
-             *  allow non strict side effect order
-             */
-            unsigned strictEffects = GTF_GLOB_EFFECT;
-
-            if (canSwap &&
-                (opA->gtFlags & strictEffects))
-            {
-                /*  op1 has side efects, that can't be reordered.
-                 *  Check for some special cases where we still
-                 *  may be able to swap
-                 */
-
-                if (opB->gtFlags & strictEffects)
-                {
-                    /* op2 has also has non reorderable side effects - can't swap */
-                    canSwap = false;
-                }
-                else
-                {
-                    /* No side effects in op2 - we can swap iff
-                     *  op1 has no way of modifying op2,
-                     *  i.e. through byref assignments or calls
-                     *       unless op2 is a constant
-                     */
-
-                    if (opA->gtFlags & strictEffects & GTF_PERSISTENT_SIDE_EFFECTS)
-                    {
-                        /* We have to be conservative - can swap iff op2 is constant */
-                        if (!opB->OperIsConst())
-                            canSwap = false;
-                    }
-                }
-            }
+            bool canSwap = gtCanSwapOrder(opA, opB);
 
             if  (canSwap)
             {
@@ -6156,22 +6169,8 @@ bool  Compiler::gtArgIsThisPtr(fgArgTabEntryPtr argEntry)
  *  Create a node that will assign 'src' to 'dst'.
  */
 
-GenTreePtr          Compiler::gtNewAssignNode(GenTreePtr dst, GenTreePtr src DEBUGARG(bool isPhiDefn))
+GenTreePtr          Compiler::gtNewAssignNode(GenTreePtr dst, GenTreePtr src)
 {
-    var_types type = dst->TypeGet();
-
-    // ARM has HFA struct return values, HFA return values are received in registers from GT_CALL,
-    // using struct assignment.
-#ifdef FEATURE_HFA
-    assert(isPhiDefn || type != TYP_STRUCT || IsHfa(dst) || IsHfa(src));
-#elif defined(FEATURE_UNIX_AMD64_STRUCT_PASSING)
-    // You need to use GT_COPYBLK for assigning structs
-    // See impAssignStruct()
-    assert(isPhiDefn || type != TYP_STRUCT || IsRegisterPassable(dst) || IsRegisterPassable(src));
-#else // !FEATURE_UNIX_AMD64_STRUCT_PASSING
-    assert(isPhiDefn || type != TYP_STRUCT);
-#endif
-
     /* Mark the target as being assigned */
 
     if ((dst->gtOper == GT_LCL_VAR) || (dst->OperGet() == GT_LCL_FLD))
@@ -6187,7 +6186,7 @@ GenTreePtr          Compiler::gtNewAssignNode(GenTreePtr dst, GenTreePtr src DEB
 
     /* Create the assignment node */
 
-    GenTreePtr asg = gtNewOperNode(GT_ASG, type, dst, src);
+    GenTreePtr asg = gtNewOperNode(GT_ASG, dst->TypeGet(), dst, src);
 
     /* Mark the expression as containing an assignment */
 
@@ -8513,10 +8512,15 @@ void                Compiler::gtDispNode(GenTreePtr     tree,
 
         // If we have an indent stack, don't add additional characters,
         // as it will mess up the alignment.
-        if (tree->gtOper != GT_STMT && hasSeqNum && (indentStack == nullptr))
+        bool displayDotNum = tree->gtOper != GT_STMT && hasSeqNum && (indentStack == nullptr);
+        if (displayDotNum)
+        {
             printf("N%03u.%02u ", prev->gtSeqNum, dotNum);
+        }
         else
+        {
             printf("     ");
+        }
 
         if (tree->gtCostsInitialized)
         {
@@ -8524,7 +8528,7 @@ void                Compiler::gtDispNode(GenTreePtr     tree,
         }
         else
         {
-            if (tree->gtOper != GT_STMT && hasSeqNum)
+            if (displayDotNum)
             {
                 // Do better alignment in this case
                 printf("       ");
@@ -12713,7 +12717,7 @@ void                Compiler::gtExtractSideEffList(GenTreePtr expr, GenTreePtr *
             // Special case - GT_ADDR of GT_IND nodes of TYP_STRUCT
             // have to be kept together
 
-            if (oper == GT_ADDR && op1->gtOper == GT_IND && op1->gtType == TYP_STRUCT)
+            if (oper == GT_ADDR && op1->OperIsIndir() && op1->gtType == TYP_STRUCT)
             {
                 *pList = gtBuildCommaList(*pList, expr);
 
@@ -13917,7 +13921,7 @@ bool GenTree::isContainedIndir() const
 
 bool GenTree::isIndirAddrMode()
 { 
-    return isIndir() && gtOp.gtOp1->OperIsAddrMode() && gtOp.gtOp1->isContained(); 
+    return isIndir() && AsIndir()->Addr()->OperIsAddrMode() && AsIndir()->Addr()->isContained(); 
 }
 
 bool GenTree::isIndir() const
@@ -14570,7 +14574,7 @@ void GenTree::ParseArrayAddressWork(Compiler* comp, ssize_t inputMul, GenTreePtr
 
 bool GenTree::ParseArrayElemForm(Compiler* comp, ArrayInfo* arrayInfo, FieldSeqNode** pFldSeq)
 {
-    if (OperGet() == GT_IND)
+    if (OperIsIndir())
     {
         if (gtFlags & GTF_IND_ARR_INDEX)
         {
@@ -14580,7 +14584,7 @@ bool GenTree::ParseArrayElemForm(Compiler* comp, ArrayInfo* arrayInfo, FieldSeqN
         }
 
         // Otherwise...
-        GenTreePtr addr = gtOp.gtOp1;
+        GenTreePtr addr = AsIndir()->Addr();
         return addr->ParseArrayElemAddrForm(comp, arrayInfo, pFldSeq);
     }
     else
@@ -14849,42 +14853,151 @@ bool GenTree::isCommutativeSIMDIntrinsic()
 }
 #endif //FEATURE_SIMD
 
-//-------------------------------------------------------------------------
-// Initialize: Return Type Descriptor given type handle.
+//---------------------------------------------------------------------------------------
+// InitializeStructReturnType:
+//    Initialize the Return Type Descriptor for a method that returns a struct type
 // 
 // Arguments
 //    comp        -  Compiler Instance
-//    retClsHnd   -  VM handle to the type returned
+//    retClsHnd   -  VM handle to the struct type returned by the method
 //
 // Return Value
 //    None
 //
-void ReturnTypeDesc::InitializeReturnType(Compiler* comp, CORINFO_CLASS_HANDLE retClsHnd)
+void ReturnTypeDesc::InitializeStructReturnType(Compiler* comp, CORINFO_CLASS_HANDLE retClsHnd)
 {
     assert(!m_inited);
 
-#ifdef FEATURE_UNIX_AMD64_STRUCT_PASSING
+#if FEATURE_MULTIREG_RET
+
     assert(retClsHnd != NO_CLASS_HANDLE);
+    unsigned  structSize = comp->info.compCompHnd->getClassSize(retClsHnd);
 
-    SYSTEMV_AMD64_CORINFO_STRUCT_REG_PASSING_DESCRIPTOR structDesc;
-    comp->eeGetSystemVAmd64PassStructInRegisterDescriptor(retClsHnd, &structDesc);
+    Compiler::structPassingKind  howToReturnStruct;
+    var_types returnType = comp->getReturnTypeForStruct(retClsHnd, &howToReturnStruct, structSize);
 
-    if (structDesc.passedInRegisters)
+    switch (howToReturnStruct)
     {
-        for (int i=0; i<structDesc.eightByteCount; i++)
+        case Compiler::SPK_PrimitiveType:
         {
-            assert(i < MAX_RET_REG_COUNT);
-            m_regType[i] = comp->GetEightByteType(structDesc, i);
+            assert(returnType != TYP_UNKNOWN);
+            assert(returnType != TYP_STRUCT);
+            m_regType[0] = returnType;
+            break;
         }
-    }
 
-#elif defined(_TARGET_X86_)
-    // TODO-X86: Assumes we are only using ReturnTypeDesc for longs on x86.
-    // Will need to be updated in the future to handle other return types
-    assert(MAX_RET_REG_COUNT == 2);
+        case Compiler::SPK_ByValueAsHfa:
+        {
+            assert(returnType == TYP_STRUCT);
+            var_types hfaType = comp->GetHfaType(retClsHnd);
+
+            // We should have an hfa struct type
+            assert(varTypeIsFloating(hfaType));
+
+            // Note that the retail build issues a warning about a potential divsion by zero without this Max function
+            unsigned elemSize = Max((unsigned)1, EA_SIZE_IN_BYTES(emitActualTypeSize(hfaType)));
+
+            // The size of this struct should be evenly divisible by elemSize
+            assert((structSize % elemSize) == 0);
+            
+            unsigned hfaCount = (structSize / elemSize);            
+            for (unsigned i = 0; i < hfaCount; ++i)
+            {
+                m_regType[i] = hfaType;
+            }
+
+            if (comp->compFloatingPointUsed == false)
+            {
+                comp->compFloatingPointUsed = true;
+            }
+            break;
+        }
+
+        case Compiler::SPK_ByValue:
+        {
+            assert(returnType == TYP_STRUCT);
+
+#ifdef FEATURE_UNIX_AMD64_STRUCT_PASSING
+
+            SYSTEMV_AMD64_CORINFO_STRUCT_REG_PASSING_DESCRIPTOR structDesc;
+            comp->eeGetSystemVAmd64PassStructInRegisterDescriptor(retClsHnd, &structDesc);
+
+            assert(structDesc.passedInRegisters);
+            for (int i = 0; i < structDesc.eightByteCount; i++)
+            {
+                assert(i < MAX_RET_REG_COUNT);
+                m_regType[i] = comp->GetEightByteType(structDesc, i);
+            }
+
+#elif defined(_TARGET_ARM64_)
+
+            // a non-HFA struct returned using two registers
+            //            
+            assert((structSize > TARGET_POINTER_SIZE) && (structSize <= (2 * TARGET_POINTER_SIZE)));
+
+            BYTE gcPtrs[2] = { TYPE_GC_NONE, TYPE_GC_NONE };
+            comp->info.compCompHnd->getClassGClayout(retClsHnd, &gcPtrs[0]);
+            for (unsigned i = 0; i < 2; ++i)
+            {
+                m_regType[i] = comp->getJitGCType(gcPtrs[i]);
+            }
+
+#else //  _TARGET_XXX_
+
+            // This target needs support here!
+            //
+            NYI("Unsupported TARGET returning a TYP_STRUCT in InitializeStructReturnType");
+
+
+#endif // FEATURE_UNIX_AMD64_STRUCT_PASSING
+
+            break;   // for case SPK_ByValue
+        }
+
+        case Compiler::SPK_ByReference:
+
+            // We are returning using the return buffer argument 
+            // There are no return registers
+            break;
+
+        default:
+
+            unreached(); // By the contract of getReturnTypeForStruct we should never get here.
+
+    }   // end of switch (howToReturnStruct)
+
+#endif //  FEATURE_MULTIREG_RET
+
+#ifdef DEBUG
+    m_inited = true;
+#endif
+}
+
+//---------------------------------------------------------------------------------------
+// InitializeLongReturnType:
+//    Initialize the Return Type Descriptor for a method that returns a TYP_LONG
+// 
+// Arguments
+//    comp        -  Compiler Instance
+//
+// Return Value
+//    None
+//
+void ReturnTypeDesc::InitializeLongReturnType(Compiler* comp)
+{
+#if defined(_TARGET_X86_)
+
+    // Setups up a ReturnTypeDesc for returning a long using two registers
+    //
+    assert(MAX_RET_REG_COUNT >= 2);
     m_regType[0] = TYP_INT;
     m_regType[1] = TYP_INT;
-#endif // FEATURE_UNIX_AMD64_STRUCT_PASSING
+
+#else  // not _TARGET_X86_
+
+    m_regType[0] = TYP_LONG;
+
+#endif // _TARGET_X86_
 
 #ifdef DEBUG
     m_inited = true;
@@ -14907,7 +15020,6 @@ void ReturnTypeDesc::InitializeReturnType(Compiler* comp, CORINFO_CLASS_HANDLE r
 //     targets (Arm64/Arm32/x86).
 //
 // TODO-ARM:   Implement this routine to support HFA returns.
-// TODO-ARM64: Implement this routine to support HFA returns.
 // TODO-X86:   Implement this routine to support long returns.
 regNumber ReturnTypeDesc::GetABIReturnReg(unsigned idx)
 {
@@ -14961,6 +15073,7 @@ regNumber ReturnTypeDesc::GetABIReturnReg(unsigned idx)
     }
 
 #elif defined(_TARGET_X86_)
+
     if (idx == 0)
     {
         resultReg = REG_LNGRET_LO;
@@ -14969,7 +15082,22 @@ regNumber ReturnTypeDesc::GetABIReturnReg(unsigned idx)
     {
         resultReg = REG_LNGRET_HI;
     }
-#endif //FEATURE_UNIX_AMD64_STRUCT_PASSING
+
+#elif defined(_TARGET_ARM64_)
+
+    var_types regType = GetReturnRegType(idx);
+    if (varTypeIsIntegralOrI(regType))
+    {
+        noway_assert(idx < 2);  // Up to 2 return registers for 16-byte structs
+        resultReg = (idx == 0) ? REG_INTRET : REG_INTRET_1;       // X0 or X1
+    }
+    else
+    {
+        noway_assert(idx < 4);  // Up to 4 return registers for HFA's
+        resultReg = (regNumber)((unsigned)(REG_FLOATRET)+idx);  // V0, V1, V2 or V3
+    }
+
+#endif // TARGET_XXX
 
     assert(resultReg != REG_NA);
     return resultReg;

@@ -103,8 +103,7 @@ private:
     static void genJumpKindsForTree(GenTreePtr cmpTree, emitJumpKind jmpKind[2], bool jmpToTrueLabel[2]);
 
 #if !defined(_TARGET_64BIT_)
-    static void genJumpKindsForTreeLongHi(GenTreePtr cmpTree, emitJumpKind jmpKind[2], bool jmpToTrueLabel[2]);
-    static void genJumpKindsForTreeLongLo(GenTreePtr cmpTree, emitJumpKind jmpKind[2], bool jmpToTrueLabel[2]);
+    static void genJumpKindsForTreeLongHi(GenTreePtr cmpTree, emitJumpKind jmpKind[2]);
 #endif //!defined(_TARGET_64BIT_)
 
     static bool         genShouldRoundFP();
@@ -446,26 +445,26 @@ protected:
 
     void                genPrologPadForReJit();
 
-    void                genEmitCall(int                                                 callType,
-                                    CORINFO_METHOD_HANDLE                               methHnd,
-                                    INDEBUG_LDISASM_COMMA(CORINFO_SIG_INFO*             sigInfo)
-                                    void*                                               addr
-                                    X86_ARG(ssize_t                                     argSize),
-                                    emitAttr                                            retSize
-                                    FEATURE_UNIX_AMD64_STRUCT_PASSING_ONLY_ARG(emitAttr secondRetSize),
-                                    IL_OFFSETX                                          ilOffset,
-                                    regNumber                                           base   = REG_NA,
-                                    bool                                                isJump = false,
-                                    bool                                                isNoGC = false);
+    void                genEmitCall(int                                           callType,
+                                    CORINFO_METHOD_HANDLE                         methHnd,
+                                    INDEBUG_LDISASM_COMMA(CORINFO_SIG_INFO*       sigInfo)
+                                    void*                                         addr
+                                    X86_ARG(ssize_t                               argSize),
+                                    emitAttr                                      retSize
+                                    MULTIREG_HAS_SECOND_GC_RET_ONLY_ARG(emitAttr  secondRetSize),
+                                    IL_OFFSETX                                    ilOffset,
+                                    regNumber                                     base   = REG_NA,
+                                    bool                                          isJump = false,
+                                    bool                                          isNoGC = false);
     
-    void                genEmitCall(int                   callType, 
-                                    CORINFO_METHOD_HANDLE methHnd,
-                                    INDEBUG_LDISASM_COMMA(CORINFO_SIG_INFO* sigInfo)
-                                    GenTreeIndir*         indir
-                                    X86_ARG(ssize_t       argSize),
-                                    emitAttr              retSize
-                                    FEATURE_UNIX_AMD64_STRUCT_PASSING_ONLY_ARG(emitAttr secondRetSize),
-                                    IL_OFFSETX            ilOffset);
+    void                genEmitCall(int                                           callType, 
+                                    CORINFO_METHOD_HANDLE                         methHnd,
+                                    INDEBUG_LDISASM_COMMA(CORINFO_SIG_INFO*       sigInfo)
+                                    GenTreeIndir*                                 indir
+                                    X86_ARG(ssize_t                               argSize),
+                                    emitAttr                                      retSize
+                                    MULTIREG_HAS_SECOND_GC_RET_ONLY_ARG(emitAttr  secondRetSize),
+                                    IL_OFFSETX                                    ilOffset);
 
 
     //
@@ -903,7 +902,7 @@ public :
     void                instEmit_indCall(GenTreePtr     call,
                                          size_t         argSize,
                                          emitAttr       retSize
-                                         FEATURE_UNIX_AMD64_STRUCT_PASSING_ONLY_ARG(emitAttr    secondRetSize));
+                                         MULTIREG_HAS_SECOND_GC_RET_ONLY_ARG(emitAttr  secondRetSize));
 
     void                instEmit_RM     (instruction    ins,
                                          GenTreePtr     tree,
