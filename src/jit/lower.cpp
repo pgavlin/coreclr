@@ -391,14 +391,13 @@ void Lowering::LowerNode(GenTree* node)
  *     to implement this instead of implement all the control flow constructs using InstrDscs and InstrGroups downstream.
  */
 
-void Lowering::LowerSwitch(GenTreePtr* pTree)
+void Lowering::LowerSwitch(GenTree* node)
 {
     unsigned     jumpCnt;
     unsigned     targetCnt;
     BasicBlock** jumpTab;
-    GenTreePtr   tree = *pTree;
 
-    assert(tree->gtOper == GT_SWITCH);
+    assert(node->gtOper == GT_SWITCH);
 
     // The first step is to build the default case conditional construct that is
     // shared between both kinds of expansion of the switch node.
@@ -413,6 +412,12 @@ void Lowering::LowerSwitch(GenTreePtr* pTree)
     jumpCnt = originalSwitchBB->bbJumpSwt->bbsCount;
     jumpTab = originalSwitchBB->bbJumpSwt->bbsDstTab;
     targetCnt = originalSwitchBB->NumSucc(comp);
+
+    // GT_SWITCH must be a top-level node with no use.
+    {
+        LIR::Use use;
+        assert(!m_blockRange.TryGetUse(node, &use));
+    }
 
     JITDUMP("Lowering switch BB%02u, %d cases\n", originalSwitchBB->bbNum, jumpCnt);
 
@@ -440,20 +445,21 @@ void Lowering::LowerSwitch(GenTreePtr* pTree)
         }
         // We have to get rid of the GT_SWITCH node but a child might have side effects so just assign 
         // the result of the child subtree to a temp.
-        GenTree* store = CreateLocalTempAsg(tree->gtOp.gtOp1);
-        tree->InsertAfterSelf(store, comp->compCurStmt->AsStmt());
-        Compiler::fgSnipNode(comp->compCurStmt->AsStmt(), tree);
-        *pTree = store;
-        
+        GenTree* store = CreateLocalTempAsg(node->gtOp.gtOp1);
+        m_blockRange.InsertAfter(store, node);
+        m_blockRange.Remove(node);
+
         return;
     }
 
     noway_assert(jumpCnt >= 2);
 
     // Split the switch node to insert an assignment to a temporary variable.
-    // Note that 'tree' is the GT_SWITCH, and its op1 may be overwritten by SplitTree
+    // Note that 'node' is the GT_SWITCH, and its op1 may be overwritten by SplitTree
     //
-    GenTreeStmt* asgStmt = comp->fgInsertEmbeddedFormTemp(&(tree->gtOp.gtOp1));
+    unsigned blockWeight = originalSwitchBB->getBBWeight(comp);
+    LIR::Use use(m_blockRange, &(node->gtOp.gtOp1), node);
+    use.ReplaceWithLclVar(comp, blockWeight);
 
     // GT_SWITCH(indexExpression) is now two statements:
     //   1. a statement containing 'asg' (for temp = indexExpression) 
@@ -461,20 +467,13 @@ void Lowering::LowerSwitch(GenTreePtr* pTree)
 
     // The return value of fgInsertEmbeddedFormTemp is stmt 1 
     // The 'asg' can either be a GT_ASG or a GT_STORE_LCL_VAR
-    // 'tree' is still a GT_SWITCH but tree->gtOp.gtOp1 is modified to be 'temp'
-     
-    // The asgStmt needs to pickup the IL offsets from the current statement
-    //
-    asgStmt->gtStmtILoffsx = comp->compCurStmt->gtStmt.gtStmtILoffsx;
-#ifdef DEBUG
-    asgStmt->gtStmtLastILoffs = comp->compCurStmt->gtStmt.gtStmtLastILoffs;
-#endif // DEBUG
+    // 'node' is still a GT_SWITCH but node->gtOp.gtOp1 is modified to be 'temp'
 
-    assert(tree->gtOper == GT_SWITCH);
-    GenTreePtr temp = tree->gtOp.gtOp1;
+    assert(node->gtOper == GT_SWITCH);
+    GenTreePtr temp = node->gtOp.gtOp1;
     assert(temp->gtOper == GT_LCL_VAR);
     unsigned tempLclNum = temp->gtLclVarCommon.gtLclNum;
-    LclVarDsc *  tempVarDsc = comp->lvaTable + tempLclNum;
+    LclVarDsc* tempVarDsc = comp->lvaTable + tempLclNum;
     var_types tempLclType = tempVarDsc->TypeGet();
 
     BasicBlock* defaultBB = jumpTab[jumpCnt - 1];
@@ -497,6 +496,7 @@ void Lowering::LowerSwitch(GenTreePtr* pTree)
     // table is huge and hideous due to the relocation... :(
     minSwitchTabJumpCnt += 2;
 #endif // _TARGET_ARM_
+
     // Once we have the temporary variable, we construct the conditional branch for
     // the default case.  As stated above, this conditional is being shared between
     // both GT_SWITCH lowering code paths.
@@ -504,19 +504,20 @@ void Lowering::LowerSwitch(GenTreePtr* pTree)
     GenTreePtr gtDefaultCaseCond = comp->gtNewOperNode(GT_GT, TYP_INT,
                                                        comp->gtNewLclvNode(tempLclNum, tempLclType),
                                                        comp->gtNewIconNode(jumpCnt - 2, TYP_INT));
-    //
+
     // Make sure we perform an unsigned comparison, just in case the switch index in 'temp' 
     // is now less than zero 0 (that would also hit the default case).
     gtDefaultCaseCond->gtFlags |= GTF_UNSIGNED;
 
     /* Increment the lvRefCnt and lvRefCntWtd for temp */
-    tempVarDsc->incRefCnts(originalSwitchBB->getBBWeight(comp), comp);
+    tempVarDsc->incRefCnts(blockWeight, comp);
 
-    GenTreePtr gtDefaultCaseJump = comp->gtNewOperNode(GT_JTRUE,
-                                                       TYP_VOID,
-                                                       gtDefaultCaseCond);
-    gtDefaultCaseJump->gtFlags = tree->gtFlags;
+    GenTreePtr gtDefaultCaseJump = comp->gtNewOperNode(GT_JTRUE, TYP_VOID, gtDefaultCaseCond);
+    gtDefaultCaseJump->gtFlags = node->gtFlags;
 
+    // LIR: don't create new statement!
+    gtSetEvalOrder(gtDefaultCaseJump);
+    fgSetStmtSeq(gtDefaultCaseJump)
     GenTreePtr condStmt = comp->fgNewStmtFromTree(gtDefaultCaseJump, originalSwitchBB, comp->compCurStmt->gtStmt.gtStmtILoffsx);
 
 #ifdef DEBUG
@@ -525,14 +526,15 @@ void Lowering::LowerSwitch(GenTreePtr* pTree)
 
     comp->fgInsertStmtAfter(originalSwitchBB, comp->compCurStmt, condStmt);
 
-    BasicBlock* afterDefCondBlock = comp->fgSplitBlockAfterStatement(originalSwitchBB, condStmt);
+    // LIR: split block after node? Need to ensure no 
+    BasicBlock* afterDefaultCondBlock = comp->fgSplitBlockAfterStatement(originalSwitchBB, condStmt);
 
-    // afterDefCondBlock is now the switch, and all the switch targets have it as a predecessor.
-    // originalSwitchBB is now a BBJ_NONE, and there is a predecessor edge in afterDefCondBlock
+    // afterDefaultCondBlock is now the switch, and all the switch targets have it as a predecessor.
+    // originalSwitchBB is now a BBJ_NONE, and there is a predecessor edge in afterDefaultCondBlock
     // representing the fall-through flow from originalSwitchBB.
     assert(originalSwitchBB->bbJumpKind == BBJ_NONE);
-    assert(afterDefCondBlock->bbJumpKind == BBJ_SWITCH);
-    assert(afterDefCondBlock->bbJumpSwt->bbsHasDefault);
+    assert(afterDefaultCondBlock->bbJumpKind == BBJ_SWITCH);
+    assert(afterDefaultCondBlock->bbJumpSwt->bbsHasDefault);
 
     // Turn originalSwitchBB into a BBJ_COND.
     originalSwitchBB->bbJumpKind = BBJ_COND;
@@ -540,8 +542,8 @@ void Lowering::LowerSwitch(GenTreePtr* pTree)
 
     // Fix the pred for the default case: the default block target still has originalSwitchBB
     // as a predecessor, but the fgSplitBlockAfterStatement() moved all predecessors to point
-    // to afterDefCondBlock.
-    flowList* oldEdge = comp->fgRemoveRefPred(jumpTab[jumpCnt - 1], afterDefCondBlock);
+    // to afterDefaultCondBlock.
+    flowList* oldEdge = comp->fgRemoveRefPred(jumpTab[jumpCnt - 1], afterDefaultCondBlock);
     comp->fgAddRefPred(jumpTab[jumpCnt - 1], originalSwitchBB, oldEdge);
 
     // If we originally had 2 unique successors, check to see whether there is a unique
@@ -573,17 +575,17 @@ void Lowering::LowerSwitch(GenTreePtr* pTree)
         for (unsigned i = 1; i < jumpCnt - 1; ++i)
         {
             assert(jumpTab[i] == uniqueSucc);
-            (void) comp->fgRemoveRefPred(uniqueSucc, afterDefCondBlock);
+            (void) comp->fgRemoveRefPred(uniqueSucc, afterDefaultCondBlock);
         }
-        if (afterDefCondBlock->bbNext == uniqueSucc)
+        if (afterDefaultCondBlock->bbNext == uniqueSucc)
         {
-            afterDefCondBlock->bbJumpKind = BBJ_NONE;
-            afterDefCondBlock->bbJumpDest = nullptr;
+            afterDefaultCondBlock->bbJumpKind = BBJ_NONE;
+            afterDefaultCondBlock->bbJumpDest = nullptr;
         }
         else
         {
-            afterDefCondBlock->bbJumpKind = BBJ_ALWAYS;
-            afterDefCondBlock->bbJumpDest = uniqueSucc;
+            afterDefaultCondBlock->bbJumpKind = BBJ_ALWAYS;
+            afterDefaultCondBlock->bbJumpDest = uniqueSucc;
         }
     }
     // If the number of possible destinations is small enough, we proceed to expand the switch
@@ -593,7 +595,7 @@ void Lowering::LowerSwitch(GenTreePtr* pTree)
     {
         // Lower the switch into a series of compare and branch IR trees.
         //
-        // In this case we will morph the tree in the following way:
+        // In this case we will morph the node in the following way:
         // 1. Generate a JTRUE statement to evaluate the default case. (This happens above.)
         // 2. Start splitting the switch basic block into subsequent basic blocks, each of which will contain
         //    a statement that is responsible for performing a comparison of the table index and conditional
@@ -601,11 +603,11 @@ void Lowering::LowerSwitch(GenTreePtr* pTree)
 
         JITDUMP("Lowering switch BB%02u: using compare/branch expansion\n", originalSwitchBB->bbNum);
 
-        // We'll use 'afterDefCondBlock' for the first conditional. After that, we'll add new
+        // We'll use 'afterDefaultCondBlock' for the first conditional. After that, we'll add new
         // blocks. If we end up not needing it at all (say, if all the non-default cases just fall through),
         // we'll delete it.
-        bool fUsedAfterDefCondBlock = false;
-        BasicBlock* currentBlock = afterDefCondBlock;
+        bool fUsedAfterDefaultCondBlock = false;
+        BasicBlock* currentBlock = afterDefaultCondBlock;
 
         // Walk to entries 0 to jumpCnt - 1. If a case target follows, ignore it and let it fall through.
         // If no case target follows, the last one doesn't need to be a compare/branch: it can be an
@@ -617,7 +619,7 @@ void Lowering::LowerSwitch(GenTreePtr* pTree)
 
             // Remove the switch from the predecessor list of this case target's block.
             // We'll add the proper new predecessor edge later.
-            flowList* oldEdge = comp->fgRemoveRefPred(jumpTab[i], afterDefCondBlock);
+            flowList* oldEdge = comp->fgRemoveRefPred(jumpTab[i], afterDefaultCondBlock);
 
             if (jumpTab[i] == followingBB)
             {
@@ -627,8 +629,8 @@ void Lowering::LowerSwitch(GenTreePtr* pTree)
             }
 
             // We need a block to put in the new compare and/or branch.
-            // If we haven't used the afterDefCondBlock yet, then use that.
-            if (fUsedAfterDefCondBlock)
+            // If we haven't used the afterDefaultCondBlock yet, then use that.
+            if (fUsedAfterDefaultCondBlock)
             {
                 BasicBlock* newBlock = comp->fgNewBBafter(BBJ_NONE, currentBlock, true);
                 comp->fgAddRefPred(newBlock, currentBlock); // The fall-through predecessor.
@@ -636,8 +638,8 @@ void Lowering::LowerSwitch(GenTreePtr* pTree)
             }
             else
             {
-                assert(currentBlock == afterDefCondBlock);
-                fUsedAfterDefCondBlock = true;
+                assert(currentBlock == afterDefaultCondBlock);
+                fUsedAfterDefaultCondBlock = true;
             }
 
             // We're going to have a branch, either a conditional or unconditional,
@@ -673,7 +675,7 @@ void Lowering::LowerSwitch(GenTreePtr* pTree)
                                                             comp->gtNewLclvNode(tempLclNum, tempLclType),
                                                             comp->gtNewIconNode(i, TYP_INT));
                 /* Increment the lvRefCnt and lvRefCntWtd for temp */
-                tempVarDsc->incRefCnts(originalSwitchBB->getBBWeight(comp), comp);
+                tempVarDsc->incRefCnts(blockWeight, comp);
 
                 GenTreePtr gtCaseBranch = comp->gtNewOperNode(GT_JTRUE, TYP_VOID, gtCaseCond);
                 GenTreePtr gtCaseStmt = comp->fgNewStmtFromTree(gtCaseBranch, currentBlock);
@@ -689,13 +691,13 @@ void Lowering::LowerSwitch(GenTreePtr* pTree)
             comp->fgAddRefPred(currentBlock->bbNext, currentBlock);
         }
 
-        if (!fUsedAfterDefCondBlock)
+        if (!fUsedAfterDefaultCondBlock)
         {
             // All the cases were fall-through! We don't need this block.
             // Convert it from BBJ_SWITCH to BBJ_NONE and unset the BBF_DONT_REMOVE flag
             // so fgRemoveBlock() doesn't complain.
             JITDUMP("Lowering switch BB%02u: all switch cases were fall-through\n", originalSwitchBB->bbNum);
-            assert(currentBlock == afterDefCondBlock);
+            assert(currentBlock == afterDefaultCondBlock);
             assert(currentBlock->bbJumpKind == BBJ_SWITCH);
             currentBlock->bbJumpKind = BBJ_NONE;
             currentBlock->bbFlags &= ~BBF_DONT_REMOVE;
@@ -722,37 +724,18 @@ void Lowering::LowerSwitch(GenTreePtr* pTree)
                                                        comp->gtNewLclvNode(tempLclNum, tempLclType),
                                                        comp->gtNewJmpTableNode());
         /* Increment the lvRefCnt and lvRefCntWtd for temp */
-        tempVarDsc->incRefCnts(originalSwitchBB->getBBWeight(comp), comp);
+        tempVarDsc->incRefCnts(blockWeight, comp);
 
         // this block no longer branches to the default block
-        afterDefCondBlock->bbJumpSwt->removeDefault();
-        comp->fgInvalidateSwitchDescMapEntry(afterDefCondBlock);
+        afterDefaultCondBlock->bbJumpSwt->removeDefault();
+        comp->fgInvalidateSwitchDescMapEntry(afterDefaultCondBlock);
 
         GenTreeStmt* stmt = comp->fgNewStmtFromTree(gtTableSwitch);
-        comp->fgInsertStmtAtEnd(afterDefCondBlock, stmt);
+        comp->fgInsertStmtAtEnd(afterDefaultCondBlock, stmt);
     }
 
     // Get rid of the original GT_SWITCH.
     comp->fgRemoveStmt(originalSwitchBB, comp->compCurStmt, false);
-    // Set compCurStmt.  If asgStmt is top-level, we need to set it to that, so that any of
-    // its embedded statements are traversed.  Otherwise, set it to condStmt, which will
-    // contain the embedded asgStmt.
-    if (asgStmt->gtStmtIsTopLevel())
-    {
-        comp->compCurStmt = asgStmt;
-    }
-    else
-    {
-#ifdef DEBUG
-        GenTree* nextStmt = condStmt->gtNext;
-        while (nextStmt != nullptr && nextStmt != asgStmt)
-        {
-            nextStmt = nextStmt->gtNext;
-        }
-        assert(nextStmt == asgStmt);
-#endif // DEBUG
-        comp->compCurStmt = condStmt;
-    }
 }
 
 // splice in a unary op, between the child and parent

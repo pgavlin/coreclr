@@ -232,7 +232,7 @@ private:
 
     // Remove the nodes that are no longer used after an addressing mode is constructed under a GT_IND
     void LowerIndCleanupHelper(GenTreeAddrMode* addrMode, GenTreePtr tree);
-    void LowerSwitch(GenTreePtr* ppTree);
+    void LowerSwitch(GenTree* node);
     void LowerCast(GenTreePtr* ppTree);
     void LowerCntBlockOp(GenTreePtr* ppTree);
 
