@@ -7308,13 +7308,13 @@ DONE:
 // gtReplaceTree: Replace a tree with a new tree.
 //
 // Arguments:
-//    stmt            - The top-level root stmt of the tree bing replaced.
+//    stmt            - The top-level root stmt of the tree being replaced.
 //                      Must not be null.
 //    tree            - The tree being replaced. Must not be null.
 //    replacementTree - The replacement tree. Must not be null.
 //
 // Return Value:
-//    Return the tree node actually replaces the old tree.
+//    The tree node that replaces the old tree.
 //
 // Assumptions:
 //    The sequencing of the stmt has been done.

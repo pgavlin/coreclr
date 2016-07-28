@@ -17102,8 +17102,6 @@ void                Compiler::fgMarkAddressExposedLocals()
 bool Compiler::fgNodesMayInterfere(GenTree* write, GenTree* read)
 {
     LclVarDsc* srcVar = nullptr;
-    bool srcAliased = false;
-    bool dstAliased = false;
 
     bool readIsIndir  = read->OperIsIndir()  || read->OperIsImplicitIndir();
     bool writeIsIndir = write->OperIsIndir() || write->OperIsImplicitIndir();

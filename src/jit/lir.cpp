@@ -386,6 +386,18 @@ GenTree* LIR::Range::End() const
     return IsEmpty() ? nullptr : LastNode()->gtNext;
 }
 
+
+//------------------------------------------------------------------------
+// LIR::Range::EndExclusive: Returns a value that can be used during iteration to
+//                  find the end of the range, but exclusive of the last element
+//                  of the range (that is, the last element will not be included
+//                  in the iteration).
+//
+GenTree* LIR::Range::EndExclusive() const
+{
+    return IsEmpty() ? nullptr : LastNode();
+}
+
 //------------------------------------------------------------------------
 // LIR::Range::begin: Returns an iterator positioned at the first node in
 //                    the range.
@@ -403,7 +415,6 @@ LIR::Range::Iterator LIR::Range::end() const
 {
     return Iterator(End());
 }
-
 
 //------------------------------------------------------------------------
 // LIR::Range::FirstNonPhiNode: Returns the first non-phi node in the
@@ -504,6 +515,96 @@ void LIR::Range::InsertAfter(GenTree* node, GenTree* insertionPoint)
 
     node->gtPrev = insertionPoint;
     insertionPoint->gtNext = node;
+}
+
+//------------------------------------------------------------------------
+// LIR::Range::InsertBefore: Inserts a range before another node in `this`
+//                           range.
+//
+// Arguments:
+//    range - The range to splice in.
+//    insertionPoint - The node before which `range` will be inserted.
+//                     Must be part of `this` range.
+//
+void LIR::Range::InsertBefore(Range& range, GenTree* insertionPoint)
+{
+    // Is there anything to insert?
+    if (range.IsEmpty())
+        return;
+
+    assert(range.Begin()->gtPrev == nullptr);
+    assert(range.End()->gtNext == nullptr);
+
+    if (insertionPoint == nullptr)
+    {
+        assert(FirstNode() == nullptr);
+        assert(LastNode() == nullptr);
+
+        FirstNode() = range.FirstNode();
+        LastNode() = range.LastNode();
+        return;
+    }
+
+    assert(ContainsNode(insertionPoint));
+
+    if (insertionPoint->gtPrev == nullptr)
+    {
+        assert(insertionPoint == FirstNode());
+        FirstNode() = range.FirstNode();
+    }
+    else
+    {
+        range.FirstNode()->gtPrev = insertionPoint->gtPrev;
+        range.FirstNode()->gtPrev->gtNext = range.FirstNode();
+    }
+
+    range.LastNode()->gtNext = insertionPoint;
+    insertionPoint->gtPrev = range.LastNode();
+}
+
+//------------------------------------------------------------------------
+// LIR::Range::InsertAfter: Inserts a range after another node in `this`
+//                          range.
+//
+// Arguments:
+//    range - The range to splice in.
+//    insertionPoint - The node after which `range` will be inserted.
+//                     Must be part of `this` range.
+//
+void LIR::Range::InsertAfter(Range& range, GenTree* insertionPoint)
+{
+    // Is there anything to insert?
+    if (range.IsEmpty())
+        return;
+
+    assert(range.Begin()->gtPrev == nullptr);
+    assert(range.End()->gtNext == nullptr);
+
+    if (insertionPoint == nullptr)
+    {
+        assert(FirstNode() == nullptr);
+        assert(LastNode() == nullptr);
+
+        FirstNode() = range.FirstNode();
+        LastNode() = range.LastNode();
+        return;
+    }
+
+    assert(ContainsNode(insertionPoint));
+
+    if (insertionPoint->gtNext == nullptr)
+    {
+        assert(insertionPoint == LastNode());
+        LastNode() = range.LastNode();
+    }
+    else
+    {
+        range.LastNode()->gtNext = insertionPoint->gtNext;
+        range.LastNode()->gtNext->gtPrev = range.LastNode();
+    }
+
+    range.FirstNode()->gtPrev = insertionPoint;
+    insertionPoint->gtNext = range.FirstNode();
 }
 
 //------------------------------------------------------------------------

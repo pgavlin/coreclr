@@ -114,6 +114,7 @@ public:
 
         GenTree* Begin() const;
         GenTree* End() const;
+        GenTree* EndExclusive() const;
 
         Iterator begin() const;
         Iterator end() const;
@@ -126,6 +127,10 @@ public:
 
         void InsertBefore(GenTree* node, GenTree* insertionPoint);
         void InsertAfter(GenTree* node, GenTree* insertionPoint);
+
+        void InsertBefore(Range& range, GenTree* insertionPoint);
+        void InsertAfter(Range& range, GenTree* insertionPoint);
+
         void Remove(GenTree* node);
 
         bool TryGetUse(GenTree* node, Use* use);
@@ -188,6 +193,24 @@ public:
     static Range AsRange(TContainer* container)
     {
         return Range(container->FirstLIRNodeSlot(), container->LastLIRNodeSlot());
+    }
+
+    //------------------------------------------------------------------------
+    // LIR::SetTreeSeq: Given a newly created, unsequenced HIR tree, sequence
+    // the tree (set gtNext/gtPrev pointers), and return a Range representing
+    // the list of nodes. It is expected this will later be spliced into the
+    // LIR graph afterwards.
+    //
+    // Arguments:
+    //    compiler - The Compiler context.
+    //    tree - The tree to sequence.
+    //
+    // Return Value: The newly constructed range.
+    //
+    static Range SetTreeSeq(Compiler* compiler, GenTree* tree)
+    {
+        compiler->fgSetTreeSeq(tree);
+        return AsRange(compiler->fgTreeSeqBeg, tree);
     }
 };
 

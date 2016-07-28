@@ -30,11 +30,11 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 #endif // !defined(_TARGET_64BIT_)
 
 //------------------------------------------------------------------------
-// MakeSrcContained: Make "tree" a contained node
+// MakeSrcContained: Make "childNode" a contained node
 //
 // Arguments:
-//    'parentNode' is a non-leaf node that can contain its 'childNode' 
-//    'childNode' is an op that will now be contained by its parent.
+//    parentNode - is a non-leaf node that can contain its 'childNode' 
+//    childNode  - is an op that will now be contained by its parent.
 //
 // Notes:
 //    If 'childNode' it has any existing sources, they will now be sources for the parent.
@@ -50,16 +50,15 @@ void Lowering::MakeSrcContained(GenTreePtr parentNode, GenTreePtr childNode)
 }
 
 //------------------------------------------------------------------------
-// CheckImmedAndMakeContained: Check and make 'childNode' contained
-// Arguments:
-//    'parentNode' is any non-leaf node 
-//    'childNode' is an child op of 'parentNode'
-// Return value:
-//     returns true if we are able to make childNode contained immediate
+// CheckImmedAndMakeContained: Checks if the 'childNode' is a containable immediate
+//    and, if so, makes it contained.
 //
-// Notes:
-//    Checks if the 'childNode' is a containable immediate 
-//    and then makes it contained
+// Arguments:
+//    parentNode - is any non-leaf node 
+//    childNode  - is an child op of 'parentNode'
+//
+// Return value:
+//     true if we are able to make childNode a contained immediate
 //
 bool Lowering::CheckImmedAndMakeContained(GenTree* parentNode, GenTree* childNode)
 {
@@ -75,30 +74,27 @@ bool Lowering::CheckImmedAndMakeContained(GenTree* parentNode, GenTree* childNod
 }
 
 //------------------------------------------------------------------------
-// IsSafeToContainMem: Checks for conflicts between childNode and parentNode.
+// IsSafeToContainMem: Checks for conflicts between childNode and parentNode,
+// and returns 'true' iff memory operand childNode can be contained in parentNode.
 //
 // Arguments:
 //    parentNode  - a non-leaf binary node
 //    childNode   - a memory op that is a child op of 'parentNode'
 //
 // Return value:
-//    returns true if it is safe to make childNode a contained memory op
+//    true if it is safe to make childNode a contained memory operand.
 //
-// Notes:
-//    Checks for memory conflicts in the instructions between childNode and parentNode,
-//    and returns true iff childNode can be contained.
-
 bool Lowering::IsSafeToContainMem(GenTree* parentNode, GenTree* childNode)
 {
     assert(parentNode->OperIsBinary());
     assert(childNode->isMemoryOp());
 
-    // Check conflicts against nodes between 'childNode' and 'parentNode'
-    GenTree* node;
     unsigned int childFlags = (childNode->gtFlags & GTF_ALL_EFFECT);
-    for (node = childNode->gtNext;
-         (node != parentNode) && (node != nullptr);
-         node = node->gtNext)
+
+    LIR::Range range = LIR::AsRange(childNode, parentNode);
+    GenTree* node;
+    GenTree* end;
+    for (node = range.Begin(), end = range.EndExclusive(); (node != nullptr) && (node != end); node = node->gtNext)
     {
         if ((childFlags != 0) && node->IsCall())
         {
@@ -113,9 +109,9 @@ bool Lowering::IsSafeToContainMem(GenTree* parentNode, GenTree* childNode)
             return false;
         }
     }
-    if (node != parentNode)
+    if (node != parentNode) // TODO: should this be asserted somewhere else? This is "defense in depth" since it works even in non-DEBUG builds.
     {
-        assert(!"Ran off end of stmt\n");
+        assert(!"Ran off end of range\n");
         return false;
     }
     return true;
@@ -123,6 +119,7 @@ bool Lowering::IsSafeToContainMem(GenTree* parentNode, GenTree* childNode)
 
 //------------------------------------------------------------------------
 
+#if 0
 //static
 Compiler::fgWalkResult Lowering::LowerNodeHelper(GenTreePtr* pTree, Compiler::fgWalkData* data)
 {
@@ -130,23 +127,18 @@ Compiler::fgWalkResult Lowering::LowerNodeHelper(GenTreePtr* pTree, Compiler::fg
     lower->LowerNode(pTree, data);
     return Compiler::WALK_CONTINUE;
 }
+#endif // 0
 
 
-/** Creates an assignment of an existing tree to a new temporary local variable
- * and the specified reference count for the new variable.
+/** Creates an assignment of an existing tree to a new temporary local variable.
+ * TODO(btf): delete this in favor of LIR helpers?
  */
-GenTreePtr Lowering::CreateLocalTempAsg(GenTreePtr rhs,
-                                        unsigned refCount,
-                                        GenTreePtr* ppLclVar) //out legacy arg
+GenTreePtr Lowering::CreateLocalTempAsg(GenTreePtr rhs)
 {
     unsigned lclNum = comp->lvaGrabTemp(true DEBUGARG("Lowering is creating a new local variable"));
     comp->lvaSortAgain = true;
     comp->lvaTable[lclNum].lvType = rhs->TypeGet();
-
-    // Make sure we don't lose precision when downgrading to short
-    noway_assert(FitsIn<short>(refCount));
-    comp->lvaTable[lclNum].lvRefCnt = (short)(refCount);
-    JITDUMP("Lowering has requested a new temporary local variable: V%02u with refCount %u \n", lclNum, refCount);
+    comp->lvaTable[lclNum].lvRefCnt = 1;
 
     GenTreeLclVar* store = new(comp, GT_STORE_LCL_VAR) GenTreeLclVar(GT_STORE_LCL_VAR, rhs->TypeGet(), lclNum, BAD_IL_OFFSET);
     store->gtOp1 = rhs;
@@ -166,12 +158,13 @@ GenTreePtr Lowering::CreateLocalTempAsg(GenTreePtr rhs,
 //    The newly created store statement.
 //
 // Assumptions:
-//    This may only be called during tree lowering. The callee must ensure that the tree has already
-//    been lowered and is part of compCurStmt and that compCurStmt is in compCurBB.
+//    This may only be called during tree lowering. The caller must ensure that (a) the tree has already
+//    been lowered, (b) the tree is part of compCurStmt, and (c) that compCurStmt is in compCurBB.
 //
+// TODO(btf): stop creating embedded statements!
 // Notes:
 //    The newly created statement is usually an embedded statement but it can also be a top-level
-//    statement if the tree to be replaced extends to the begining of the current statement. If
+//    statement if the tree to be replaced extends to the beginning of the current statement. If
 //    a top-level statement is created any embedded statements contained in the tree move to the
 //    the new top-level statement, before the current statement. Such embedded statements need to 
 //    be lowered here because the normal lowering code path won't reach them anymore.
@@ -229,65 +222,48 @@ GenTreeStmt* Lowering::CreateTemporary(GenTree** ppTree)
 
 // This is the main entry point for Lowering.  
 
-// In addition to that, LowerNode is also responsible for initializing the
-// treeNodeMap data structure consumed by LSRA.  This map is a 1:1 mapping between
-// expression trees and TreeNodeInfo structs.  Currently, Lowering initializes
-// treeNodeMap with new instances of TreeNodeInfo for each tree and also annotates them
-// with the register requirements needed for each tree.
-// We receive a double pointer to a tree in order to be able, if needed, to entirely
-// replace the tree by creating a new one and updating the underying pointer so this
-// enables in-place tree manipulation.
-// The current design is made in such a way we perform a helper call for each different
-// type of tree.  Currently, the only supported node is GT_IND and for that we call the
-// LowerInd private method.  The build system picks up the appropiate Lower.cpp (either
-// LowerArm/LowerX86/LowerAMD64) that has the machine dependent logic to lower each node.
-// TODO-Throughput: Modify post-order traversal to propagate parent info OR
-// implement child iterator directly on GenTree, so that we can
-// lower in-place.
-void Lowering::LowerNode(GenTreePtr* ppTree, Compiler::fgWalkData* data)
+void Lowering::LowerNode(GenTree* node)
 {
-    // First, lower any child nodes (done via post-order walk)
-    assert(ppTree);
-    assert(*ppTree);
-    switch ((*ppTree)->gtOper)
+    assert(node != nullptr);
+    switch (node->gtOper)
     {
     case GT_IND:
     case GT_STOREIND:
-        LowerInd(ppTree);
+        LowerInd(node);
         break;
 
     case GT_ADD:
-        LowerAdd(ppTree, data);
+        LowerAdd(node);
         break;
         
     case GT_UDIV:
     case GT_UMOD:
-        LowerUnsignedDivOrMod(*ppTree);
+        LowerUnsignedDivOrMod(node);
         break;
 
     case GT_DIV:
     case GT_MOD:
-        LowerSignedDivOrMod(ppTree, data);
+        LowerSignedDivOrMod(node);
         break;
 
     case GT_SWITCH:
-        LowerSwitch(ppTree);
+        LowerSwitch(node);
         break;
 
     case GT_CALL:
-        LowerCall(*ppTree);
+        LowerCall(node);
         break;
 
     case GT_JMP:
-        LowerJmpMethod(*ppTree);
+        LowerJmpMethod(node);
         break;
 
     case GT_RETURN:
-        LowerRet(*ppTree);
+        LowerRet(node);
         break;
 
     case GT_CAST:
-        LowerCast(ppTree);
+        LowerCast(node);
         break;
 
     case GT_ARR_ELEM:
@@ -300,22 +276,22 @@ void Lowering::LowerNode(GenTreePtr* ppTree, Compiler::fgWalkData* data)
 
     case GT_ROL:
     case GT_ROR:
-        LowerRotate(*ppTree);
+        LowerRotate(node);
         break;
 
 #ifdef FEATURE_SIMD
     case GT_SIMD:
-        if ((*ppTree)->TypeGet() == TYP_SIMD12)
+        if (node->TypeGet() == TYP_SIMD12)
         {
             // GT_SIMD node requiring to produce TYP_SIMD12 in fact
             // produces a TYP_SIMD16 result
-            (*ppTree)->gtType = TYP_SIMD16;
+            node->gtType = TYP_SIMD16;
         }
         break;
 
     case GT_LCL_VAR:
     case GT_STORE_LCL_VAR:
-        if ((*ppTree)->TypeGet() == TYP_SIMD12)
+        if (node->TypeGet() == TYP_SIMD12)
         {
 #ifdef _TARGET_64BIT_
             // Assumption 1:
@@ -340,7 +316,7 @@ void Lowering::LowerNode(GenTreePtr* ppTree, Compiler::fgWalkData* data)
             // Vector3 return values are returned two return registers and Caller assembles them into a 
             // single xmm reg. Hence RyuJIT explicitly generates code to clears upper 4-bytes of Vector3 
             // type args in prolog and Vector3 type return value of a call            
-            (*ppTree)->gtType = TYP_SIMD16;
+            node->gtType = TYP_SIMD16;
 #else
             NYI("Lowering of TYP_SIMD12 locals");
 #endif // _TARGET_64BIT_
@@ -348,7 +324,7 @@ void Lowering::LowerNode(GenTreePtr* ppTree, Compiler::fgWalkData* data)
 #endif //FEATURE_SIMD
 
     default:
-        return;
+        break;
     }
 }
 
@@ -464,7 +440,7 @@ void Lowering::LowerSwitch(GenTreePtr* pTree)
         }
         // We have to get rid of the GT_SWITCH node but a child might have side effects so just assign 
         // the result of the child subtree to a temp.
-        GenTree* store = CreateLocalTempAsg(tree->gtOp.gtOp1, 1);
+        GenTree* store = CreateLocalTempAsg(tree->gtOp.gtOp1);
         tree->InsertAfterSelf(store, comp->compCurStmt->AsStmt());
         Compiler::fgSnipNode(comp->compCurStmt->AsStmt(), tree);
         *pTree = store;
@@ -1351,7 +1327,7 @@ void Lowering::LowerCall(GenTree* node)
     {
         // The controlExpr is newly constructed, so we can use tree sequencing
         comp->gtSetEvalOrder(result);
-        comp->fgSetTreeSeq(result, nullptr);
+        comp->fgSetTreeSeq(result);
 
         JITDUMP("results of lowering call:\n");
         DISPTREE(result);
@@ -1372,7 +1348,7 @@ void Lowering::LowerCall(GenTree* node)
         {
             // We got a new call target constructed, so resequence it.
             comp->gtSetEvalOrder(result);
-            comp->fgSetTreeSeq(result, nullptr);
+            comp->fgSetTreeSeq(result);
             JITDUMP("results of lowering tail call via helper:\n");
             DISPTREE(result);            
         }
@@ -3287,35 +3263,31 @@ void Lowering::LowerAddrMode(GenTreePtr* pTree, GenTree* before, Compiler::fgWal
 // LowerAdd: turn this add into a GT_LEA if that would be profitable
 //
 // Arguments:
-//    pTree:   pointer to the parent node's link to the node we care about
-//    data:    fgWalkData which is used to get info about parents and fixup call args
-
-void Lowering::LowerAdd(GenTreePtr* pTree, Compiler::fgWalkData* data)
+//    node - the node we care about
+//
+void Lowering::LowerAdd(GenTree* node)
 {
-    GenTreePtr newNode = NULL;
-
-    GenTreePtr addr = *pTree;
-
 #ifdef _TARGET_ARMARCH_
     // For ARM architectures we don't have the LEA instruction
     // therefore we won't get much benefit from doing this.
     return;
 #else // _TARGET_ARMARCH_
-    if (data->parentStack->Height() < 2)
+    if (!varTypeIsIntegralOrI(node))
         return;
-    
+
+    LIR::Use use;
+    if (!m_blockRange.TryGetUse(node, &use))
+        return;
+
     // if this is a child of an indir, let the parent handle it
-    if (data->parentStack->Index(1)->OperIsIndir())
+    if (use.User()->OperIsIndir())
         return;
 
     // if there is a chain of adds, only look at the topmost one
-    if (data->parentStack->Index(1)->gtOper == GT_ADD)
+    if (use.User()->gtOper == GT_ADD)
         return;
 
-    if (!varTypeIsIntegralOrI(addr))
-        return;
-
-    LowerAddrMode(pTree, addr, data, false);
+    LowerAddrMode(use, false);
 #endif // !_TARGET_ARMARCH_
 }
 
@@ -3324,13 +3296,13 @@ void Lowering::LowerAdd(GenTreePtr* pTree, Compiler::fgWalkData* data)
 // divisor into GT_RSZ/GT_AND nodes.
 //
 // Arguments:
-//    tree:   pointer to the GT_UDIV/GT_UMOD node to be lowered
-
-void Lowering::LowerUnsignedDivOrMod(GenTree* tree)
+//    node - pointer to the GT_UDIV/GT_UMOD node to be lowered
+//
+void Lowering::LowerUnsignedDivOrMod(GenTree* node)
 {
-    assert(tree->OperGet() == GT_UDIV || tree->OperGet() == GT_UMOD);
+    assert((node->OperGet() == GT_UDIV) || (node->OperGet() == GT_UMOD));
 
-    GenTree* divisor = tree->gtGetOp2();
+    GenTree* divisor = node->gtGetOp2();
 
     if (divisor->IsCnsIntOrI())
     {
@@ -3340,7 +3312,7 @@ void Lowering::LowerUnsignedDivOrMod(GenTree* tree)
         {
             genTreeOps newOper;
 
-            if (tree->OperGet() == GT_UDIV)
+            if (node->OperGet() == GT_UDIV)
             {
                 newOper = GT_RSZ;
                 divisorValue = genLog2(divisorValue);
@@ -3351,7 +3323,7 @@ void Lowering::LowerUnsignedDivOrMod(GenTree* tree)
                 divisorValue -= 1;
             }
 
-            tree->SetOper(newOper);
+            node->SetOper(newOper);
             divisor->gtIntCon.SetIconValue(divisorValue);
         }
     }
@@ -3362,184 +3334,177 @@ void Lowering::LowerUnsignedDivOrMod(GenTree* tree)
 // const divisor into equivalent but faster sequences.
 //
 // Arguments:
-//    pTree:   pointer to the parent node's link to the node we care about
-//    data:    fgWalkData which is used to get info about parents and fixup call args
-
-void Lowering::LowerSignedDivOrMod(GenTreePtr* ppTree, Compiler::fgWalkData* data)
+//    node - pointer to node we care about
+//
+void Lowering::LowerSignedDivOrMod(GenTreePtr node)
 {
-    GenTree* divMod = *ppTree;
-    assert(divMod->OperGet() == GT_DIV || divMod->OperGet() == GT_MOD);
+    assert((node->OperGet() == GT_DIV) || (node->OperGet() == GT_MOD));
+
+    GenTree* divMod = node;
     GenTree* divisor = divMod->gtGetOp2();
 
-    if (divisor->IsCnsIntOrI())
+    if (!divisor->IsCnsIntOrI())
+        return; // no transformations to make
+
+    const var_types type = divMod->TypeGet();
+    assert((type == TYP_INT) || (type == TYP_LONG));
+
+    GenTree* dividend = divMod->gtGetOp1();
+
+    if (dividend->IsCnsIntOrI())
     {
-        const var_types type = divMod->TypeGet();
-        assert(type == TYP_INT || type == TYP_LONG);
+        // We shouldn't see a divmod with constant operands here but if we do then it's likely 
+        // because optimizations are disabled or it's a case that's supposed to throw an exception. 
+        // Don't optimize this.
+        return;
+    }
 
-        GenTree* dividend = divMod->gtGetOp1();
+    ssize_t divisorValue = divisor->gtIntCon.IconValue();
 
-        if (dividend->IsCnsIntOrI())
+    if (divisorValue == -1)
+    {
+        // x / -1 can't be optimized because INT_MIN / -1 is required to throw an exception.
+     
+        // x % -1 is always 0 and the IL spec says that the rem instruction "can" throw an exception if x is
+        // the minimum representable integer. However, the C# spec says that an exception "is" thrown in this
+        // case so optimizing this case would break C# code.
+
+        // A runtime check could be used to handle this case but it's probably too rare to matter.
+        return;
+    }
+
+    bool isDiv = divMod->OperGet() == GT_DIV;
+
+    if (isDiv)
+    {
+        if ((type == TYP_INT && divisorValue == INT_MIN) ||
+            (type == TYP_LONG && divisorValue == INT64_MIN))
         {
-            // We shouldn't see a divmod with constant operands here but if we do then it's likely 
-            // because optimizations are disabled or it's a case that's supposed to throw an exception. 
-            // Don't optimize this.
-            return;
-        }
-
-        ssize_t divisorValue = divisor->gtIntCon.IconValue();
-
-        if (divisorValue == -1)
-        {
-            // x / -1 can't be optimized because INT_MIN / -1 is required to throw an exception.
-         
-            // x % -1 is always 0 and the IL spec says that the rem instruction "can" throw an exception if x is
-            // the minimum representable integer. However, the C# spec says that an exception "is" thrown in this
-            // case so optimizing this case would break C# code.
-
-            // A runtime check could be used to handle this case but it's probably too rare to matter.
-            return;
-        }
-        
-        bool isDiv = divMod->OperGet() == GT_DIV;
-
-        if (isDiv)
-        {
-            if ((type == TYP_INT && divisorValue == INT_MIN) ||
-                (type == TYP_LONG && divisorValue == INT64_MIN))
-            {
-                // If the divisor is the minimum representable integer value then we can use a compare, 
-                // the result is 1 iff the dividend equals divisor.
-                divMod->SetOper(GT_EQ);
-                return;
-            }
-        }
-
-        size_t absDivisorValue = (divisorValue == SSIZE_T_MIN) ? static_cast<size_t>(divisorValue) : static_cast<size_t>(abs(divisorValue));
-
-        if (isPow2(absDivisorValue))
-        {
-            // We need to use the dividend node multiple times so its value needs to be
-            // computed once and stored in a temp variable.
-            CreateTemporary(&(divMod->gtOp.gtOp1));
-            dividend = divMod->gtGetOp1();
-
-            GenTreeStmt* curStmt = comp->compCurStmt->AsStmt();
-            unsigned curBBWeight = currBlock->getBBWeight(comp);
-            unsigned dividendLclNum = dividend->gtLclVar.gtLclNum;
-
-            GenTree* adjustment = comp->gtNewOperNode(
-                GT_RSH, type,
-                dividend,
-                comp->gtNewIconNode(type == TYP_INT ? 31 : 63));
-
-            if (absDivisorValue == 2)
-            {
-                // If the divisor is +/-2 then we'd end up with a bitwise and between 0/-1 and 1.
-                // We can get the same result by using GT_RSZ instead of GT_RSH.
-                adjustment->SetOper(GT_RSZ);
-            }
-            else
-            {
-                adjustment = comp->gtNewOperNode(
-                    GT_AND, type,
-                    adjustment,
-                    comp->gtNewIconNode(absDivisorValue - 1, type));
-            }
-
-            GenTree* adjustedDividend = comp->gtNewOperNode(
-                GT_ADD, type,
-                adjustment,
-                comp->gtNewLclvNode(dividendLclNum, type));
-
-            comp->lvaTable[dividendLclNum].incRefCnts(curBBWeight, comp);
-
-            GenTree* newDivMod;
-
-            if (isDiv)
-            {
-                // perform the division by right shifting the adjusted dividend
-                divisor->gtIntCon.SetIconValue(genLog2(absDivisorValue));
-
-                newDivMod = comp->gtNewOperNode(
-                    GT_RSH, type,
-                    adjustedDividend,
-                    divisor);
-
-                if (divisorValue < 0)
-                {
-                    // negate the result if the divisor is negative
-                    newDivMod = comp->gtNewOperNode(
-                        GT_NEG, type,
-                        newDivMod);
-                }
-            }
-            else
-            {
-                // divisor % dividend = dividend - divisor x (dividend / divisor)
-                // divisor x (dividend / divisor) translates to (dividend >> log2(divisor)) << log2(divisor)
-                // which simply discards the low log2(divisor) bits, that's just dividend & ~(divisor - 1)
-                divisor->gtIntCon.SetIconValue(~(absDivisorValue - 1));
-
-                newDivMod = comp->gtNewOperNode(
-                    GT_SUB, type,
-                    comp->gtNewLclvNode(dividendLclNum, type),
-                    comp->gtNewOperNode(
-                        GT_AND, type,
-                        adjustedDividend,
-                        divisor));
-
-                comp->lvaTable[dividendLclNum].incRefCnts(curBBWeight, comp);
-            }
-
-            // Remove the divisor and dividend nodes from the linear order, 
-            // since we have reused them and will resequence the tree
-            comp->fgSnipNode(curStmt, divisor);
-            comp->fgSnipNode(curStmt, dividend);
-
-            // linearize and insert the new tree before the original divMod node
-            comp->gtSetEvalOrder(newDivMod);
-            comp->fgSetTreeSeq(newDivMod);
-            comp->fgInsertTreeInListBefore(newDivMod, divMod, curStmt);
-            comp->fgSnipNode(curStmt, divMod);
-
-            // the divMod that we've replaced could have been a call arg
-            comp->fgFixupIfCallArg(data->parentStack, divMod, newDivMod);
-
-            // replace the original divmod node with the new divmod tree
-            *ppTree = newDivMod;
-
+            // If the divisor is the minimum representable integer value then we can use a compare, 
+            // the result is 1 iff the dividend equals divisor.
+            divMod->SetOper(GT_EQ);
             return;
         }
     }
+
+    size_t absDivisorValue = (divisorValue == SSIZE_T_MIN) ? static_cast<size_t>(divisorValue) : static_cast<size_t>(abs(divisorValue));
+
+    if (!isPow2(absDivisorValue))
+        return;
+
+    // We're committed to the conversion now. Go find the use.
+    LIR::Use use;
+    if (!m_blockRange.TryGetUse(node, &use))
+    {
+        assert(!"signed DIV/MOD node is unused");
+        return;
+    }
+
+    // We need to use the dividend node multiple times so its value needs to be
+    // computed once and stored in a temp variable.
+
+    unsigned curBBWeight = comp->compCurBB->getBBWeight(comp);
+
+    LIR::Use opDividend(m_blockRange, &divMod->gtOp.gtOp1, divMod);
+    opDividend.ReplaceWithLclVar(comp, curBBWeight);
+
+    dividend = divMod->gtGetOp1();
+    assert(dividend->OperGet() == GT_LCL_VAR);
+
+    unsigned dividendLclNum = dividend->gtLclVar.gtLclNum;
+
+    GenTree* adjustment = comp->gtNewOperNode(
+        GT_RSH, type,
+        dividend,
+        comp->gtNewIconNode(type == TYP_INT ? 31 : 63));
+
+    if (absDivisorValue == 2)
+    {
+        // If the divisor is +/-2 then we'd end up with a bitwise and between 0/-1 and 1.
+        // We can get the same result by using GT_RSZ instead of GT_RSH.
+        adjustment->SetOper(GT_RSZ);
+    }
+    else
+    {
+        adjustment = comp->gtNewOperNode(
+            GT_AND, type,
+            adjustment,
+            comp->gtNewIconNode(absDivisorValue - 1, type));
+    }
+
+    GenTree* adjustedDividend = comp->gtNewOperNode(
+        GT_ADD, type,
+        adjustment,
+        comp->gtNewLclvNode(dividendLclNum, type));
+
+    comp->lvaTable[dividendLclNum].incRefCnts(curBBWeight, comp);
+
+    GenTree* newDivMod;
+
+    if (isDiv)
+    {
+        // perform the division by right shifting the adjusted dividend
+        divisor->gtIntCon.SetIconValue(genLog2(absDivisorValue));
+
+        newDivMod = comp->gtNewOperNode(GT_RSH, type, adjustedDividend, divisor);
+
+        if (divisorValue < 0)
+        {
+            // negate the result if the divisor is negative
+            newDivMod = comp->gtNewOperNode(GT_NEG, type, newDivMod);
+        }
+    }
+    else
+    {
+        // divisor % dividend = dividend - divisor x (dividend / divisor)
+        // divisor x (dividend / divisor) translates to (dividend >> log2(divisor)) << log2(divisor)
+        // which simply discards the low log2(divisor) bits, that's just dividend & ~(divisor - 1)
+        divisor->gtIntCon.SetIconValue(~(absDivisorValue - 1));
+
+        newDivMod = comp->gtNewOperNode(
+            GT_SUB, type,
+            comp->gtNewLclvNode(dividendLclNum, type),
+            comp->gtNewOperNode(GT_AND, type, adjustedDividend, divisor));
+
+        comp->lvaTable[dividendLclNum].incRefCnts(curBBWeight, comp);
+    }
+
+    // Remove the divisor and dividend nodes from the linear order, 
+    // since we have reused them and will resequence the tree
+    m_blockRange.Remove(divisor);
+    m_blockRange.Remove(dividend);
+
+    // linearize and insert the new tree before the original divMod node
+    comp->gtSetEvalOrder(newDivMod);
+    LIR::Range range = LIR::SetTreeSeq(comp, newDivMod);
+    m_blockRange.InsertBefore(range, divMod);
+    m_blockRange.Remove(divMod);
+
+    // replace the original divmod node with the new divmod tree
+    use.ReplaceWith(comp, newDivMod);
 }
 
 //------------------------------------------------------------------------
 // LowerInd: attempt to transform indirected expression into an addressing mode
 //
 // Arguments:
-//    pTree:   pointer to the parent node's link to the node we care about
-
-void Lowering::LowerInd(GenTreePtr* pTree)
+//    node - the node we care about
+//
+void Lowering::LowerInd(GenTree* node)
 {
-    GenTreePtr newNode = NULL;
-    GenTreePtr cTree = *pTree;
+    GenTreePtr before = node;
+    if ((node->OperGet() == GT_STOREIND) && !node->IsReverseOp())
+    {
+        before = comp->fgGetFirstNode(node->gtGetOp2());
+    }
 
-    JITDUMP("\n");
-    DISPNODE(cTree);
-
-    GenTreePtr addr = cTree->gtOp.gtOp1;
-
-    GenTreePtr before = cTree;
-    if (cTree->OperGet() == GT_STOREIND && !cTree->IsReverseOp())
-        before = comp->fgGetFirstNode(cTree->gtGetOp2());
-
-    LowerAddrMode(&cTree->gtOp.gtOp1, before, nullptr, true);
+    LowerAddrMode(&node->gtOp.gtOp1, before, nullptr, true);
 
     // Mark all GT_STOREIND nodes to indicate that it is not known
     // whether it represents a RMW memory op.  
-    if (cTree->OperGet() == GT_STOREIND)
+    if (node->OperGet() == GT_STOREIND)
     {
-        cTree->AsStoreInd()->SetRMWStatusDefault();
+        node->AsStoreInd()->SetRMWStatusDefault();
     }
 }
 
@@ -3794,36 +3759,14 @@ void Lowering::DoPhase()
 
     for (BasicBlock* block = comp->fgFirstBB; block; block = block->bbNext)
     {
-        GenTreePtr      stmt;
-
         /* Make the block publicly available */
-        currBlock = block;
         comp->compCurBB = block;
 
 #if !defined(_TARGET_64BIT_)
         decomp.DecomposeBlock(block);
 #endif //!_TARGET_64BIT_
 
-#if 0 // NOTE(pdg): ifdef'd out for better testing of decomp
-        // Walk the statement trees in this basic block 
-        for (stmt = block->bbTreeList; stmt; stmt = stmt->gtNext)
-        {
-            if (stmt->gtFlags & GTF_STMT_SKIP_LOWER)
-            {
-                continue;
-            }
-#ifdef DEBUG
-            if (comp->verbose)
-            {
-                printf("Lowering BB%02u, stmt id %u\n", block->bbNum, stmt->gtTreeID);
-            }
-#endif
-            comp->compCurStmt = stmt;
-            comp->fgWalkTreePost(&stmt->gtStmt.gtStmtExpr, &Lowering::LowerNodeHelper, this, true);
-            // We may have removed "stmt" in LowerNode().
-            stmt = comp->compCurStmt;
-        }
-#endif
+        LowerBlock(block);
     }
 
     NYI("later phases cannot yet process LIR!");
@@ -3995,6 +3938,40 @@ void Lowering::DoPhase()
         }
     }
     DBEXEC(VERBOSE, DumpNodeInfoMap());
+}
+
+void Lowering::LowerBlock(BasicBlock* block)
+{
+#if 0
+    for (GenTree* stmt = block->bbTreeList; stmt != nullptr; stmt = stmt->gtNext)
+    {
+        if (stmt->gtFlags & GTF_STMT_SKIP_LOWER)
+        {
+            continue;
+        }
+#ifdef DEBUG
+        if (comp->verbose)
+        {
+            printf("Lowering BB%02u, stmt id %u\n", block->bbNum, stmt->gtTreeID);
+        }
+#endif
+        comp->compCurStmt = stmt;
+        comp->fgWalkTreePost(&stmt->gtStmt.gtStmtExpr, &Lowering::LowerNodeHelper, this, true);
+        // We may have removed "stmt" in LowerNode().
+        stmt = comp->compCurStmt;
+    }
+#endif
+
+    assert(block == comp->compCurBB); // compCurBB must already be set.
+    assert(block->isEmpty() || block->IsLIR());
+
+    LIR::Range range = LIR::AsRange(block);
+    for (GenTree* node = range.FirstNonPhiNode(), *end = range.End(); node != end; node = node->gtNext)
+    {
+        LowerNode(node);
+    }
+
+    assert(range.CheckLIR(comp));
 }
 
 /** Verifies if both of these trees represent the same indirection.
@@ -4300,21 +4277,19 @@ void Lowering::getCastDescription(GenTreePtr treeNode, CastInfo* castInfo)
 #ifdef DEBUG
 void Lowering::DumpNodeInfoMap()
 {
-    // dump tree node info
     printf("-----------------------------\n");
     printf("TREE NODE INFO DUMP\n");
     printf("-----------------------------\n");
 
-    for (BasicBlock* block = comp->fgFirstBB; block; block = block->bbNext)
+    for (BasicBlock* block = comp->fgFirstBB; block != nullptr; block = block->bbNext)
     {
-        GenTreePtr      stmt;
-        GenTreePtr      tree;
-        for (stmt = block->FirstNonPhiDef(); stmt; stmt = stmt->gtNext)
+        for (GenTree* stmt = block->FirstNonPhiDef(); stmt != nullptr; stmt = stmt->gtNext)
         {
             GenTreePtr node;
             foreach_treenode_execution_order(node, stmt)
             {
-                if (stmt->gtStmt.gtStmtIsEmbedded()) continue;
+                if (stmt->gtStmt.gtStmtIsEmbedded())
+                    continue;
                 comp->gtDispTree(node, nullptr, nullptr, true);
                 printf("    +");
                 node->gtLsraInfo.dump(m_lsra);

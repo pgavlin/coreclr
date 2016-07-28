@@ -55,6 +55,7 @@ private:
     static Compiler::fgWalkResult TreeInfoInitHelper(GenTreePtr* ppTree, Compiler::fgWalkData* data);
     
     // Member Functions
+    void LowerBlock(BasicBlock* block);
     void LowerNode(GenTreePtr* tree, Compiler::fgWalkData* data);
     GenTreeStmt* LowerMorphAndSeqTree(GenTree *tree);
     void CheckVSQuirkStackPaddingNeeded(GenTreeCall* call);
@@ -223,11 +224,11 @@ private:
     void DumpNodeInfoMap();
 
     // Per tree node member functions
-    void LowerInd(GenTreePtr* ppTree);
+    void LowerInd(GenTree* node);
     void LowerAddrMode(GenTreePtr* ppTree, GenTree* before, Compiler::fgWalkData* data, bool isIndir);
-    void LowerAdd(GenTreePtr* ppTree, Compiler::fgWalkData* data);
-    void LowerUnsignedDivOrMod(GenTree* tree);
-    void LowerSignedDivOrMod(GenTreePtr* ppTree, Compiler::fgWalkData* data);
+    void LowerAdd(GenTree* node);
+    void LowerUnsignedDivOrMod(GenTree* node);
+    void LowerSignedDivOrMod(GenTree* node);
 
     // Remove the nodes that are no longer used after an addressing mode is constructed under a GT_IND
     void LowerIndCleanupHelper(GenTreeAddrMode* addrMode, GenTreePtr tree);
@@ -256,7 +257,7 @@ public:
 private:
     static bool NodesAreEquivalentLeaves       (GenTreePtr candidate, GenTreePtr storeInd);
 
-    GenTreePtr  CreateLocalTempAsg      (GenTreePtr rhs, unsigned refCount, GenTreePtr *ppLclVar = nullptr);
+    GenTreePtr  CreateLocalTempAsg      (GenTreePtr rhs);
     GenTreeStmt* CreateTemporary        (GenTree** ppTree);
     bool AreSourcesPossiblyModified     (GenTree* use, GenTree* src1, GenTree *src2);
     void ReplaceNode                    (GenTree** ppTreeLocation,
@@ -280,10 +281,9 @@ private:
     // Checks for memory conflicts in the instructions between childNode and parentNode, and returns true if childNode can be contained.
     bool IsSafeToContainMem(GenTree* parentNode, GenTree* childNode);
 
-    LinearScan *m_lsra;
-    BasicBlock *currBlock;
-    LIR::Range m_currBlockRange;
+    LinearScan* m_lsra;
     unsigned vtableCallTemp; // local variable we use as a temp for vtable calls
+    LIR::Range m_blockRange;    // The range of nodes in the current block.
 };
 
 #endif // _LOWER_H_

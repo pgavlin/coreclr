@@ -18316,7 +18316,7 @@ GenTreePtr Compiler::fgGetFirstNode(GenTreePtr tree)
     GenTreePtr child = tree;
     while (child->NumChildren() > 0)
     {
-        if (child->OperIsBinary() && ((child->gtFlags & GTF_REVERSE_OPS) != 0))
+        if (child->OperIsBinary() && child->IsReverseOp())
         {
             child = child->GetChild(1);
         }
