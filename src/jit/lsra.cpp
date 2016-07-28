@@ -2495,6 +2495,7 @@ LinearScan::getKillSetForNode(GenTree* tree)
 {
     regMaskTP killSet = getKillSetForNode(compiler, tree);
 
+#ifdef _TARGET_XARCH_
     switch (tree->OperGet())
     {
     case GT_MOD:
@@ -2519,6 +2520,7 @@ LinearScan::getKillSetForNode(GenTree* tree)
     default:
         break;
     }
+#endif
 
     return killSet;
 }
