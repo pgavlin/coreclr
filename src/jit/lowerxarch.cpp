@@ -3174,7 +3174,8 @@ void Lowering::LowerCmp(GenTreePtr tree)
                                 }
                             }
                         }
-                        comp->fgSnipNode(comp->compCurStmt->AsStmt(), removeTreeNode);
+
+                        m_currBlockRange.Remove(removeTreeNode);
 #ifdef DEBUG
                         if (comp->verbose)
                         {
@@ -3319,7 +3320,7 @@ void Lowering::LowerCast( GenTreePtr* ppTree)
 
         tree->gtFlags &= ~GTF_UNSIGNED;
         tree->gtOp.gtOp1 = tmp;
-        op1->InsertAfterSelf(tmp);
+        m_currBlockRange.InsertAfter(tmp, op1);
     }
 }
 
@@ -3349,8 +3350,8 @@ bool Lowering::IsBinOpInRMWStoreInd(GenTreePtr tree)
         return false;
     }
 
-    GenTreePtr parent = tree->gtGetParent(nullptr);
-    if (parent == nullptr || parent->OperGet() != GT_STOREIND || parent->gtGetOp2() != tree)
+    LIR::Use use;
+    if (!m_currBlockRange.TryGetUse(tree, &use) || use.User()->OperGet() != GT_STOREIND || use.User()->gtGetOp2() != tree)
     {
         return false;
     }
@@ -3360,7 +3361,7 @@ bool Lowering::IsBinOpInRMWStoreInd(GenTreePtr tree)
     // we can use the result.
     GenTreePtr indirCandidate = nullptr;
     GenTreePtr indirOpSource = nullptr;
-    return IsRMWMemOpRootedAtStoreInd(parent, &indirCandidate, &indirOpSource);
+    return IsRMWMemOpRootedAtStoreInd(use.User(), &indirCandidate, &indirOpSource);
 }
  
  //----------------------------------------------------------------------------------------------

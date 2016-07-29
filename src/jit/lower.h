@@ -282,6 +282,7 @@ private:
 
     LinearScan *m_lsra;
     BasicBlock *currBlock;
+    LIR::Range m_currBlockRange;
     unsigned vtableCallTemp; // local variable we use as a temp for vtable calls
 };
 
