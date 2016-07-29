@@ -55,7 +55,7 @@ private:
     // Data
     Compiler* m_compiler;
     BasicBlock* m_block;
-    LIR::Range m_range;
+    LIR::Range m_blockRange;
 };
 
 #endif // _DECOMPOSELONGS_H_
