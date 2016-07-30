@@ -349,6 +349,8 @@ struct GenTree
 
 #endif // FEATURE_ANYCSE
 
+    unsigned char     gtLIRFlags; // Used for nodes that are in LIR.
+
 #if ASSERTION_PROP
     unsigned short     gtAssertionNum;  // 0 or Assertion table index
                                         // valid only for non-GT_STMT nodes

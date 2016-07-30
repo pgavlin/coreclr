@@ -14,6 +14,22 @@ public:
     class Range;
 
     //------------------------------------------------------------------------
+    // LIR::Flags: Defines the set of flags that may appear in the
+    //             GenTree::gtLIRFlags field.
+    class Flags final
+    {
+        // Disallow the creation of values of this type.
+        Flags() = delete;
+
+    public:
+        enum : unsigned char
+        {
+            None = 0x00,
+            Mark = 0x01,
+        };
+    };
+
+    //------------------------------------------------------------------------
     // LIR::Use: Represents a use <-> def edge between two nodes in a range
     //           of LIR. Provides utilities to point the use to a different
     //           def.
@@ -124,6 +140,7 @@ public:
         bool IsSubRange() const;
 
         GenTree* FirstNonPhiNode() const;
+        GenTree* FirstNonPhiOrCatchArgNode() const;
 
         void InsertBefore(GenTree* node, GenTree* insertionPoint);
         void InsertAfter(GenTree* node, GenTree* insertionPoint);
@@ -132,8 +149,11 @@ public:
         void InsertAfter(const Range& range, GenTree* insertionPoint);
 
         void Remove(GenTree* node);
+        void Remove(const Range& range);
 
         bool TryGetUse(GenTree* node, Use* use);
+
+        Range GetTreeRange(GenTree* root, bool* isClosed) const;
 
 #ifdef DEBUG
         bool ContainsNode(GenTree* node) const;
@@ -161,6 +181,7 @@ private:
 public:
     static Range EmptyRange();
     static Range AsRange(GenTree* firstNode, GenTree* lastNode);
+    static Range SetTreeSeq(Compiler* compiler, GenTree* tree);
 
     //------------------------------------------------------------------------
     // LIR::AsRange: Constructs and returns an LIR::Range value given a value
@@ -193,24 +214,6 @@ public:
     static Range AsRange(TContainer* container)
     {
         return Range(container->FirstLIRNodeSlot(), container->LastLIRNodeSlot());
-    }
-
-    //------------------------------------------------------------------------
-    // LIR::SetTreeSeq: Given a newly created, unsequenced HIR tree, sequence
-    // the tree (set gtNext/gtPrev pointers), and return a Range representing
-    // the list of nodes. It is expected this will later be spliced into the
-    // LIR graph afterwards.
-    //
-    // Arguments:
-    //    compiler - The Compiler context.
-    //    tree - The tree to sequence.
-    //
-    // Return Value: The newly constructed range.
-    //
-    static Range SetTreeSeq(Compiler* compiler, GenTree* tree)
-    {
-        compiler->fgSetTreeSeq(tree);
-        return AsRange(compiler->fgTreeSeqBeg, tree);
     }
 };
 

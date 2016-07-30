@@ -413,8 +413,8 @@ void Lowering::LowerSwitch(GenTree* node)
     gtDefaultCaseJump->gtFlags = node->gtFlags;
 
     // LIR: don't create new statement!
-    gtSetEvalOrder(gtDefaultCaseJump);
-    fgSetStmtSeq(gtDefaultCaseJump)
+    comp->gtSetEvalOrder(gtDefaultCaseJump);
+    comp->fgSetStmtSeq(gtDefaultCaseJump);
     GenTreePtr condStmt = comp->fgNewStmtFromTree(gtDefaultCaseJump, originalSwitchBB, comp->compCurStmt->gtStmt.gtStmtILoffsx);
 
 #ifdef DEBUG
@@ -1126,14 +1126,6 @@ GenTree* Lowering::AddrGen(void* addr, regNumber reg)
     return AddrGen((ssize_t)addr, reg);
 }
 
-// do some common operations on trees before they are inserted as top level statements
-GenTreeStmt* Lowering::LowerMorphAndSeqTree(GenTree* tree)
-{
-    tree = comp->fgMorphTree(tree);
-    GenTreeStmt* stmt = comp->fgNewStmtFromTree(tree);
-    return stmt;
-}
-
 // do lowering steps for a call
 // this includes:
 //   - adding the placement nodes (either stack or register variety) for arguments
@@ -1201,70 +1193,69 @@ void Lowering::LowerCall(GenTree* node)
         }
     }
 
-    assert(m_blockRange.CheckLIR());
-
-    if (result != nullptr)
-    {
-        // The controlExpr is newly constructed, so we can use tree sequencing
-        comp->gtSetEvalOrder(result);
-        comp->fgSetTreeSeq(result);
-
-        JITDUMP("results of lowering call:\n");
-        DISPTREE(result);
-    }
+    assert(m_blockRange.CheckLIR(comp));
     
     if (call->IsTailCallViaHelper())
     {
         // Either controlExpr or gtCallAddr must contain real call target.
         if (result == nullptr)
         {
+            assert(call->gtCallType == CT_INDIRECT);
             assert(call->gtCallAddr != nullptr);
             result = call->gtCallAddr;
         }
 
         result = LowerTailCallViaHelper(call, result);
-
-        if (result != nullptr)
-        {
-            // We got a new call target constructed, so resequence it.
-            comp->gtSetEvalOrder(result);
-            comp->fgSetTreeSeq(result);
-            JITDUMP("results of lowering tail call via helper:\n");
-            DISPTREE(result);            
-        }
     }
     else if (call->IsFastTailCall())
     {
         LowerFastTailCall(call);
     }
     
-    if (result)
-    {        
+    if (result != nullptr)
+    {
+        comp->gtSetEvalOrder(result);
+        LIR::Range resultRange = LIR::SetTreeSeq(comp, result);
+
+        JITDUMP("results of lowering call:\n");
+        DISPTREE(result);
+
         GenTree* insertionPoint = call;
         if (!call->IsTailCallViaHelper())
         {            
-            // The controlExpr should go before the gtCallCookie and the gtCallAddr, if they exist        
+            // The controlExpr should go before the gtCallCookie and the gtCallAddr, if they exist
+            //
+            // TODO(pdg): find out what's really required here, as this is currently a tree order
+            // dependency.
             if (call->gtCallType == CT_INDIRECT)
             {
+                bool isClosed = false;
                 if (call->gtCallCookie != nullptr)
                 {
-                    insertionPoint = comp->fgGetFirstNode(call->gtCallCookie);
+#ifdef DEBUG
+                    GenTree* firstCallAddrNode = m_blockRange.GetTreeRange(call->gtCallAddr, &isClosed).Begin();
+                    assert(isClosed);
+                    assert(call->gtCallCookie->Precedes(firstCallAddrNode));
+#endif // DEBUG
+
+                    insertionPoint = m_blockRange.GetTreeRange(call->gtCallCookie, &isClosed).Begin();
                 }
                 else if (call->gtCallAddr != nullptr)
                 {
-                    insertionPoint = comp->fgGetFirstNode(call->gtCallAddr);
+                    insertionPoint = m_blockRange.GetTreeRange(call->gtCallAddr, &isClosed).Begin();
                 }
+
+                (assert(isClosed), (void)isClosed);
             }
         }
 
-        comp->fgInsertTreeInListBefore(result, insertionPoint, callStmt);
+        m_blockRange.InsertBefore(resultRange, insertionPoint);
+
         call->gtControlExpr = result;
     }
 #endif //!_TARGET_ARM_
 
-#ifdef DEBUG
-    comp->fgDebugCheckNodeLinks(comp->compCurBB, callStmt);
-#endif
+    assert(m_blockRange.CheckLIR(comp));
 
     if (comp->opts.IsJit64Compat())
     {
@@ -1459,9 +1450,8 @@ void  Lowering::InsertProfTailCallHook(GenTreeCall* call, GenTree *insertionPoin
     }
 
     assert(insertionPoint != nullptr);
-    GenTreeStmt* callStmt = comp->compCurStmt->AsStmt();
     GenTreePtr profHookNode = new (comp, GT_PROF_HOOK) GenTree(GT_PROF_HOOK, TYP_VOID);
-    comp->fgInsertTreeBeforeAsEmbedded(profHookNode, insertionPoint, callStmt, comp->compCurBB);
+    m_blockRange.InsertBefore(profHookNode, insertionPoint);
 }
 
 // Lower fast tail call implemented as epilog+jmp.
@@ -1634,7 +1624,7 @@ void Lowering::LowerFastTailCall(GenTreeCall *call)
             assert(tmpType != TYP_UNDEF);
             GenTreeLclVar* local = new(comp, GT_LCL_VAR) GenTreeLclVar(GT_LCL_VAR, tmpType, callerArgLclNum, BAD_IL_OFFSET);
             GenTree* assignExpr = comp->gtNewTempAssign(tmpLclNum, local);
-            comp->fgInsertTreeBeforeAsEmbedded(assignExpr, firstPutArgStk, callStmt, comp->compCurBB);
+            m_blockRange.InsertBefore(LIR::SetTreeSeq(comp, assignExpr), firstPutArgStk);
         }
     }
 
@@ -1644,8 +1634,8 @@ void Lowering::LowerFastTailCall(GenTreeCall *call)
     GenTreePtr startNonGCNode = nullptr;
     if (firstPutArgStk != nullptr)
     {                
-        startNonGCNode = new (comp, GT_START_NONGC) GenTree(GT_START_NONGC, TYP_VOID);         
-        comp->fgInsertTreeBeforeAsEmbedded(startNonGCNode, firstPutArgStk, callStmt, comp->compCurBB);
+        startNonGCNode = new (comp, GT_START_NONGC) GenTree(GT_START_NONGC, TYP_VOID);
+        m_blockRange.InsertBefore(startNonGCNode, firstPutArgStk);
 
         // Gc-interruptability in the following case:
         //     foo(a, b, c, d, e) { bar(a, b, c, d, e); } 
@@ -1661,7 +1651,7 @@ void Lowering::LowerFastTailCall(GenTreeCall *call)
         {
             assert(comp->fgFirstBB == comp->compCurBB);
             GenTreePtr noOp = new (comp, GT_NO_OP) GenTree(GT_NO_OP, TYP_VOID);
-            comp->fgInsertTreeBeforeAsEmbedded(noOp, startNonGCNode, callStmt, comp->compCurBB);
+            m_blockRange.InsertBefore(noOp, startNonGCNode);
         }
     }
 
@@ -1737,15 +1727,28 @@ GenTree* Lowering::LowerTailCallViaHelper(GenTreeCall* call, GenTree *callTarget
         InsertPInvokeMethodEpilog(comp->compCurBB DEBUGARG(call));
     }
 
-    // Remove gtCallAddr from execution order if one present.
-    GenTreeStmt* callStmt = comp->compCurStmt->AsStmt();     
+    // Remove gtCallAddr from execution order if present.
+    LIR::Range callTargetRange;
     if (call->gtCallType == CT_INDIRECT)
     {
         assert(call->gtCallAddr != nullptr);
-        comp->fgDeleteTreeFromList(callStmt, call->gtCallAddr);
+
+        bool isClosed;
+        callTargetRange = m_blockRange.GetTreeRange(call->gtCallAddr, &isClosed);
+        (assert(isClosed), (void)isClosed);
+
+        m_blockRange.Remove(callTargetRange);
+    }
+    else
+    {
+        assert(call->gtCallAddr == nullptr);
+
+        comp->gtSetEvalOrder(callTarget);
+        callTargetRange = LIR::SetTreeSeq(comp, callTarget);
     }
 
     fgArgTabEntry* argEntry;
+
 
 #if defined(_TARGET_AMD64_)
 
@@ -1765,8 +1768,14 @@ GenTree* Lowering::LowerTailCallViaHelper(GenTreeCall* call, GenTree *callTarget
     assert(argEntry->node->gtOper == GT_PUTARG_REG);
     GenTree *secondArg = argEntry->node->gtOp.gtOp1;
 
-    comp->fgInsertTreeInListAfter(callTarget, secondArg, callStmt);    
-    comp->fgDeleteTreeFromList(callStmt, secondArg);
+    m_blockRange.InsertAfter(callTargetRange, secondArg);
+
+    bool isClosed;
+    LIR::Range secondArgRange = m_blockRange.GetTreeRange(secondArg, &isClosed);
+    (assert(isClosed), (void)isClosed);
+
+    m_blockRange.Remove(secondArgRange);
+
     argEntry->node->gtOp.gtOp1 = callTarget;
 
 #elif defined(_TARGET_X86_)
@@ -1787,8 +1796,12 @@ GenTree* Lowering::LowerTailCallViaHelper(GenTreeCall* call, GenTree *callTarget
     assert(argEntry->node->gtOper == GT_PUTARG_STK);
     GenTree* arg0 = argEntry->node->gtOp.gtOp1;
 
-    comp->fgInsertTreeInListAfter(callTarget, arg0, callStmt);    
-    comp->fgDeleteTreeFromList(callStmt, arg0);
+    m_blockRange.InsertAfter(callTargetRange, arg0);
+
+    bool isClosed;
+    LIR::Range secondArgRange = m_blockRange.GetTreeRange(arg0, &isClosed);
+    (assert(isClosed), (void)isClosed);
+    
     argEntry->node->gtOp.gtOp1 = callTarget;
 
     // arg 1 == flags
@@ -2288,10 +2301,14 @@ void Lowering::InsertPInvokeMethodProlog()
     store->gtOp.gtOp1 = call;
     store->gtFlags |= GTF_VAR_DEF;
 
-    GenTreeStmt* stmt = LowerMorphAndSeqTree(store);
-    comp->fgInsertStmtAtBeg(comp->fgFirstBB, stmt);
-    GenTree* lastStmt = stmt;
-    DISPTREE(lastStmt);
+    GenTree* insertionPoint = m_blockRange.FirstNonPhiOrCatchArgNode();
+
+    comp->fgMorphTree(store);
+    comp->gtSetEvalOrder(store);
+    m_blockRange.InsertAfter(LIR::SetTreeSeq(comp, store), insertionPoint);
+    insertionPoint = store;
+
+    DISPTREE(store);
 
 #ifndef _TARGET_X86_ // For x86, this step is done at the call site (due to stack pointer not being static in the function).
 
@@ -2303,10 +2320,11 @@ void Lowering::InsertPInvokeMethodProlog()
                                                     callFrameInfo.offsetOfCallSiteSP);
     storeSP->gtOp1 = PhysReg(REG_SPBASE);
 
-    GenTreeStmt* storeSPStmt = LowerMorphAndSeqTree(storeSP);
-    comp->fgInsertStmtAfter(comp->fgFirstBB, lastStmt, storeSPStmt);
-    lastStmt = storeSPStmt;
-    DISPTREE(lastStmt);
+    comp->gtSetEvalOrder(storeSP);
+    m_blockRange.InsertAfter(LIR::SetTreeSeq(comp, storeSP), insertionPoint);
+    insertionPoint = storeSP;
+
+    DISPTREE(storeSP);
 
 #endif // !_TARGET_X86_
 
@@ -2318,10 +2336,11 @@ void Lowering::InsertPInvokeMethodProlog()
                                                     callFrameInfo.offsetOfCalleeSavedFP);
     storeFP->gtOp1 = PhysReg(REG_FPBASE);
 
-    GenTreeStmt* storeFPStmt = LowerMorphAndSeqTree(storeFP);
-    comp->fgInsertStmtAfter(comp->fgFirstBB, lastStmt, storeFPStmt);
-    lastStmt = storeFPStmt;
-    DISPTREE(lastStmt);
+    comp->gtSetEvalOrder(storeFP);
+    m_blockRange.InsertAfter(LIR::SetTreeSeq(comp, storeFP), insertionPoint);
+    insertionPoint = storeFP;
+
+    DISPTREE(storeFP);
 
     // --------------------------------------------------------
 
@@ -2331,9 +2350,9 @@ void Lowering::InsertPInvokeMethodProlog()
         // The init routine sets InlinedCallFrame's m_pNext, so we just set the thead's top-of-stack
         GenTree* frameUpd = CreateFrameLinkUpdate(PushFrame);
 
-        GenTreeStmt* frameUpdStmt = LowerMorphAndSeqTree(frameUpd);
-        comp->fgInsertStmtAfter(comp->fgFirstBB, lastStmt, frameUpdStmt);
-        DISPTREE(frameUpdStmt);
+        comp->gtSetEvalOrder(frameUpd);
+        m_blockRange.InsertAfter(LIR::SetTreeSeq(comp, frameUpd), insertionPoint);
+        DISPTREE(frameUpd);
     }
 }
 
@@ -2366,13 +2385,7 @@ void Lowering::InsertPInvokeMethodEpilog(BasicBlock *returnBB
     // Method doing PInvoke calls has exactly one return block unless it has "jmp" or tail calls.
     assert(((returnBB == comp->genReturnBB) && (returnBB->bbJumpKind == BBJ_RETURN)) || returnBB->endsWithTailCallOrJmp(comp));
 
-    GenTree* insertionPoint = LIR::AsRange(returnBB).End();
-
-    GenTreeStmt* lastTopLevelStmt = comp->fgGetLastTopLevelStmt(returnBB)->AsStmt();
-    GenTreePtr lastTopLevelStmtExpr = lastTopLevelStmt->gtStmtExpr;
-
-    // Gentree of the last top level stmnt should match.
-    assert(lastTopLevelStmtExpr == lastExpr);   
+    GenTree* insertionPoint = LIR::AsRange(returnBB).EndExclusive();
 
     // Note: PInvoke Method Epilog (PME) needs to be inserted just before GT_RETURN, GT_JMP or GT_CALL node in execution order
     // so that it is guaranteed that there will be no further PInvokes after that point in the method.
@@ -2961,10 +2974,12 @@ void Lowering::AddrModeCleanupHelper(GenTreeAddrMode* addrMode, GenTree* node)
     }
 
     // TODO(pdg): change this to use the operand iterator once LSRA changes are in
-    unsigned childCount = tree->NumChildren();
+    //
+    // Also, change this to use the LIR mark bit and iterate instead of recursing
+    unsigned childCount = node->NumOperands();
     for (unsigned i = 0; i < childCount; i++)
     {
-        AddrModeCleanupHelper(addrMode, node->GetChild(i));
+        AddrModeCleanupHelper(addrMode, *node->GetOperand(i));
     }
 
     m_blockRange.Remove(node);
@@ -3018,9 +3033,9 @@ bool Lowering::AreSourcesPossiblyModified(GenTree* addr, GenTree* base, GenTree*
 //    use:     the use of the address we want to transform
 //    isIndir: true if this addressing mode is the child of an indir
 //
-void Lowering::TryCreateAddrMode(LIR::Use& use, bool isIndir)
+void Lowering::TryCreateAddrMode(LIR::Use&& use, bool isIndir)
 {
-    GenTree*    addr   = use->Def();
+    GenTree*    addr   = use.Def();
     GenTreePtr  base   = nullptr;
     GenTreePtr  index  = nullptr;
     unsigned    scale  = 0;
@@ -3111,7 +3126,7 @@ void Lowering::TryCreateAddrMode(LIR::Use& use, bool isIndir)
     m_blockRange.InsertAfter(addrMode, addr);
 
     // Now we need to remove all the nodes subsumed by the addrMode
-    LowerIndCleanupHelper(addrMode, addr);
+    AddrModeCleanupHelper(addrMode, addr);
 
     // Replace the original address node with the addrMode.
     use.ReplaceWith(comp, addrMode);
@@ -3145,7 +3160,7 @@ void Lowering::LowerAdd(GenTree* node)
     if (use.User()->gtOper == GT_ADD)
         return;
 
-    TryCreateAddrMode(use, false);
+    TryCreateAddrMode(std::move(use), false);
 #endif // !_TARGET_ARMARCH_
 }
 
@@ -3413,7 +3428,7 @@ Lowering::LowerArrElem(GenTree* node)
     // This will assert if we don't have an ArrElem node
     GenTreeArrElem* arrElem = node->AsArrElem();
     const unsigned char rank = arrElem->gtArrElem.gtArrRank;
-    const unsigned blockWeight = comp->getBBWeight(comp);
+    const unsigned blockWeight = m_block->getBBWeight(comp);
 
     JITDUMP("Lowering ArrElem\n");
     JITDUMP("============\n");
@@ -3504,8 +3519,6 @@ Lowering::LowerArrElem(GenTree* node)
 
     JITDUMP("Results of lowering ArrElem:\n");
     DISPTREE(leaNode);
-    JITDUMP("\nResulting statement:\n");
-    DISPTREE(curStmt);
     JITDUMP("\n\n");
 }
 
@@ -3556,8 +3569,6 @@ void Lowering::DoPhase()
         LowerBlock(block);
     }
 
-    NYI("later phases cannot yet process LIR!");
-
     // If we have any PInvoke calls, insert the one-time prolog code. We've already inserted the epilog code in the appropriate spots.
     // NOTE: there is a minor optimization opportunity here, as we still create p/invoke data structures and setup/teardown
     // even if we've eliminated all p/invoke calls due to dead code elimination.
@@ -3585,6 +3596,8 @@ void Lowering::DoPhase()
         comp->lvaSortAgain = true;
     }
     comp->EndPhase(PHASE_LOWERING_DECOMP);
+
+    NYI("later phases cannot yet process LIR!");
 
     comp->fgLocalVarLiveness();
     // local var liveness can delete code, which may create empty blocks
@@ -3729,36 +3742,18 @@ void Lowering::DoPhase()
 
 void Lowering::LowerBlock(BasicBlock* block)
 {
-#if 0
-    for (GenTree* stmt = block->bbTreeList; stmt != nullptr; stmt = stmt->gtNext)
-    {
-        if (stmt->gtFlags & GTF_STMT_SKIP_LOWER)
-        {
-            continue;
-        }
-#ifdef DEBUG
-        if (comp->verbose)
-        {
-            printf("Lowering BB%02u, stmt id %u\n", block->bbNum, stmt->gtTreeID);
-        }
-#endif
-        comp->compCurStmt = stmt;
-        comp->fgWalkTreePost(&stmt->gtStmt.gtStmtExpr, &Lowering::LowerNodeHelper, this, true);
-        // We may have removed "stmt" in LowerNode().
-        stmt = comp->compCurStmt;
-    }
-#endif
-
     assert(block == comp->compCurBB); // compCurBB must already be set.
     assert(block->isEmpty() || block->IsLIR());
 
-    LIR::Range range = LIR::AsRange(block);
-    for (GenTree* node = range.FirstNonPhiNode(), *end = range.End(); node != end; node = node->gtNext)
+    m_block = block;
+    m_blockRange = LIR::AsRange(block);
+
+    for (GenTree* node = m_blockRange.FirstNonPhiNode(), *end = m_blockRange.End(); node != end; node = node->gtNext)
     {
         LowerNode(node);
     }
 
-    assert(range.CheckLIR(comp));
+    assert(m_blockRange.CheckLIR(comp));
 }
 
 /** Verifies if both of these trees represent the same indirection.

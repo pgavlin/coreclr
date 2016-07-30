@@ -56,8 +56,7 @@ private:
     
     // Member Functions
     void LowerBlock(BasicBlock* block);
-    void LowerNode(GenTreePtr* tree, Compiler::fgWalkData* data);
-    GenTreeStmt* LowerMorphAndSeqTree(GenTree *tree);
+    void LowerNode(GenTree* node);
     void CheckVSQuirkStackPaddingNeeded(GenTreeCall* call);
 
     // ------------------------------
@@ -210,7 +209,7 @@ private:
     void LowerUnsignedDivOrMod(GenTree* node);
     void LowerSignedDivOrMod(GenTree* node);
 
-    void TryCreateAddrMode(LIR::Use& use, bool isIndir);
+    void TryCreateAddrMode(LIR::Use&& use, bool isIndir);
     void AddrModeCleanupHelper(GenTreeAddrMode* addrMode, GenTree* node);
 
     void LowerSwitch(GenTree* node);

@@ -1317,7 +1317,8 @@ Compiler::fgWalkResult Rationalizer::RewriteNode(GenTree** useEdge, ArrayStack<G
 #endif // FEATURE_SIMD
 
     default:
-        // Nothing to do for most nodes.
+        // Ensure that the LIR flags are clear.
+        node->gtLIRFlags = LIR::Flags::None;
         break;
     }
 
