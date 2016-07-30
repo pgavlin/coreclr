@@ -3259,9 +3259,8 @@ void Lowering::LowerCmp(GenTreePtr tree)
  * system.windows.forms, scimark, fractals, bio mums). If we ever find evidence that
  * doing this optimization is a win, should consider generating in-lined code.
  */
-void Lowering::LowerCast( GenTreePtr* ppTree) 
+void Lowering::LowerCast(GenTree* tree)
 {
-    GenTreePtr  tree    = *ppTree;
     assert(tree->OperGet() == GT_CAST);
 
     GenTreePtr  op1     = tree->gtOp.gtOp1;

@@ -128,8 +128,8 @@ public:
         void InsertBefore(GenTree* node, GenTree* insertionPoint);
         void InsertAfter(GenTree* node, GenTree* insertionPoint);
 
-        void InsertBefore(Range& range, GenTree* insertionPoint);
-        void InsertAfter(Range& range, GenTree* insertionPoint);
+        void InsertBefore(const Range& range, GenTree* insertionPoint);
+        void InsertAfter(const Range& range, GenTree* insertionPoint);
 
         void Remove(GenTree* node);
 

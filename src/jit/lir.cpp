@@ -526,14 +526,10 @@ void LIR::Range::InsertAfter(GenTree* node, GenTree* insertionPoint)
 //    insertionPoint - The node before which `range` will be inserted.
 //                     Must be part of `this` range.
 //
-void LIR::Range::InsertBefore(Range& range, GenTree* insertionPoint)
+void LIR::Range::InsertBefore(const Range& range, GenTree* insertionPoint)
 {
-    // Is there anything to insert?
-    if (range.IsEmpty())
-        return;
-
-    assert(range.Begin()->gtPrev == nullptr);
-    assert(range.End()->gtNext == nullptr);
+    assert(!range.IsEmpty());
+    assert(!range.IsSubRange());
 
     if (insertionPoint == nullptr)
     {
@@ -571,14 +567,10 @@ void LIR::Range::InsertBefore(Range& range, GenTree* insertionPoint)
 //    insertionPoint - The node after which `range` will be inserted.
 //                     Must be part of `this` range.
 //
-void LIR::Range::InsertAfter(Range& range, GenTree* insertionPoint)
+void LIR::Range::InsertAfter(const Range& range, GenTree* insertionPoint)
 {
-    // Is there anything to insert?
-    if (range.IsEmpty())
-        return;
-
-    assert(range.Begin()->gtPrev == nullptr);
-    assert(range.End()->gtNext == nullptr);
+    assert(!range.IsEmpty());
+    assert(!range.IsSubRange());
 
     if (insertionPoint == nullptr)
     {
