@@ -41,7 +41,6 @@ public:
         GenTree** m_edge;
         GenTree* m_user;
 
-
     public:
         Use();
         Use(const Use& other);
@@ -75,8 +74,10 @@ public:
     private:
         GenTree** m_firstNodeSlot;
         GenTree** m_lastNodeSlot;
+        bool m_isSimpleRange;
 
         Range(GenTree** firstNodeSlot, GenTree** lastNodeSlot);
+        Range(GenTree* firstNode, GenTree* lastNode);
 
         GenTree*& FirstNode() const;
         GenTree*& LastNode() const;
@@ -159,23 +160,6 @@ public:
         bool ContainsNode(GenTree* node) const;
         bool CheckLIR(Compiler* compiler) const;
 #endif
-    };
-
-private:
-    //------------------------------------------------------------------------
-    // LIR::SimpleRange: Provides storage for a simple range defined only by
-    //                   a start and end node. Can be used in order to
-    //                   incrementally build up a range of IR to be inserted
-    //                   into another range.
-    //
-    class SimpleRange final : public Range
-    {
-    private:
-        GenTree* m_firstNode;
-        GenTree* m_lastNode;
-
-    public:
-        SimpleRange(GenTree* firstNode, GenTree* lastNode);
     };
 
 public:

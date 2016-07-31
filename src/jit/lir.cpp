@@ -292,11 +292,12 @@ LIR::Range::Range()
 //
 // Arguments:
 //    firstNodeSlot - The storage for the first node in the range.
-//    lastNodeSlot - The storage for the last node in the range.
+//    lastNodeSlot  - The storage for the last node in the range.
 //
 LIR::Range::Range(GenTree** firstNodeSlot, GenTree** lastNodeSlot)
     : m_firstNodeSlot(firstNodeSlot)
     , m_lastNodeSlot(lastNodeSlot)
+    , m_isSimpleRange(false)
 {
     assert(firstNodeSlot != nullptr);
     assert(lastNodeSlot != nullptr);
@@ -307,6 +308,25 @@ LIR::Range::Range(GenTree** firstNodeSlot, GenTree** lastNodeSlot)
 }
 
 //------------------------------------------------------------------------
+// LIR::Range::Range: Creates a `Range` value given the first and last
+//                    node in the range. When this constructor is called,
+//                    the Range itself will store the nodes.
+//
+// Arguments:
+//    firstNode - The first node in the range.
+//    lastNode  - The last node in the range.
+//
+LIR::Range::Range(GenTree* firstNode, GenTree* lastNode)
+    : m_firstNodeSlot(reinterpret_cast<GenTree**>(firstNode))
+    , m_lastNodeSlot(reinterpret_cast<GenTree**>(lastNode))
+    , m_isSimpleRange(true)
+{
+    assert((FirstNode() != nullptr) == (LastNode() != nullptr));
+    assert((FirstNode() == LastNode()) || FirstNode()->Precedes(LastNode()));
+}
+
+
+//------------------------------------------------------------------------
 // LIR::Range::FirstNode: Returns a reference to the first node in the
 //                        range.
 //
@@ -315,8 +335,13 @@ LIR::Range::Range(GenTree** firstNodeSlot, GenTree** lastNodeSlot)
 //
 GenTree*& LIR::Range::FirstNode() const
 {
-    assert(m_firstNodeSlot != nullptr);
-    return *m_firstNodeSlot;
+    assert(m_isSimpleRange || m_firstNodeSlot != nullptr);
+    if (!m_isSimpleRange)
+    {
+        return *m_firstNodeSlot;
+    }
+
+    return *reinterpret_cast<GenTree**>(&const_cast<Range*>(this)->m_firstNodeSlot);
 }
 
 //------------------------------------------------------------------------
@@ -327,8 +352,13 @@ GenTree*& LIR::Range::FirstNode() const
 //
 GenTree*& LIR::Range::LastNode() const
 {
-    assert(m_lastNodeSlot != nullptr);
-    return *m_lastNodeSlot;
+    assert(m_isSimpleRange || m_lastNodeSlot != nullptr);
+    if (!m_isSimpleRange)
+    {
+        return *m_lastNodeSlot;
+    }
+
+    return *reinterpret_cast<GenTree**>(&const_cast<Range*>(this)->m_lastNodeSlot);
 }
 
 //------------------------------------------------------------------------
@@ -947,28 +977,11 @@ bool LIR::Range::CheckLIR(Compiler* compiler) const
 #endif // DEBUG
 
 //------------------------------------------------------------------------
-// LIR::SimpleRange::SimpleRange: Constructs a range given a first and
-//                                last node.
-//
-// Arguments:
-//    firstNode - The first node in the range. Must precede lastNode.
-//    lastNode - The last node in the range. Must follow firstNode.
-//
-LIR::SimpleRange::SimpleRange(GenTree* firstNode, GenTree* lastNode)
-    : Range(&m_firstNode, &m_lastNode)
-    , m_firstNode(firstNode)
-    , m_lastNode(lastNode)
-{
-    assert((firstNode == nullptr) == (lastNode == nullptr));
-    assert((FirstNode() == LastNode()) || FirstNode()->Precedes(LastNode()));
-}
-
-//------------------------------------------------------------------------
 // LIR::EmptyRange: Constructs and returns an empty range.
 //
 LIR::Range LIR::EmptyRange()
 {
-    return SimpleRange(nullptr, nullptr);
+    return Range(static_cast<GenTree*>(nullptr), static_cast<GenTree*>(nullptr));
 }
 
 //------------------------------------------------------------------------
@@ -981,7 +994,7 @@ LIR::Range LIR::EmptyRange()
 //
 LIR::Range LIR::AsRange(GenTree* firstNode, GenTree* lastNode)
 {
-    return SimpleRange(firstNode, lastNode);
+    return Range(firstNode, lastNode);
 }
 
 //------------------------------------------------------------------------
