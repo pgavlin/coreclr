@@ -296,6 +296,8 @@ void Lowering::LowerSwitch(GenTree* node)
 
     assert(node->gtOper == GT_SWITCH);
 
+    NYI("switch lowering in LIR");
+
     // The first step is to build the default case conditional construct that is
     // shared between both kinds of expansion of the switch node.
 
