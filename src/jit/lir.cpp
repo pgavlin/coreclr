@@ -714,7 +714,7 @@ bool LIR::Range::TryGetUse(GenTree* node, Use* use)
     // Don't bother looking for uses of nodes that are not values.
     if (node->IsValue())
     {
-        for (GenTree* n : LIR::AsRange(node->gtNext, End()))
+        for (GenTree* n : LIR::AsRange(node->gtNext, EndExclusive()))
         {
             GenTree** edge;
             if (n->TryGetUse(node, &edge))
