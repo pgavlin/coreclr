@@ -764,6 +764,34 @@ bool LIR::Range::TryGetUse(GenTree* node, Use* use)
 //                           in the dataflow tree rooted at a particular
 //                           node.
 //
+// This method logically uses the following algorithm to compute the
+// range:
+//
+//    worklist = { root }
+//    firstNode = root
+//    isClosed = true
+//
+//    while not worklist.isEmpty:
+//        if not worklist.contains(firstNode):
+//            isClosed = false
+//        else:
+//            for operand in firstNode:
+//                worklist.add(operand)
+//
+//            worklist.remove(firstNode)
+//
+//        firstNode = firstNode.previousNode
+//
+//    return firstNode
+//
+// Instead of using a set for the worklist, the implementation uses the
+// `LIR::Mark` bit of the `GenTree::LIRFlags` field to track whether or
+// not a node is in the worklist.
+//
+// Note also that this algorithm depends LIR nodes being SDSU, SDSU defs
+// and uses occurring in the same block, and correct dataflow (i.e. defs
+// occurring before uses).
+//
 // Arguments:
 //    root     - The root of the dataflow tree.
 //    isClosed - An output parameter that is set to true if the returned
@@ -786,6 +814,9 @@ LIR::Range LIR::Range::GetTreeRange(GenTree* root, bool* isClosed) const
     GenTree* firstNode;
     for (firstNode = root; markCount > 0; firstNode = firstNode->gtPrev)
     {
+        // This assert will fail if the dataflow that feeds the root node
+        // is incorrect in that it crosses a block boundary or if it involves
+        // a use that occurs before its corresponding def.
         assert(firstNode != nullptr);
 
         if ((firstNode->gtLIRFlags & LIR::Flags::Mark) != 0)
@@ -801,7 +832,7 @@ LIR::Range LIR::Range::GetTreeRange(GenTree* root, bool* isClosed) const
                 markCount++;
             }
 
-            // Unmark the the node and udpate `firstNode`
+            // Unmark the the node and update `firstNode`
             firstNode->gtLIRFlags &= ~LIR::Flags::Mark;
             markCount--;
         }

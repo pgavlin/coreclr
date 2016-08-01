@@ -25,7 +25,9 @@ public:
         enum : unsigned char
         {
             None = 0x00,
-            Mark = 0x01,
+            Mark = 0x01, // An aribtrary "mark" bit that can be used in place of
+                         // a more expensive data structure when processing a set
+                         // of LIR nodes. See for example `LIR::GetTreeRange`.
         };
     };
 
@@ -74,7 +76,10 @@ public:
     private:
         GenTree** m_firstNodeSlot;
         GenTree** m_lastNodeSlot;
-        bool m_isSimpleRange;
+        bool m_isSimpleRange;      // A simple range provides its own storage: instead of holding
+                                   // pointers to the first and last node tracked by some other
+                                   // container, `m_firstNodeSlot` and `m_lastNodeSlot` hold pointers
+                                   // to the first and last node in the range, respectively.
 
         Range(GenTree** firstNodeSlot, GenTree** lastNodeSlot);
         Range(GenTree* firstNode, GenTree* lastNode);
