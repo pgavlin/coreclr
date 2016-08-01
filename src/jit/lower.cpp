@@ -1247,7 +1247,7 @@ void Lowering::LowerCall(GenTree* node)
                     insertionPoint = m_blockRange.GetTreeRange(call->gtCallAddr, &isClosed).Begin();
                 }
 
-                (assert(isClosed), (void)isClosed);
+                assert(isClosed);
             }
         }
 
@@ -1737,7 +1737,7 @@ GenTree* Lowering::LowerTailCallViaHelper(GenTreeCall* call, GenTree *callTarget
 
         bool isClosed;
         callTargetRange = m_blockRange.GetTreeRange(call->gtCallAddr, &isClosed);
-        (assert(isClosed), (void)isClosed);
+        assert(isClosed);
 
         m_blockRange.Remove(callTargetRange);
     }
@@ -1774,7 +1774,7 @@ GenTree* Lowering::LowerTailCallViaHelper(GenTreeCall* call, GenTree *callTarget
 
     bool isClosed;
     LIR::Range secondArgRange = m_blockRange.GetTreeRange(secondArg, &isClosed);
-    (assert(isClosed), (void)isClosed);
+    assert(isClosed);
 
     m_blockRange.Remove(secondArgRange);
 
@@ -1802,7 +1802,7 @@ GenTree* Lowering::LowerTailCallViaHelper(GenTreeCall* call, GenTree *callTarget
 
     bool isClosed;
     LIR::Range secondArgRange = m_blockRange.GetTreeRange(arg0, &isClosed);
-    (assert(isClosed), (void)isClosed);
+    assert(isClosed);
     
     argEntry->node->gtOp.gtOp1 = callTarget;
 
