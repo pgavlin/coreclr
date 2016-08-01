@@ -1362,6 +1362,7 @@ class   Compiler
     friend class CodeGen;
     friend class LclVarDsc;
     friend class TempDsc;
+    friend class LIR;
 
 #ifndef _TARGET_64BIT_
     friend class DecomposeLongs;

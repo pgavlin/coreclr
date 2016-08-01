@@ -14,6 +14,24 @@ public:
     class Range;
 
     //------------------------------------------------------------------------
+    // LIR::Flags: Defines the set of flags that may appear in the
+    //             GenTree::gtLIRFlags field.
+    class Flags final
+    {
+        // Disallow the creation of values of this type.
+        Flags() = delete;
+
+    public:
+        enum : unsigned char
+        {
+            None = 0x00,
+            Mark = 0x01, // An aribtrary "mark" bit that can be used in place of
+                         // a more expensive data structure when processing a set
+                         // of LIR nodes. See for example `LIR::GetTreeRange`.
+        };
+    };
+
+    //------------------------------------------------------------------------
     // LIR::Use: Represents a use <-> def edge between two nodes in a range
     //           of LIR. Provides utilities to point the use to a different
     //           def.
@@ -24,7 +42,6 @@ public:
         Range* m_range;
         GenTree** m_edge;
         GenTree* m_user;
-
 
     public:
         Use();
@@ -59,8 +76,13 @@ public:
     private:
         GenTree** m_firstNodeSlot;
         GenTree** m_lastNodeSlot;
+        bool m_isSimpleRange;      // A simple range provides its own storage: instead of holding
+                                   // pointers to the first and last node tracked by some other
+                                   // container, `m_firstNodeSlot` and `m_lastNodeSlot` hold pointers
+                                   // to the first and last node in the range, respectively.
 
         Range(GenTree** firstNodeSlot, GenTree** lastNodeSlot);
+        Range(GenTree* firstNode, GenTree* lastNode);
 
         GenTree*& FirstNode() const;
         GenTree*& LastNode() const;
@@ -114,6 +136,7 @@ public:
 
         GenTree* Begin() const;
         GenTree* End() const;
+        GenTree* EndExclusive() const;
 
         Iterator begin() const;
         Iterator end() const;
@@ -123,12 +146,20 @@ public:
         bool IsSubRange() const;
 
         GenTree* FirstNonPhiNode() const;
+        GenTree* FirstNonPhiOrCatchArgNode() const;
 
         void InsertBefore(GenTree* node, GenTree* insertionPoint);
         void InsertAfter(GenTree* node, GenTree* insertionPoint);
+
+        void InsertBefore(const Range& range, GenTree* insertionPoint);
+        void InsertAfter(const Range& range, GenTree* insertionPoint);
+
         void Remove(GenTree* node);
+        void Remove(const Range& range);
 
         bool TryGetUse(GenTree* node, Use* use);
+
+        Range GetTreeRange(GenTree* root, bool* isClosed) const;
 
 #ifdef DEBUG
         bool ContainsNode(GenTree* node) const;
@@ -136,26 +167,10 @@ public:
 #endif
     };
 
-private:
-    //------------------------------------------------------------------------
-    // LIR::SimpleRange: Provides storage for a simple range defined only by
-    //                   a start and end node. Can be used in order to
-    //                   incrementally build up a range of IR to be inserted
-    //                   into another range.
-    //
-    class SimpleRange final : public Range
-    {
-    private:
-        GenTree* m_firstNode;
-        GenTree* m_lastNode;
-
-    public:
-        SimpleRange(GenTree* firstNode, GenTree* lastNode);
-    };
-
 public:
     static Range EmptyRange();
     static Range AsRange(GenTree* firstNode, GenTree* lastNode);
+    static Range SetTreeSeq(Compiler* compiler, GenTree* tree);
 
     //------------------------------------------------------------------------
     // LIR::AsRange: Constructs and returns an LIR::Range value given a value

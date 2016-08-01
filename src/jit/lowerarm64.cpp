@@ -1827,9 +1827,8 @@ void Lowering::LowerCmp(GenTreePtr tree)
  * i) GT_CAST(float/double, int type with overflow detection) 
  *
  */
-void Lowering::LowerCast( GenTreePtr* ppTree) 
+void Lowering::LowerCast(GenTree* tree) 
 {
-    GenTreePtr  tree = *ppTree;
     assert(tree->OperGet() == GT_CAST);
 
     GenTreePtr  op1 = tree->gtOp.gtOp1;
@@ -1867,7 +1866,7 @@ void Lowering::LowerCast( GenTreePtr* ppTree)
 
         tree->gtFlags &= ~GTF_UNSIGNED;
         tree->gtOp.gtOp1 = tmp;
-        m_currBlockRange.InsertAfter(tmp, op1);
+        m_blockRange.InsertAfter(tmp, op1);
     }
 }
 

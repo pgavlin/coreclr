@@ -3175,7 +3175,7 @@ void Lowering::LowerCmp(GenTreePtr tree)
                             }
                         }
 
-                        m_currBlockRange.Remove(removeTreeNode);
+                        m_blockRange.Remove(removeTreeNode);
 #ifdef DEBUG
                         if (comp->verbose)
                         {
@@ -3259,9 +3259,8 @@ void Lowering::LowerCmp(GenTreePtr tree)
  * system.windows.forms, scimark, fractals, bio mums). If we ever find evidence that
  * doing this optimization is a win, should consider generating in-lined code.
  */
-void Lowering::LowerCast( GenTreePtr* ppTree) 
+void Lowering::LowerCast(GenTree* tree)
 {
-    GenTreePtr  tree    = *ppTree;
     assert(tree->OperGet() == GT_CAST);
 
     GenTreePtr  op1     = tree->gtOp.gtOp1;
@@ -3320,7 +3319,7 @@ void Lowering::LowerCast( GenTreePtr* ppTree)
 
         tree->gtFlags &= ~GTF_UNSIGNED;
         tree->gtOp.gtOp1 = tmp;
-        m_currBlockRange.InsertAfter(tmp, op1);
+        m_blockRange.InsertAfter(tmp, op1);
     }
 }
 
@@ -3351,7 +3350,7 @@ bool Lowering::IsBinOpInRMWStoreInd(GenTreePtr tree)
     }
 
     LIR::Use use;
-    if (!m_currBlockRange.TryGetUse(tree, &use) || use.User()->OperGet() != GT_STOREIND || use.User()->gtGetOp2() != tree)
+    if (!m_blockRange.TryGetUse(tree, &use) || use.User()->OperGet() != GT_STOREIND || use.User()->gtGetOp2() != tree)
     {
         return false;
     }
