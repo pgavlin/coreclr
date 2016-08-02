@@ -1742,7 +1742,7 @@ public:
     // of nodes produced by a loop over `GetChild` in its handling of call, phi, and block op
     // nodes. If `expandMultiRegArgs` is true, an multi-reg args passed to a call will appear
     // be expanded from their GT_LIST node into that node's contents.
-    GenTreeOperandIterator OperandsBegin(bool expandMultiRegArgs = false);
+    GenTreeOperandIterator OperandsBegin(bool expandMultiRegArgs = true);
     GenTreeOperandIterator OperandsEnd();
 
     // Returns a range that will produce the operands of this node in use order.
