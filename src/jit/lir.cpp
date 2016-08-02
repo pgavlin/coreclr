@@ -3,6 +3,8 @@
 // See the LICENSE file in the project root for more information.
 
 #include "jitpch.h"
+#include "smallhash.h"
+
 #ifdef _MSC_VER
 #pragma hdrstop
 #endif
@@ -1049,7 +1051,7 @@ bool LIR::Range::ContainsNode(GenTree* node) const
 // Return Value:
 //    'true' if the LIR for the specified range is legal.
 //
-bool LIR::Range::CheckLIR(Compiler* compiler) const
+bool LIR::Range::CheckLIR(Compiler* compiler, bool checkUnusedValues) const
 {
     // The check that uses are correctly linked into this range may fail
     // erroneously if this range is a sub-range.
@@ -1058,39 +1060,7 @@ bool LIR::Range::CheckLIR(Compiler* compiler) const
     // Make sure the range itself is valid.
     assert(IsValid());
 
-    // This code uses a stack as a map. Lookup is accomplished by scanning downward from the top.
-    // This relies on defs being near uses for efficiency.
-    ArrayStack<GenTree*> unusedDefs(compiler);
-    auto recordDef = [&unusedDefs](GenTree* def)
-    {
-        unusedDefs.Push(def);
-    };
-
-    auto tryConsumeDef = [&unusedDefs](GenTree* def) -> bool
-    {
-        int height = unusedDefs.Height();
-        for (int i = 0; i < height; i++)
-        {
-            if (unusedDefs.Index(i) == def)
-            {
-                // REVIEW: isn't this the reverse? Shouldn't it be:
-                // for (; i < height - 1; i++) {
-                //    unusedDefs.IndexRef(i) = unusedDefs.Index(i + 1);
-                // }
-                // unusedDefs.Pop();
-                // --- better, just add an unusedDefs.Remove(i) member function.
-                for (; i > 0; i--)
-                {
-                    unusedDefs.IndexRef(i) = unusedDefs.Index(i - 1);
-                }
-
-                unusedDefs.Pop();
-                return true;
-            }
-        }
-
-        return false;
-    };
+    SmallHashTable<GenTree*, bool, 32> unusedDefs(compiler);
 
     bool pastPhis = false;
     GenTree* prev = nullptr;
@@ -1109,17 +1079,15 @@ bool LIR::Range::CheckLIR(Compiler* compiler) const
             pastPhis = true;
         }
 
-        // Skip nodes that do not produce values.
-        if (!node->IsValue())
-        {
-            continue;
-        }
-
         unsigned numOperands = node->NumOperands();
         for (unsigned i = 0; i < numOperands; i++)
         {
             GenTree** use = node->GetOperand(i);
             GenTree* def = *use;
+
+            assert((!checkUnusedValues || ((def->gtLIRFlags & LIR::Flags::IsUnusedValue) == 0)) &&
+                "operands should never be marked as unused values");
+
             if (def->OperGet() == GT_ARGPLACE)
             {
                 // ARGPLACE nodes are not represented in the LIR sequence. Ignore them.
@@ -1133,7 +1101,8 @@ bool LIR::Range::CheckLIR(Compiler* compiler) const
                 continue;
             }
 
-            bool foundDef = tryConsumeDef(def);
+            bool v;
+            bool foundDef = unusedDefs.TryRemove(def, &v);
             if (!foundDef)
             {
                 // First, scan backwards and look for a preceding use.
@@ -1160,10 +1129,24 @@ bool LIR::Range::CheckLIR(Compiler* compiler) const
             }
         }
 
-        recordDef(*node);
+        if (node->IsValue())
+        {
+            bool added = unusedDefs.AddOrUpdate(*node, true);
+            assert(added);
+        }
     }
 
     assert(prev == LastNode());
+
+    // At this point the unusedDefs map should contain only unused values.
+    if (checkUnusedValues)
+    {
+        for (auto kvp : unusedDefs)
+        {
+            GenTree* node = kvp.Key();
+            assert(((node->gtLIRFlags & LIR::Flags::IsUnusedValue) != 0) && "found an unmarked unused value");
+        }
+    }
 
     return true;
 }
