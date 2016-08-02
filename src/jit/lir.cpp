@@ -905,27 +905,30 @@ LIR::Range LIR::Range::GetMarkedRange(unsigned markCount, GenTree* start, bool* 
     assert(isClosed != nullptr);
     assert(sideEffects != nullptr);
 
-    bool sawMarkedNode = false;
     bool sawUnmarkedNode = false;
     unsigned sideEffectsInRange = 0;
 
-    GenTree* firstNode;
-    for (firstNode = start; markCount > 0; firstNode = firstNode->gtPrev)
+    GenTree* firstNode = start;
+    GenTree* lastNode = nullptr;
+    for (;;)
     {
-        // This assert will fail if the dataflow that feeds the root node
-        // is incorrect in that it crosses a block boundary or if it involves
-        // a use that occurs before its corresponding def.
-        assert(firstNode != nullptr);
-
-        sideEffectsInRange |= (firstNode->gtFlags & GTF_ALL_EFFECT);
-
         if ((firstNode->gtLIRFlags & LIR::Flags::Mark) != 0)
         {
-            sawMarkedNode = true;
+            if (lastNode == nullptr)
+            {
+                lastNode = firstNode;
+            }
 
             // Mark the node's operands
             for (GenTree* operand : firstNode->Operands())
             {
+                // Do not mark nodes that do not appear in the execution order
+                assert(operand->OperGet() != GT_LIST);
+                if (operand->OperGet() == GT_ARGPLACE)
+                {
+                    continue;
+                }
+
                 operand->gtLIRFlags |= LIR::Flags::Mark;
                 markCount++;
             }
@@ -934,15 +937,34 @@ LIR::Range LIR::Range::GetMarkedRange(unsigned markCount, GenTree* start, bool* 
             firstNode->gtLIRFlags &= ~LIR::Flags::Mark;
             markCount--;
         }
-        else
+        else if (lastNode != nullptr)
         {
             sawUnmarkedNode = true;
         }
+
+        if (lastNode != nullptr)
+        {
+            sideEffectsInRange |= (firstNode->gtFlags & GTF_ALL_EFFECT);
+        }
+
+        if (markCount == 0)
+        {
+            break;
+        }
+
+        firstNode = firstNode->gtPrev;
+
+        // This assert will fail if the dataflow that feeds the root node
+        // is incorrect in that it crosses a block boundary or if it involves
+        // a use that occurs before its corresponding def.
+        assert(firstNode != nullptr);
     }
 
-    *isClosed = sawMarkedNode && !sawUnmarkedNode;
+    assert(lastNode != nullptr);
+
+    *isClosed = !sawUnmarkedNode;
     *sideEffects = sideEffectsInRange;
-    return LIR::Range(firstNode, start);
+    return LIR::Range(firstNode, lastNode);
 }
 
 LIR::Range LIR::Range::GetTreeRange(GenTree* root, bool* isClosed) const

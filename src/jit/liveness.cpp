@@ -642,7 +642,8 @@ void                Compiler::fgPerBlockLocalVarLiveness()
             // on all of the nodes that precede `asgdLclVar` in execution order to factor into the
             // dataflow for the value being assigned to the local var, which is not necessarily the
             // case without tree order. As a result, we simply pass `nullptr` for `asgdLclVar`.
-            for (GenTree* node : LIR::AsRange(block))
+            LIR::Range blockRange = LIR::AsRange(block);
+            for (GenTree* node = blockRange.FirstNonPhiNode(), *end = blockRange.End(); node != end; node = node->gtNext)
             {
                 fgPerNodeLocalVarLiveness(node, nullptr);
             }
