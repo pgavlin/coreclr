@@ -28,10 +28,11 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 #include "nodeinfo.h"
 #include "simd.h"
 
-// Debugging GenTree is much easier if we add a magic virtual function to make the debugger able to figure out what type it's got.
-// This is enabled by default in DEBUG. To enable it in RET builds (temporarily!), you need to change the build to define DEBUGGABLE_GENTREE=1,
-// as well as pass /OPT:NOICF to the linker (or else all the vtables get merged, making the debugging value supplied by them useless).
-// See protojit.nativeproj for a commented example of setting the build flags correctly.
+// Debugging GenTree is much easier if we add a magic virtual function to make the debugger able to figure out what type
+// it's got. This is enabled by default in DEBUG. To enable it in RET builds (temporarily!), you need to change the
+// build to define DEBUGGABLE_GENTREE=1, as well as pass /OPT:NOICF to the linker (or else all the vtables get merged,
+// making the debugging value supplied by them useless). See protojit.nativeproj for a commented example of setting the
+// build flags correctly.
 #ifndef DEBUGGABLE_GENTREE
 #ifdef DEBUG
 #define DEBUGGABLE_GENTREE  1
@@ -72,14 +73,13 @@ DECLARE_TYPED_ENUM(genTreeOps,BYTE)
 
     GT_COUNT,
 
+#ifdef _TARGET_64BIT_
     // GT_CNS_NATIVELONG is the gtOper symbol for GT_CNS_LNG or GT_CNS_INT, depending on the target.
     // For the 64-bit targets we will only use GT_CNS_INT as it used to represent all the possible sizes
-    // For the 32-bit targets we use a GT_CNS_LNG to hold a 64-bit integer constant and GT_CNS_INT for all others.
-    // In the future when we retarget the JIT for x86 we should consider eliminating GT_CNS_LNG
-    //
-#ifdef _TARGET_64BIT_
     GT_CNS_NATIVELONG = GT_CNS_INT,
 #else
+    // For the 32-bit targets we use a GT_CNS_LNG to hold a 64-bit integer constant and GT_CNS_INT for all others.
+    // In the future when we retarget the JIT for x86 we should consider eliminating GT_CNS_LNG
     GT_CNS_NATIVELONG = GT_CNS_LNG,
 #endif
 }
@@ -232,7 +232,7 @@ public:
     }
 };
 
-
+class GenTreeOperandIterator;
 
 /*****************************************************************************/
 
@@ -440,6 +440,7 @@ private:
     //
     // Register or register pair number of the node.
     //
+    CLANG_FORMAT_COMMENT_ANCHOR;
 
 #ifdef DEBUG
 public:
@@ -749,7 +750,7 @@ public:
 
     #define GTF_CALL_UNMANAGED  0x80000000  // GT_CALL    -- direct call to unmanaged code
     #define GTF_CALL_INLINE_CANDIDATE 0x40000000 // GT_CALL -- this call has been marked as an inline candidate
-//  
+
     #define GTF_CALL_VIRT_KIND_MASK  0x30000000 
     #define GTF_CALL_NONVIRT         0x00000000  // GT_CALL    -- a non virtual call
     #define GTF_CALL_VIRT_STUB       0x10000000  // GT_CALL    -- a stub-dispatch virtual call
@@ -770,25 +771,31 @@ public:
     #define GTF_INX_REFARR_LAYOUT 0x20000000  // GT_INDEX -- same as GTF_IND_REFARR_LAYOUT
     #define GTF_INX_STRING_LAYOUT 0x40000000  // GT_INDEX -- this uses the special string array layout
 
-    #define GTF_IND_VOLATILE      0x40000000  // GT_IND   -- the load or store must use volatile sematics (this is a nop on X86)
+    #define GTF_IND_VOLATILE      0x40000000  // GT_IND   -- the load or store must use volatile sematics (this is a nop
+                                              //             on X86)
     #define GTF_IND_REFARR_LAYOUT 0x20000000  // GT_IND   -- the array holds object refs (only effects layout of Arrays)
     #define GTF_IND_TGTANYWHERE   0x10000000  // GT_IND   -- the target could be anywhere
     #define GTF_IND_TLS_REF       0x08000000  // GT_IND   -- the target is accessed via TLS
-    #define GTF_IND_ASG_LHS       0x04000000  // GT_IND   -- this GT_IND node is (the effective val) of the LHS of an assignment; don't evaluate it independently.
-    #define GTF_IND_UNALIGNED     0x02000000  // GT_IND   -- the load or store is unaligned (we assume worst case alignment of 1 byte) 
+    #define GTF_IND_ASG_LHS       0x04000000  // GT_IND   -- this GT_IND node is (the effective val) of the LHS of an
+                                              //             assignment; don't evaluate it independently.
+    #define GTF_IND_UNALIGNED     0x02000000  // GT_IND   -- the load or store is unaligned (we assume worst case
+                                              //             alignment of 1 byte) 
     #define GTF_IND_INVARIANT     0x01000000  // GT_IND   -- the target is invariant (a prejit indirection)
-    #define GTF_IND_ARR_LEN       0x80000000  // GT_IND   -- the indirection represents an array length (of the REF contribution to its argument).
+    #define GTF_IND_ARR_LEN       0x80000000  // GT_IND   -- the indirection represents an array length (of the REF
+                                              //             contribution to its argument).
     #define GTF_IND_ARR_INDEX     0x00800000  // GT_IND   -- the indirection represents an (SZ) array index
 
     #define GTF_IND_FLAGS         (GTF_IND_VOLATILE|GTF_IND_REFARR_LAYOUT|GTF_IND_TGTANYWHERE|GTF_IND_NONFAULTING|\
                                    GTF_IND_TLS_REF|GTF_IND_UNALIGNED|GTF_IND_INVARIANT|GTF_IND_ARR_INDEX)
 
-    #define GTF_CLS_VAR_ASG_LHS   0x04000000  // GT_CLS_VAR   -- this GT_CLS_VAR node is (the effective val) of the LHS of an assignment; don't evaluate it independently.
+    #define GTF_CLS_VAR_ASG_LHS   0x04000000  // GT_CLS_VAR   -- this GT_CLS_VAR node is (the effective val) of the LHS
+                                              //                 of an assignment; don't evaluate it independently.
 
     #define GTF_ADDR_ONSTACK      0x80000000  // GT_ADDR    -- this expression is guaranteed to be on the stack
 
 
-    #define GTF_ADDRMODE_NO_CSE 0x80000000  // GT_ADD/GT_MUL/GT_LSH -- Do not CSE this node only, forms complex addressing mode
+    #define GTF_ADDRMODE_NO_CSE 0x80000000  // GT_ADD/GT_MUL/GT_LSH -- Do not CSE this node only, forms complex
+                                            //                         addressing mode
 
     #define GTF_MUL_64RSLT      0x40000000  // GT_MUL     -- produce 64-bit result
 
@@ -801,12 +808,15 @@ public:
     #define GTF_RELOP_NAN_UN    0x80000000  // GT_<relop> -- Is branch taken if ops are NaN?
     #define GTF_RELOP_JMP_USED  0x40000000  // GT_<relop> -- result of compare used for jump or ?:
     #define GTF_RELOP_QMARK     0x20000000  // GT_<relop> -- the node is the condition for ?:
-    #define GTF_RELOP_SMALL     0x10000000  // GT_<relop> -- We should use a byte or short sized compare (op1->gtType is the small type)
-    #define GTF_RELOP_ZTT       0x08000000  // GT_<relop> -- Loop test cloned for converting while-loops into do-while with explicit "loop test" in the header block.
+    #define GTF_RELOP_SMALL     0x10000000  // GT_<relop> -- We should use a byte or short sized compare (op1->gtType
+                                            //               is the small type)
+    #define GTF_RELOP_ZTT       0x08000000  // GT_<relop> -- Loop test cloned for converting while-loops into do-while
+                                            //               with explicit "loop test" in the header block.
 
-    #define GTF_QMARK_CAST_INSTOF 0x80000000  // GT_QMARK   -- Is this a top (not nested) level qmark created for castclass or instanceof?
+    #define GTF_QMARK_CAST_INSTOF 0x80000000  // GT_QMARK -- Is this a top (not nested) level qmark created for
+                                              //             castclass or instanceof?
 
-    #define GTF_BOX_VALUE 0x80000000  // GT_BOX   -- "box" is on a value type
+    #define GTF_BOX_VALUE 0x80000000  // GT_BOX -- "box" is on a value type
 
     #define GTF_ICON_HDL_MASK   0xF0000000  // Bits used by handle types below
 
@@ -843,7 +853,8 @@ public:
 
     #define GTF_STMT_CMPADD     0x80000000  // GT_STMT    -- added by compiler
     #define GTF_STMT_HAS_CSE    0x40000000  // GT_STMT    -- CSE def or use was subsituted
-    #define GTF_STMT_TOP_LEVEL  0x20000000  // GT_STMT    -- Top-level statement - true iff gtStmtList->gtPrev == nullptr
+    #define GTF_STMT_TOP_LEVEL  0x20000000  // GT_STMT    -- Top-level statement - 
+                                            //               true iff gtStmtList->gtPrev == nullptr
                                             //               True for all stmts when in FGOrderTree
     #define GTF_STMT_SKIP_LOWER 0x10000000  // GT_STMT    -- Skip lowering if we already lowered an embedded stmt.
 
@@ -1565,8 +1576,8 @@ public:
 
     // Requires "this" to be a GT_IND.  Requires the outermost caller to set "*pFldSeq" to nullptr.
     // Returns true if it is an array index expression, or access to a (sequence of) struct field(s)
-    // within a struct array element.  If it returns true, sets *arrayInfo to the array information, and sets *pFldSeq to the sequence
-    // of struct field accesses.
+    // within a struct array element.  If it returns true, sets *arrayInfo to the array information, and sets *pFldSeq
+    // to the sequence of struct field accesses.
     bool ParseArrayElemForm(Compiler* comp, ArrayInfo* arrayInfo, FieldSeqNode** pFldSeq);
 
     // Requires "this" to be the address of a (possible) array element (or struct field within that).
@@ -1578,8 +1589,8 @@ public:
     // returns true and sets "*pFldSeq" to the sequence of fields with which those constants are annotated.
     bool ParseOffsetForm(Compiler* comp, FieldSeqNode** pFldSeq);
 
-    // Labels "*this" as an array index expression: label all constants and variables that could contribute, as part of an affine expression, to the value of the
-    // of the index.
+    // Labels "*this" as an array index expression: label all constants and variables that could contribute, as part of
+    // an affine expression, to the value of the of the index.
     void LabelIndex(Compiler* comp, bool isConst = true);
 
     // Assumes that "this" occurs in a context where it is being dereferenced as the LHS of an assignment-like
@@ -1727,6 +1738,18 @@ public:
     // only in the case of call nodes and its handling of GTF_REVERSE_OPS.
     GenTree** GetOperand(unsigned operandNum);
 
+    // Returns an iterator that will produce each operand of this node. Differs from the sequence
+    // of nodes produced by a loop over `GetChild` in its handling of call, phi, and block op
+    // nodes. If `expandMultiRegArgs` is true, an multi-reg args passed to a call will appear
+    // be expanded from their GT_LIST node into that node's contents.
+    GenTreeOperandIterator OperandsBegin(bool expandMultiRegArgs = false);
+    GenTreeOperandIterator OperandsEnd();
+
+    // Returns a range that will produce the operands of this node in use order.
+    IteratorPair<GenTreeOperandIterator> Operands(bool expandMultiRegArgs = false);
+
+    bool Precedes(GenTree* other);
+
     // The maximum possible # of children of any node.
     static const int MAX_CHILDREN = 6;
 
@@ -1749,8 +1772,6 @@ public:
         assert(OperIsConst());
         gtFlags &= ~GTF_REUSE_REG_VAL;
     }
-
-    bool Precedes(GenTree* other);
 
 #ifdef DEBUG
 
@@ -1779,6 +1800,72 @@ public:
 
     inline GenTree(genTreeOps oper, var_types type
                    DEBUGARG(bool largeNode = false));
+};
+
+//------------------------------------------------------------------------
+// GenTreeOperandIterator: an iterator that will produce each operand of a
+//                         GenTree node in the order in which they are
+//                         used. Note that the operands of a node may not
+//                         correspond exactly to the nodes on the other
+//                         ends of its use edges: in particular, GT_LIST
+//                         nodes are expanded into their component parts
+//                         (with the optional exception of multi-reg
+//                         arguments). This differs from the behavior of
+//                         GenTree::GetChild(), which does not expand
+//                         lists.
+//
+// Note: valid values of this type may be obtained by calling
+// `GenTree::OperandsBegin` and `GenTree::OperandsEnd`.
+class GenTreeOperandIterator
+{
+    friend GenTreeOperandIterator GenTree::OperandsBegin(bool expandMultiRegArgs);
+    friend GenTreeOperandIterator GenTree::OperandsEnd();
+
+    GenTree* m_node;
+    GenTree* m_operand;
+    GenTree* m_argList;
+    GenTree* m_multiRegArg;
+    bool m_expandMultiRegArgs;
+    int m_state;
+
+    GenTreeOperandIterator(GenTree* node, bool expandMultiRegArgs);
+
+    GenTree* GetNextOperand() const;
+    void MoveToNextCallOperand();
+    void MoveToNextPhiOperand();
+#ifdef FEATURE_SIMD
+    void MoveToNextSIMDOperand();
+#endif
+
+public:
+    GenTreeOperandIterator();
+
+    inline GenTree*& operator*()
+    {
+        return m_operand;
+    }
+
+    inline GenTree** operator->()
+    {
+        return &m_operand;
+    }
+
+    inline bool operator==(const GenTreeOperandIterator& other) const
+    {
+        if (m_state == -1 || other.m_state == -1)
+        {
+            return m_state == other.m_state;
+        }
+
+        return (m_node == other.m_node) && (m_operand == other.m_operand) && (m_argList == other.m_argList) && (m_state == other.m_state);
+    }
+
+    inline bool operator!=(const GenTreeOperandIterator& other) const
+    {
+        return !(operator==(other));
+    }
+
+    GenTreeOperandIterator& operator++();
 };
 
 
@@ -2608,11 +2695,11 @@ struct GenTreeCall final : public GenTree
     regMaskTP         gtCallRegUsedMask;      // mask of registers used to pass parameters
 #endif // LEGACY_BACKEND
 
+#if FEATURE_MULTIREG_RET
     // State required to support multi-reg returning call nodes.
     // For now it is enabled only for x64 unix.
     //
     // TODO-AllArch: enable for all call nodes to unify single-reg and multi-reg returns.
-#if FEATURE_MULTIREG_RET
     ReturnTypeDesc    gtReturnTypeDesc;
 
     // gtRegNum would always be the first return reg.
@@ -3545,7 +3632,8 @@ struct GenTreeAddrMode: public GenTreeOp
     // So, for example:
     //      1. Base + Index is legal with Scale==1
     //      2. If Index is null, Scale should be zero (or unintialized / unused)
-    //      3. If Scale==1, then we should have "Base" instead of "Index*Scale", and "Base + Offset" instead of "Index*Scale + Offset".
+    //      3. If Scale==1, then we should have "Base" instead of "Index*Scale", and "Base + Offset" instead of
+    //         "Index*Scale + Offset".
 
     // First operand is base address/pointer
     bool            HasBase() const     { return gtOp1 != nullptr; }
@@ -4066,10 +4154,10 @@ struct GenTreePutArgStk: public GenTreeUnOp
 // Represents GT_COPY or GT_RELOAD node
 struct GenTreeCopyOrReload : public GenTreeUnOp
 {
+#if FEATURE_MULTIREG_RET
     // State required to support copy/reload of a multi-reg call node.
     // First register is is always given by gtRegNum.
     //
-#if FEATURE_MULTIREG_RET
     regNumber gtOtherRegs[MAX_RET_REG_COUNT - 1];
 #endif
 

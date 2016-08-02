@@ -1493,22 +1493,22 @@ combinedScenarios.each { scenario ->
                                     }
 
                                     // For Pri 1 tests, we must shorten the output test binary path names.
-                                    // if __TestIntermediateDir is already set, buildtest.cmd will
+                                    // if __TestIntermediateDir is already set, build-test.cmd will
                                     // output test binaries to that directory. If it is not set, the 
                                     // binaries are sent to a default directory whose name is about
                                     // 35 characters long.
 
                                     else if (scenario == 'pri1' || scenario == 'pri1r2r' || scenario == 'gcstress15_pri1r2r'|| scenario == 'coverage') {
-                                        buildCommands += "set __TestIntermediateDir=int&&build.cmd ${lowerConfiguration} ${arch} Priority 1"
+                                        buildCommands += "set __TestIntermediateDir=int&&build.cmd ${lowerConfiguration} ${arch} -priority=1"
                                     }
                                     else if (scenario == 'ilrt') {
                                         // First do the build with skiptests and then build the tests with ilasm roundtrip
                                         buildCommands += "build.cmd ${lowerConfiguration} ${arch} skiptests"
-                                        buildCommands += "set __TestIntermediateDir=int&&tests\\buildtest.cmd ${lowerConfiguration} ${arch} ilasmroundtrip"
+                                        buildCommands += "set __TestIntermediateDir=int&&build-test.cmd ${lowerConfiguration} ${arch} -ilasmroundtrip"
                                     }
                                     else if (isLongGc(scenario)) {
                                         buildCommands += "build.cmd ${lowerConfiguration} ${arch} skiptests"
-                                        buildCommands += "set __TestIntermediateDir=int&&tests\\buildtest.cmd ${lowerConfiguration} ${arch}"
+                                        buildCommands += "set __TestIntermediateDir=int&&build-test.cmd ${lowerConfiguration} ${arch}"
                                     }
                                     else {
                                         println("Unknown scenario: ${scenario}")
@@ -1593,7 +1593,7 @@ combinedScenarios.each { scenario ->
                                                 buildCommands += getStressModeEnvSetCmd(os, scenario);
                                                 
                                                 // Run corefx build and testing
-                                                buildCommands += "cd fx && call \"C:\\Program Files (x86)\\Microsoft Visual Studio 14.0\\VC\\vcvarsall.bat\" x86 && Build.cmd /p:ConfigurationGroup=Release  /p:BUILDTOOLS_OVERRIDE_RUNTIME=%WORKSPACE%\\clr\\bin\\Product\\Windows_NT.x64.Checked "                                                                                              
+                                                buildCommands += "cd fx && call \"C:\\Program Files (x86)\\Microsoft Visual Studio 14.0\\VC\\vcvarsall.bat\" x86 && Build.cmd -Release -- /p:BUILDTOOLS_OVERRIDE_RUNTIME=%WORKSPACE%\\clr\\bin\\Product\\Windows_NT.x64.Checked "                                                                                              
                                             }
                                             else {
                                                 def stepScriptLocation = "%WORKSPACE%\\bin\\tests\\SetStressModes.bat"
@@ -1662,10 +1662,10 @@ combinedScenarios.each { scenario ->
 
                                     // Debug runs take too long to run. So build job only.
                                     if (lowerConfiguration == "debug") {
-                                       buildCommands += "set __TestIntermediateDir=int&&build.cmd ${lowerConfiguration} ${architecture} /toolset_dir C:\\ats2"
+                                       buildCommands += "set __TestIntermediateDir=int&&build.cmd ${lowerConfiguration} ${architecture} toolset_dir C:\\ats2"
                                     }
                                     else {
-                                       buildCommands += "set __TestIntermediateDir=int&&build.cmd skiptests ${lowerConfiguration} ${architecture} /toolset_dir C:\\ats2"
+                                       buildCommands += "set __TestIntermediateDir=int&&build.cmd skiptests ${lowerConfiguration} ${architecture} toolset_dir C:\\ats2"
                                        // Test build and run are launched together.
                                        buildCommands += "Z:\\arm64\\common\\scripts\\arm64PostLauncher.cmd %WORKSPACE% ${architecture} ${lowerConfiguration} ${scenario}"
                                        Utilities.addXUnitDotNETResults(newJob, 'bin/tests/testResults.xml')
@@ -1737,7 +1737,7 @@ combinedScenarios.each { scenario ->
                                         // Build and text corefx
                                         buildCommands += "rm -rf \$WORKSPACE/fx_home; mkdir \$WORKSPACE/fx_home"
                                         buildCommands += setEnvVar
-                                        buildCommands += "cd fx; export HOME=\$WORKSPACE/fx_home; ./build.sh /p:ConfigurationGroup=Release /p:BUILDTOOLS_OVERRIDE_RUNTIME=\$WORKSPACE/clr/bin/Product/Linux.x64.Checked /p:Outerloop=true /p:TestWithLocalLibraries=true"  
+                                        buildCommands += "cd fx; export HOME=\$WORKSPACE/fx_home; ./build.sh -Release -Outerloop -TestWithLocalLibraries -- /p:BUILDTOOLS_OVERRIDE_RUNTIME=\$WORKSPACE/clr/bin/Product/Linux.x64.Checked"  
 
                                         // Archive and process test result
                                         Utilities.addArchival(newJob, "fx/bin/tests/**/testResults.xml")
@@ -2144,7 +2144,8 @@ combinedScenarios.each { scenario ->
                                 shell("git clone https://github.com/dotnet/corefx fx")
 
                                 // Build Linux corefx
-                                shell("./fx/build.sh x64 release Linux skiptests")
+                                shell("./fx/build-native.sh -release -buildArch=x64 -os=Linux")
+                                shell("./fx/build-managed.sh -release -buildArch=x64 -osgroup=Linux -skiptests")
 
                                 def testEnvOpt = ""
                                 def scriptFileName = "\$WORKSPACE/set_stress_test_env.sh"

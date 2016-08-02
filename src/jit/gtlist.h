@@ -2,6 +2,7 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for more information.
 
+// clang-format off
 /*****************************************************************************/
 #ifndef GTNODE
 #error  Define GTNODE before including this file.
@@ -248,3 +249,4 @@ GTNODE(IL_OFFSET    , "il_offset"     ,0,GTK_LEAF|GTK_NOVALUE)  // marks an IL o
 /*****************************************************************************/
 #undef  GTNODE
 /*****************************************************************************/
+// clang-format on
