@@ -2989,13 +2989,10 @@ void Lowering::AddrModeCleanupHelper(GenTreeAddrMode* addrMode, GenTree* node)
         return;
     }
 
-    // TODO(pdg): change this to use the operand iterator once LSRA changes are in
-    //
-    // Also, change this to use the LIR mark bit and iterate instead of recursing
-    unsigned childCount = node->NumOperands();
-    for (unsigned i = 0; i < childCount; i++)
+    // TODO(pdg): change this to use the LIR mark bit and iterate instead of recursing
+    for (GenTree* operand : node->Operands())
     {
-        AddrModeCleanupHelper(addrMode, *node->GetOperand(i));
+        AddrModeCleanupHelper(addrMode, operand);
     }
 
     m_blockRange.Remove(node);

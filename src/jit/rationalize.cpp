@@ -1119,6 +1119,24 @@ Compiler::fgWalkResult Rationalizer::RewriteNode(GenTree** useEdge, ArrayStack<G
 {
     assert(useEdge != nullptr);
 
+    GenTree* node = *useEdge;
+    assert(node != nullptr);
+
+    // First, remove any preceeding GT_LIST nodes, which are not otherwise visited by the tree walk.
+    //
+    // NOTE: GT_LIST nodes that are used by block ops and phi nodes will in fact be visited.
+    for (GenTree* prev = node->gtPrev; prev != nullptr && prev->OperGet() == GT_LIST; prev = node->gtPrev)
+    {
+        m_range.Remove(prev);
+    }
+
+    // In addition, remove the current node if it is a GT_LIST node.
+    if ((*useEdge)->OperGet() == GT_LIST)
+    {
+        m_range.Remove(*useEdge);
+        return Compiler::WALK_CONTINUE;
+    }
+
     LIR::Use use;
     if (parentStack.Height() < 2)
     {
@@ -1129,16 +1147,7 @@ Compiler::fgWalkResult Rationalizer::RewriteNode(GenTree** useEdge, ArrayStack<G
         use = LIR::Use(m_range, useEdge, parentStack.Index(1));
     }
 
-    GenTree* node = use.Def();
-
-    // First, remove any preceeding GT_LIST nodes, which are not otherwise visited by the tree walk.
-    //
-    // NOTE: GT_LIST nodes that are used by block ops and phi nodes will in fact be visited.
-    for (GenTree* prev = node->gtPrev; prev != nullptr && prev->OperGet() == GT_LIST; prev = node->gtPrev)
-    {
-        m_range.Remove(prev);
-    }
-
+    assert(node == use.Def());
     switch (node->OperGet())
     {
     case GT_ASG:
@@ -1185,7 +1194,6 @@ Compiler::fgWalkResult Rationalizer::RewriteNode(GenTree** useEdge, ArrayStack<G
         break;
 
     case GT_ARGPLACE:
-    case GT_LIST:
         // Remove argplace and list nodes from the execution order.
         //
         // TODO: remove phi args and phi nodes as well?

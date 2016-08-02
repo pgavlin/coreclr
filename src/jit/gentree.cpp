@@ -5277,116 +5277,17 @@ GenTreePtr*         GenTree::gtGetChildPointer(GenTreePtr parent)
     return nullptr;
 }
 
-bool              GenTree::TryGetUse(GenTree* def, GenTree*** use)
+bool              GenTree::TryGetUse(GenTree* def, GenTree*** use, bool expandMultiRegArgs)
 {
-    assert(def != nullptr);
-    assert(use != nullptr);
-
-    switch (OperGet())
+    for (GenTree** useEdge : UseEdges(expandMultiRegArgs))
     {
-    default:
-        if (!OperIsSimple())                      return (*use = nullptr, false);
-        if (def == gtOp.gtOp1)                    return (*use = &(gtOp.gtOp1), true);
-        if (def == gtOp.gtOp2)                    return (*use = &(gtOp.gtOp2), true);
-        break;
-
-    case GT_OBJ:
-        if (def == gtOp.gtOp1)                    return (*use = &(gtOp.gtOp1), true);
-        break;
-
-    case GT_CMPXCHG:
-        if (def == gtCmpXchg.gtOpLocation)        return (*use = &(gtCmpXchg.gtOpLocation), true);
-        if (def == gtCmpXchg.gtOpValue)           return (*use = &(gtCmpXchg.gtOpValue), true);
-        if (def == gtCmpXchg.gtOpComparand)       return (*use = &(gtCmpXchg.gtOpComparand), true);
-        break;
-
-    case GT_ARR_BOUNDS_CHECK:
-#ifdef FEATURE_SIMD
-    case GT_SIMD_CHK:
-#endif // FEATURE_SIMD
-        if (def == gtBoundsChk.gtArrLen)          return (*use = &(gtBoundsChk.gtArrLen), true);
-        if (def == gtBoundsChk.gtIndex)           return (*use = &(gtBoundsChk.gtIndex), true);
-        if (def == gtBoundsChk.gtIndRngFailBB)    return (*use = &(gtBoundsChk.gtIndRngFailBB), true);
-        break;
-
-    case GT_ARR_ELEM:
-        if (def == gtArrElem.gtArrObj)            return (*use = &(gtArrElem.gtArrObj), true);
-        for (int i = 0; i < GT_ARR_MAX_RANK; i++)
-            if (def == gtArrElem.gtArrInds[i])    return (*use = &(gtArrElem.gtArrInds[i]), true);
-        break;
-
-    case GT_ARR_OFFSET:
-        if (def == gtArrOffs.gtOffset)            return (*use = &(gtArrOffs.gtOffset), true);
-        if (def == gtArrOffs.gtIndex)             return (*use = &(gtArrOffs.gtIndex), true);
-        if (def == gtArrOffs.gtArrObj)            return (*use = &(gtArrOffs.gtArrObj), true);
-        break;
-
-    case GT_FIELD:
-        if (def == AsField()->gtFldObj)           return (*use = &(AsField()->gtFldObj), true);
-        break;
-
-    case GT_RET_EXPR:
-        if (def == gtRetExpr.gtInlineCandidate)   return (*use = &(gtRetExpr.gtInlineCandidate), true);
-        break;
-
-    case GT_CALL:
+        if (*useEdge == def)
         {
-            GenTreeCall* call = AsCall();
-
-            assert(def != call->gtCallArgs);
-            assert(def != call->gtCallLateArgs);
-
-            if (def == call->gtCallObjp)                  return (*use = &(call->gtCallObjp), true);
-            if (def == call->gtControlExpr)               return (*use = &(call->gtControlExpr), true);
-            if (call->gtCallType == CT_INDIRECT)
-            {
-                if (def == call->gtCallCookie)            return (*use = &(call->gtCallCookie), true);
-                if (def == call->gtCallAddr)              return (*use = &(call->gtCallAddr), true);
-            }
-
-            for (GenTreeArgList* args = call->gtCallArgs; args != nullptr; args = args->Rest())
-            {
-                if (def == args->gtOp1)                   return (*use = &(args->gtOp1), true);
-            }
-
-            for (GenTreeArgList* args = call->gtCallLateArgs; args != nullptr; args = args->Rest())
-            {
-                if (def == args->gtOp1)                   return (*use = &(args->gtOp1), true);
-            }
+            *use = useEdge;
+            return true;
         }
-        break;
-
-    case GT_PHI:
-        {
-            GenTreeUnOp* phi = AsUnOp();
-            if (phi->gtOp1 != nullptr)
-            {
-                for (GenTreeArgList* args = phi->gtOp1->AsArgList(); args != nullptr; args = args->Rest())
-                {
-                    if (def == args->gtOp1)               return (*use = &args->gtOp1, true);
-                }
-            }
-        }
-        break;
-
-    case GT_INITBLK:
-    case GT_COPYBLK:
-    case GT_COPYOBJ:
-        {
-            GenTreeBlkOp* blkOp = AsBlkOp();
-            GenTreeArgList* args = blkOp->gtOp1->AsArgList();
-            if (def == args->gtOp1)                       return (*use = &args->gtOp1, true);
-            if (def == args->gtOp2)                       return (*use = &args->gtOp2, true);
-            if (def == blkOp->gtOp2)                      return (*use = &blkOp->gtOp2, true);
-        }
-        break;
-
-    case GT_STMT:
-        noway_assert(!"Illegal node for gtGetChildPointer()");
-        unreached();
     }
 
-    *use = nullptr;
     return false;
 }
 
@@ -7982,276 +7883,9 @@ GenTreePtr GenTree::GetChild(unsigned childNum)
     }
 }
 
-unsigned GenTree::NumOperands()
-{
-    unsigned numOperands = 0;
-    switch (OperGet())
-    {
-    case GT_CALL:
-        {
-            GenTreeCall* call = AsCall();
-
-            if (call->gtCallObjp != nullptr)
-            {
-                numOperands++;
-            }
-
-            for (GenTreeArgList* args = call->gtCallArgs; args != nullptr; args = args->Rest())
-            {
-                numOperands++;
-            }
-
-            for (GenTreeArgList* args = call->gtCallLateArgs; args != nullptr; args = args->Rest())
-            {
-                numOperands++;
-            }
-
-            if (call->gtControlExpr != nullptr)
-            {
-                numOperands++;
-            }
-
-            if (call->gtCallType == CT_INDIRECT)
-            {
-                if (call->gtCallCookie != nullptr)
-                {
-                    numOperands++;
-                }
-
-                if (call->gtCallAddr != nullptr)
-                {
-                    numOperands++;
-                }
-            }
-        }
-        break;
-
-    case GT_PHI:
-        {
-            GenTreeUnOp* phi = AsUnOp();
-            if (phi->gtOp1 != nullptr)
-            {
-                for (GenTreeArgList* args = phi->gtOp1->AsArgList(); args != nullptr; args = args->Rest())
-                {
-                    numOperands++;
-                }
-            }
-        }
-        break;
-
-    case GT_INITBLK:
-    case GT_COPYBLK:
-    case GT_COPYOBJ:
-        {
-            // Dest, InitVal/Source, Size
-            numOperands = 3;
-        }
-        break;
-
-    default:
-        numOperands = NumChildren();
-        break;
-    }
-
-    return numOperands;
-}
-
-GenTree** GenTree::GetOperand(unsigned operandNum)
-{
-    assert(operandNum < NumOperands());
-
-    // Special
-    switch (OperGet())
-    {
-    case GT_CMPXCHG:
-        switch (operandNum)
-        {
-        case 0:
-            return &AsCmpXchg()->gtOpLocation;
-        case 1:
-            return &AsCmpXchg()->gtOpValue;
-        case 2:
-            return &AsCmpXchg()->gtOpComparand;
-        default:
-            unreached();
-        }
-    case GT_ARR_BOUNDS_CHECK:
-#ifdef FEATURE_SIMD
-    case GT_SIMD_CHK:
-#endif // FEATURE_SIMD
-        switch (operandNum)
-        {
-        case 0:
-            return &AsBoundsChk()->gtArrLen;
-        case 1:
-            return &AsBoundsChk()->gtIndex;
-        default:
-            unreached();
-        }
-
-    case GT_FIELD:
-        return &AsField()->gtFldObj;
-
-    case GT_STMT:
-        return &AsStmt()->gtStmtExpr;
-
-    case GT_ARR_ELEM:
-        if (operandNum == 0)
-        {
-            return &AsArrElem()->gtArrObj;
-        }
-        else
-        {
-            return &AsArrElem()->gtArrInds[operandNum-1];
-        }
-
-    case GT_ARR_OFFSET:
-        switch (operandNum)
-        {
-        case 0:
-            return &AsArrOffs()->gtOffset;
-        case 1:
-            return &AsArrOffs()->gtIndex;
-        case 2:
-            return &AsArrOffs()->gtArrObj;
-        default:
-            unreached();
-        }
-
-    case GT_CALL:
-        {
-            GenTreeCall* call = AsCall();
-
-            if (call->gtCallObjp != nullptr)
-            {
-                if (operandNum == 0)
-                {
-                    return &call->gtCallObjp;
-                }
-                operandNum--;
-            }
-
-            for (GenTreeArgList* args = call->gtCallArgs; args != nullptr; args = args->Rest())
-            {
-                if (operandNum == 0)
-                {
-                    return &args->gtOp1;
-                }
-                operandNum--;
-            }
-
-            for (GenTreeArgList* args = call->gtCallLateArgs; args != nullptr; args = args->Rest())
-            {
-                if (operandNum == 0)
-                {
-                    return &args->gtOp1;
-                }
-                operandNum--;
-            }
-
-            if (call->gtControlExpr != nullptr)
-            {
-                if (operandNum == 0)
-                {
-                    return &call->gtControlExpr;
-                }
-                operandNum--;
-            }
-
-            if (call->gtCallType == CT_INDIRECT)
-            {
-                if (call->gtCallCookie != nullptr)
-                {
-                    if (operandNum == 0)
-                    {
-                        return &call->gtCallCookie;
-                    }
-                    operandNum--;
-                }
-
-                if (call->gtCallAddr != nullptr)
-                {
-                    assert(operandNum == 0);
-                    return &call->gtCallAddr;
-                }
-            }
-        }
-        break;
-
-    case GT_PHI:
-        {
-            GenTreeUnOp* phi = AsUnOp();
-            if (phi->gtOp1 != nullptr)
-            {
-                for (GenTreeArgList* args = phi->gtOp1->AsArgList(); args != nullptr; args = args->Rest())
-                {
-                    if (operandNum == 0)
-                    {
-                        return &args->gtOp1;
-                    }
-                    operandNum--;
-                }
-            }
-        }
-        break;
-
-    case GT_INITBLK:
-    case GT_COPYBLK:
-    case GT_COPYOBJ:
-        {
-            GenTreeBlkOp* blkOp = AsBlkOp();
-            if (operandNum == 0)
-            {
-                return &blkOp->gtOp1->AsArgList()->gtOp1;
-            }
-            else if (operandNum == 1)
-            {
-                return &blkOp->gtOp1->AsArgList()->gtOp2;
-            }
-            else if (operandNum == 2)
-            {
-                return &blkOp->gtOp2;
-            }
-        }
-        break;
-
-    default:
-        if (OperIsUnary())
-        {
-            return &AsUnOp()->gtOp1;
-        }
-        else if (OperIsBinary())
-        {
-            if (OperIsAddrMode())
-            {
-                // If this is the first (0th) child, only return op1 if it is non-null
-                // Otherwise, we return gtOp2.
-                if (operandNum == 0 && AsOp()->gtOp1 != nullptr)
-                    return &AsOp()->gtOp1;
-
-                return &AsOp()->gtOp2;
-            }
-
-            GenTree** op1 = &AsOp()->gtOp1;
-            GenTree** op2 = &AsOp()->gtOp2;
-
-            if ((gtFlags & GTF_REVERSE_OPS) != 0)
-            {
-                GenTree** tmp = op1;
-                op1 = op2;
-                op2 = tmp;
-            }
-
-            return operandNum == 0 ? op1 : op2;
-        }
-    }
-
-    unreached();
-}
-
-GenTreeOperandIterator::GenTreeOperandIterator()
+GenTreeUseEdgeIterator::GenTreeUseEdgeIterator()
     : m_node(nullptr)
-    , m_operand(nullptr)
+    , m_edge(nullptr)
     , m_argList(nullptr)
     , m_multiRegArg(nullptr)
     , m_expandMultiRegArgs(false)
@@ -8259,9 +7893,9 @@ GenTreeOperandIterator::GenTreeOperandIterator()
 {
 }
 
-GenTreeOperandIterator::GenTreeOperandIterator(GenTree* node, bool expandMultiRegArgs)
+GenTreeUseEdgeIterator::GenTreeUseEdgeIterator(GenTree* node, bool expandMultiRegArgs)
     : m_node(node)
-    , m_operand(nullptr)
+    , m_edge(nullptr)
     , m_argList(nullptr)
     , m_multiRegArg(nullptr)
     , m_expandMultiRegArgs(expandMultiRegArgs)
@@ -8274,7 +7908,7 @@ GenTreeOperandIterator::GenTreeOperandIterator(GenTree* node, bool expandMultiRe
 }
 
 //------------------------------------------------------------------------
-// GenTreeOperandIterator::GetNextOperand:
+// GenTreeUseEdgeIterator::GetNextUseEdge:
 //    Gets the next operand of a node with a fixed number of operands.
 //    This covers all nodes besides GT_CALL, GT_PHI, and GT_SIMD. For the
 //    node types handled by this method, the `m_state` field indicates the
@@ -8283,7 +7917,8 @@ GenTreeOperandIterator::GenTreeOperandIterator(GenTree* node, bool expandMultiRe
 // Returns:
 //    The node's next operand or nullptr if all operands have been
 //    produced.
-GenTree* GenTreeOperandIterator::GetNextOperand() const
+//
+GenTree** GenTreeUseEdgeIterator::GetNextUseEdge() const
 {
     switch (m_node->OperGet())
     {
@@ -8291,11 +7926,11 @@ GenTree* GenTreeOperandIterator::GetNextOperand() const
         switch (m_state)
         {
         case 0:
-            return m_node->AsCmpXchg()->gtOpLocation;
+            return &m_node->AsCmpXchg()->gtOpLocation;
         case 1:
-            return m_node->AsCmpXchg()->gtOpValue;
+            return &m_node->AsCmpXchg()->gtOpValue;
         case 2:
-            return m_node->AsCmpXchg()->gtOpComparand;
+            return &m_node->AsCmpXchg()->gtOpComparand;
         default:
             return nullptr;
         }
@@ -8306,9 +7941,9 @@ GenTree* GenTreeOperandIterator::GetNextOperand() const
         switch (m_state)
         {
         case 0:
-            return m_node->AsBoundsChk()->gtArrLen;
+            return &m_node->AsBoundsChk()->gtArrLen;
         case 1:
-            return m_node->AsBoundsChk()->gtIndex;
+            return &m_node->AsBoundsChk()->gtIndex;
         default:
             return nullptr;
         }
@@ -8316,25 +7951,25 @@ GenTree* GenTreeOperandIterator::GetNextOperand() const
     case GT_FIELD:
         if (m_state == 0)
         {
-            return m_node->AsField()->gtFldObj;
+            return &m_node->AsField()->gtFldObj;
         }
         return nullptr;
 
     case GT_STMT:
         if (m_state == 0)
         {
-            return m_node->AsStmt()->gtStmtExpr;
+            return &m_node->AsStmt()->gtStmtExpr;
         }
         return nullptr;
 
     case GT_ARR_ELEM:
         if (m_state == 0)
         {
-            return m_node->AsArrElem()->gtArrObj;
+            return &m_node->AsArrElem()->gtArrObj;
         }
         else if (m_state <= m_node->AsArrElem()->gtArrRank)
         {
-            return m_node->AsArrElem()->gtArrInds[m_state-1];
+            return &m_node->AsArrElem()->gtArrInds[m_state-1];
         }
         return nullptr;
 
@@ -8342,16 +7977,16 @@ GenTree* GenTreeOperandIterator::GetNextOperand() const
         switch (m_state)
         {
         case 0:
-            return m_node->AsArrOffs()->gtOffset;
+            return &m_node->AsArrOffs()->gtOffset;
         case 1:
-            return m_node->AsArrOffs()->gtIndex;
+            return &m_node->AsArrOffs()->gtIndex;
         case 2:
-            return m_node->AsArrOffs()->gtArrObj;
+            return &m_node->AsArrOffs()->gtArrObj;
         default:
             return nullptr;
         }
 
-    // Call, phi, and SIMD nodes are handled by MoveNext{Call,Phi,SIMD}Operand, repsectively.
+    // Call, phi, and SIMD nodes are handled by MoveNext{Call,Phi,SIMD}UseEdge, repsectively.
     case GT_CALL:
     case GT_PHI:
 #ifdef FEATURE_SIMD
@@ -8373,11 +8008,11 @@ GenTree* GenTreeOperandIterator::GetNextOperand() const
                 switch (m_state)
                 {
                 case 0:
-                    return !srcDstReversed ? blkOp->gtOp1->AsArgList()->gtOp1 : blkOp->gtOp1->AsArgList()->gtOp2;
+                    return !srcDstReversed ? &blkOp->gtOp1->AsArgList()->gtOp1 : &blkOp->gtOp1->AsArgList()->gtOp2;
                 case 1:
-                    return !srcDstReversed ? blkOp->gtOp1->AsArgList()->gtOp2 : blkOp->gtOp1->AsArgList()->gtOp1;
+                    return !srcDstReversed ? &blkOp->gtOp1->AsArgList()->gtOp2 : &blkOp->gtOp1->AsArgList()->gtOp1;
                 case 2:
-                    return blkOp->gtOp2;
+                    return &blkOp->gtOp2;
                 default:
                     return nullptr;
                 }
@@ -8387,11 +8022,11 @@ GenTree* GenTreeOperandIterator::GetNextOperand() const
                 switch (m_state)
                 {
                 case 0:
-                    return blkOp->gtOp2;
+                    return &blkOp->gtOp2;
                 case 1:
-                    return !srcDstReversed ? blkOp->gtOp1->AsArgList()->gtOp1 : blkOp->gtOp1->AsArgList()->gtOp2;
+                    return !srcDstReversed ? &blkOp->gtOp1->AsArgList()->gtOp1 : &blkOp->gtOp1->AsArgList()->gtOp2;
                 case 2:
-                    return !srcDstReversed ? blkOp->gtOp1->AsArgList()->gtOp2 : blkOp->gtOp1->AsArgList()->gtOp1;
+                    return !srcDstReversed ? &blkOp->gtOp1->AsArgList()->gtOp2 : &blkOp->gtOp1->AsArgList()->gtOp1;
                 default:
                     return nullptr;
                 }
@@ -8406,16 +8041,16 @@ GenTree* GenTreeOperandIterator::GetNextOperand() const
             bool hasOp1 = lea->gtOp1 != nullptr;
             if (!hasOp1)
             {
-                return m_state == 0 ? lea->gtOp2 : nullptr;
+                return m_state == 0 ? &lea->gtOp2 : nullptr;
             }
 
             bool operandsReversed = (lea->gtFlags & GTF_REVERSE_OPS) != 0;
             switch (m_state)
             {
                 case 0:
-                    return !operandsReversed ? lea->gtOp1 : lea->gtOp2;
+                    return !operandsReversed ? &lea->gtOp1 : &lea->gtOp2;
                 case 1:
-                    return !operandsReversed ? lea->gtOp2 : lea->gtOp1;
+                    return !operandsReversed ? &lea->gtOp2 : &lea->gtOp1;
                 default:
                     return nullptr;
             }
@@ -8429,7 +8064,7 @@ GenTree* GenTreeOperandIterator::GetNextOperand() const
         }
         else if (m_node->OperIsUnary())
         {
-            return m_state == 0 ? m_node->AsUnOp()->gtOp1 : nullptr;
+            return m_state == 0 ? &m_node->AsUnOp()->gtOp1 : nullptr;
         }
         else if (m_node->OperIsBinary())
         {
@@ -8437,9 +8072,9 @@ GenTree* GenTreeOperandIterator::GetNextOperand() const
             switch (m_state)
             {
                 case 0:
-                    return !operandsReversed ? m_node->AsOp()->gtOp1 : m_node->AsOp()->gtOp2;
+                    return !operandsReversed ? &m_node->AsOp()->gtOp1 : &m_node->AsOp()->gtOp2;
                 case 1:
-                    return !operandsReversed ? m_node->AsOp()->gtOp2 : m_node->AsOp()->gtOp1;
+                    return !operandsReversed ? &m_node->AsOp()->gtOp2 : &m_node->AsOp()->gtOp1;
                 default:
                     return nullptr;
             }
@@ -8450,13 +8085,13 @@ GenTree* GenTreeOperandIterator::GetNextOperand() const
 }
 
 //------------------------------------------------------------------------
-// GenTreeOperandIterator::MoveToNextCallOperand:
+// GenTreeUseEdgeIterator::MoveToNextCallUseEdge:
 //    Moves to the next operand of a call node. Unlike the simple nodes
-//    handled by `GetNextOperand`, call nodes have a variable number of
+//    handled by `GetNextUseEdge`, call nodes have a variable number of
 //    operands stored in cons lists. This method expands the cons lists
 //    into the operands stored within.
 //
-void GenTreeOperandIterator::MoveToNextCallOperand()
+void GenTreeUseEdgeIterator::MoveToNextCallUseEdge()
 {
     GenTreeCall* call = m_node->AsCall();
 
@@ -8470,7 +8105,7 @@ void GenTreeOperandIterator::MoveToNextCallOperand()
 
                 if (call->gtCallObjp != nullptr)
                 {
-                    m_operand = call->gtCallObjp;
+                    m_edge = &call->gtCallObjp;
                     return;
                 }
                 break;
@@ -8496,7 +8131,7 @@ void GenTreeOperandIterator::MoveToNextCallOperand()
                     }
                     else
                     {
-                        m_operand = argNode->gtOp1;
+                        m_edge = &argNode->gtOp1;
                         m_argList = argNode->Rest();
                         return;
                     }
@@ -8513,7 +8148,7 @@ void GenTreeOperandIterator::MoveToNextCallOperand()
                 else
                 {
                     GenTreeArgList* regNode = m_multiRegArg->AsArgList();
-                    m_operand = regNode->gtOp1;
+                    m_edge = &regNode->gtOp1;
                     m_multiRegArg = regNode->Rest();
                     return;
                 }
@@ -8525,7 +8160,7 @@ void GenTreeOperandIterator::MoveToNextCallOperand()
 
                 if (call->gtControlExpr != nullptr)
                 {
-                    m_operand = call->gtControlExpr;
+                    m_edge = &call->gtControlExpr;
                     return;
                 }
                 break;
@@ -8537,7 +8172,7 @@ void GenTreeOperandIterator::MoveToNextCallOperand()
 
                 if (call->gtCallCookie != nullptr)
                 {
-                    m_operand = call->gtCallCookie;
+                    m_edge = &call->gtCallCookie;
                     return;
                 }
                 break;
@@ -8548,14 +8183,14 @@ void GenTreeOperandIterator::MoveToNextCallOperand()
                 m_state = 8;
                 if (call->gtCallAddr != nullptr)
                 {
-                    m_operand = call->gtCallAddr;
+                    m_edge = &call->gtCallAddr;
                     return;
                 }
                 break;
 
             default:
                 m_node = nullptr;
-                m_operand = nullptr;
+                m_edge = nullptr;
                 m_argList = nullptr;
                 m_state = -1;
                 return;
@@ -8564,13 +8199,13 @@ void GenTreeOperandIterator::MoveToNextCallOperand()
 }
 
 //------------------------------------------------------------------------
-// GenTreeOperandIterator::MoveToNextPhiOperand:
+// GenTreeUseEdgeIterator::MoveToNextPhiUseEdge:
 //    Moves to the next operand of a phi node. Unlike the simple nodes
-//    handled by `GetNextOperand`, phi nodes have a variable number of
+//    handled by `GetNextUseEdge`, phi nodes have a variable number of
 //    operands stored in a cons list. This method expands the cons list
 //    into the operands stored within.
 //
-void GenTreeOperandIterator::MoveToNextPhiOperand()
+void GenTreeUseEdgeIterator::MoveToNextPhiUseEdge()
 {
     GenTreeUnOp* phi = m_node->AsUnOp();
 
@@ -8591,7 +8226,7 @@ void GenTreeOperandIterator::MoveToNextPhiOperand()
                 else
                 {
                     GenTreeArgList* argNode = m_argList->AsArgList();
-                    m_operand = argNode->gtOp1;
+                    m_edge = &argNode->gtOp1;
                     m_argList = argNode->Rest();
                     return;
                 }
@@ -8599,7 +8234,7 @@ void GenTreeOperandIterator::MoveToNextPhiOperand()
 
             default:
                 m_node = nullptr;
-                m_operand = nullptr;
+                m_edge = nullptr;
                 m_argList = nullptr;
                 m_state = -1;
                 return;
@@ -8609,14 +8244,14 @@ void GenTreeOperandIterator::MoveToNextPhiOperand()
 
 #ifdef FEATURE_SIMD
 //------------------------------------------------------------------------
-// GenTreeOperandIterator::MoveToNextSIMDOperand:
+// GenTreeUseEdgeIterator::MoveToNextSIMDUseEdge:
 //    Moves to the next operand of a SIMD node. Most SIMD nodes have a
 //    fixed number of operands and are handled accordingly.
 //    `SIMDIntrinsicInitN` nodes, however, have a variable number of
 //    operands stored in a cons list. This method expands the cons list
 //    into the operands stored within.
 //
-void GenTreeOperandIterator::MoveToNextSIMDOperand()
+void GenTreeUseEdgeIterator::MoveToNextSIMDUseEdge()
 {
     GenTreeSIMD* simd = m_node->AsSIMD();
 
@@ -8626,17 +8261,17 @@ void GenTreeOperandIterator::MoveToNextSIMDOperand()
         switch (m_state)
         {
             case 0:
-                m_operand = !operandsReversed ? simd->gtOp1 : simd->gtOp2;
+                m_edge = !operandsReversed ? &simd->gtOp1 : &simd->gtOp2;
                 break;
             case 1:
-                m_operand = !operandsReversed ? simd->gtOp2 : simd->gtOp1;
+                m_edge = !operandsReversed ? &simd->gtOp2 : &simd->gtOp1;
                 break;
             default:
-                m_operand = nullptr;
+                m_edge = nullptr;
                 break;
         }
 
-        if (m_operand != nullptr)
+        if (m_edge != nullptr)
         {
             m_state++;
         }
@@ -8666,7 +8301,7 @@ void GenTreeOperandIterator::MoveToNextSIMDOperand()
                 else
                 {
                     GenTreeArgList* argNode = m_argList->AsArgList();
-                    m_operand = argNode->gtOp1;
+                    m_edge = &argNode->gtOp1;
                     m_argList = argNode->Rest();
                     return;
                 }
@@ -8674,7 +8309,7 @@ void GenTreeOperandIterator::MoveToNextSIMDOperand()
 
             default:
                 m_node = nullptr;
-                m_operand = nullptr;
+                m_edge = nullptr;
                 m_argList = nullptr;
                 m_state = -1;
                 return;
@@ -8684,16 +8319,16 @@ void GenTreeOperandIterator::MoveToNextSIMDOperand()
 #endif
 
 //------------------------------------------------------------------------
-// GenTreeOperandIterator::operator++:
+// GenTreeUseEdgeIterator::operator++:
 //    Advances the iterator to the next operand.
 //
-GenTreeOperandIterator& GenTreeOperandIterator::operator++()
+GenTreeUseEdgeIterator& GenTreeUseEdgeIterator::operator++()
 {
     if (m_state == -1)
     {
         // If we've reached the terminal state, do nothing.
         assert(m_node == nullptr);
-        assert(m_operand == nullptr);
+        assert(m_edge == nullptr);
         assert(m_argList == nullptr);
     }
     else
@@ -8702,27 +8337,28 @@ GenTreeOperandIterator& GenTreeOperandIterator::operator++()
         genTreeOps op = m_node->OperGet();
         if (op == GT_CALL)
         {
-            MoveToNextCallOperand();
+            MoveToNextCallUseEdge();
         }
         else if (op == GT_PHI)
         {
-            MoveToNextPhiOperand();
+            MoveToNextPhiUseEdge();
         }
 #ifdef FEATURE_SIMD
         else if (op == GT_SIMD)
         {
-            MoveToNextSIMDOperand();
+            MoveToNextSIMDUseEdge();
         }
 #endif
         else
         {
-            m_operand = GetNextOperand();
-            if (m_operand != nullptr)
+            m_edge = GetNextUseEdge();
+            if (m_edge != nullptr && *m_edge != nullptr)
             {
                 m_state++;
             }
             else
             {
+                m_edge = nullptr;
                 m_node = nullptr;
                 m_state = -1;
             }
@@ -8730,6 +8366,21 @@ GenTreeOperandIterator& GenTreeOperandIterator::operator++()
     }
 
     return *this;
+}
+
+GenTreeUseEdgeIterator GenTree::UseEdgesBegin(bool expandMultiRegArgs)
+{
+    return GenTreeUseEdgeIterator(this, expandMultiRegArgs);
+}
+
+GenTreeUseEdgeIterator GenTree::UseEdgesEnd()
+{
+    return GenTreeUseEdgeIterator();
+}
+
+IteratorPair<GenTreeUseEdgeIterator> GenTree::UseEdges(bool expandMultiRegArgs)
+{
+    return MakeIteratorPair(UseEdgesBegin(expandMultiRegArgs), UseEdgesEnd());
 }
 
 GenTreeOperandIterator GenTree::OperandsBegin(bool expandMultiRegArgs)
@@ -9232,7 +8883,7 @@ DASH:
 
     // If we're printing a node for LIR, we use the space normally associated with the message
     // to display the node's temp name (if any)
-    const bool hasOperands = tree->NumOperands() != 0;
+    const bool hasOperands = tree->OperandsBegin() != tree->OperandsEnd();
     if (isLIR)
     {
         assert(msg == nullptr);
@@ -10914,7 +10565,7 @@ GenTreePtr          Compiler::gtDispLinearTree(GenTreeStmt* curStmt,
                 
             // Skip the GT_LIST nodes, as we do not print them, and the next node to print will occur
             // after the list.
-            while (nextLinearNode->OperGet() == GT_LIST)
+            while (nextLinearNode != nullptr && nextLinearNode->OperGet() == GT_LIST)
             {
                 nextLinearNode = nextLinearNode->gtNext;
             }
@@ -11025,15 +10676,12 @@ GenTreePtr            Compiler::gtDispLinearStmt(GenTreeStmt* stmt, IndentStack 
 // TODO(pdg): comment
 void Compiler::gtDispLIRNode(GenTree* node)
 {
-    unsigned numOperands = node->NumOperands();
-
     IndentStack indentStack(this);
 
     // Visit nodes
     IndentInfo operandArc = IIArcTop;
-    for (unsigned i = 0; i < numOperands; i++)
+    for (GenTree* operand : node->Operands())
     {
-        GenTree* operand = *node->GetOperand(i);
         if (operand->IsArgPlaceHolderNode() || !operand->IsValue())
         {
             // Either of these situations may happen with calls.

@@ -1079,11 +1079,9 @@ bool LIR::Range::CheckLIR(Compiler* compiler, bool checkUnusedValues) const
             pastPhis = true;
         }
 
-        unsigned numOperands = node->NumOperands();
-        for (unsigned i = 0; i < numOperands; i++)
+        for (GenTree** useEdge : node->UseEdges())
         {
-            GenTree** use = node->GetOperand(i);
-            GenTree* def = *use;
+            GenTree* def = *useEdge;
 
             assert((!checkUnusedValues || ((def->gtLIRFlags & LIR::Flags::IsUnusedValue) == 0)) &&
                 "operands should never be marked as unused values");
@@ -1109,8 +1107,8 @@ bool LIR::Range::CheckLIR(Compiler* compiler, bool checkUnusedValues) const
                 for (GenTree* prev = *node; prev != nullptr; prev = prev->gtPrev)
                 {
                     // TODO: dump the users and the def
-                    GenTree** earlierUse;
-                    bool foundEarlierUse = prev->TryGetUse(def, &earlierUse) && earlierUse != use;
+                    GenTree** earlierUseEdge;
+                    bool foundEarlierUse = prev->TryGetUse(def, &earlierUseEdge) && earlierUseEdge != useEdge;
                     assert(!foundEarlierUse && "found multiply-used LIR node");
                 }
 
