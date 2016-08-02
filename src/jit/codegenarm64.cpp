@@ -173,17 +173,19 @@ void CodeGen::genStackPointerAdjustment(ssize_t spDelta, regNumber tmpReg, bool*
 }
 
 //------------------------------------------------------------------------
-// genPrologSaveRegPair: Save a pair of general-purpose or floating-point/SIMD registers in a function or funclet prolog.
-// If possible, we use pre-indexed addressing to adjust SP and store the registers with a single instruction.
-// The caller must ensure that we can use the STP instruction, and that spOffset will be in the legal range for that instruction.
+// genPrologSaveRegPair: Save a pair of general-purpose or floating-point/SIMD registers in a function or funclet
+// prolog. If possible, we use pre-indexed addressing to adjust SP and store the registers with a single instruction.
+// The caller must ensure that we can use the STP instruction, and that spOffset will be in the legal range for that
+// instruction.
 //
 // Arguments:
 //    reg1                     - First register of pair to save.
 //    reg2                     - Second register of pair to save.
 //    spOffset                 - The offset from SP to store reg1 (must be positive or zero).
-//    spDelta                  - If non-zero, the amount to add to SP before the register saves (must be negative or zero).
-//    lastSavedWasPreviousPair - True if the last prolog instruction was to save the previous register pair. This allows us to
-//                               emit the "save_next" unwind code.
+//    spDelta                  - If non-zero, the amount to add to SP before the register saves (must be negative or
+//                               zero).
+//    lastSavedWasPreviousPair - True if the last prolog instruction was to save the previous register pair. This
+//                               allows us to emit the "save_next" unwind code.
 //    tmpReg                   - An available temporary register. Needed for the case of large frames.
 //    pTmpRegIsZero            - If we use tmpReg, and pTmpRegIsZero is non-null, we set *pTmpRegIsZero to 'false'.
 //                               Otherwise, we don't touch it.
@@ -202,7 +204,8 @@ void CodeGen::genPrologSaveRegPair(regNumber reg1,
     assert(spOffset >= 0);
     assert(spDelta <= 0);
     assert((spDelta % 16) == 0); // SP changes must be 16-byte aligned
-    assert(genIsValidFloatReg(reg1) == genIsValidFloatReg(reg2)); // registers must be both general-purpose, or both FP/SIMD
+    assert(genIsValidFloatReg(reg1) == genIsValidFloatReg(reg2)); // registers must be both general-purpose, or both
+                                                                  // FP/SIMD
 
     bool needToSaveRegs = true;
     if (spDelta != 0)
@@ -246,16 +249,18 @@ void CodeGen::genPrologSaveRegPair(regNumber reg1,
 }
 
 //------------------------------------------------------------------------
-// genPrologSaveReg: Like genPrologSaveRegPair, but for a single register. Save a single general-purpose or floating-point/SIMD register
-// in a function or funclet prolog. Note that if we wish to change SP (i.e., spDelta != 0), then spOffset must be 8. This is because
-// otherwise we would create an alignment hole above the saved register, not below it, which we currently don't support. This restriction
-// could be loosened if the callers change to handle it (and this function changes to support using pre-indexed STR addressing).
-// The caller must ensure that we can use the STR instruction, and that spOffset will be in the legal range for that instruction.
+// genPrologSaveReg: Like genPrologSaveRegPair, but for a single register. Save a single general-purpose or
+// floating-point/SIMD register in a function or funclet prolog. Note that if we wish to change SP (i.e., spDelta != 0),
+// then spOffset must be 8. This is because otherwise we would create an alignment hole above the saved register, not
+// below it, which we currently don't support. This restriction could be loosened if the callers change to handle it
+// (and this function changes to support using pre-indexed STR addressing). The caller must ensure that we can use the
+// STR instruction, and that spOffset will be in the legal range for that instruction.
 //
 // Arguments:
 //    reg1                     - Register to save.
 //    spOffset                 - The offset from SP to store reg1 (must be positive or zero).
-//    spDelta                  - If non-zero, the amount to add to SP before the register saves (must be negative or zero).
+//    spDelta                  - If non-zero, the amount to add to SP before the register saves (must be negative or
+//                               zero).
 //    tmpReg                   - An available temporary register. Needed for the case of large frames.
 //    pTmpRegIsZero            - If we use tmpReg, and pTmpRegIsZero is non-null, we set *pTmpRegIsZero to 'false'.
 //                               Otherwise, we don't touch it.
@@ -294,7 +299,8 @@ void CodeGen::genPrologSaveReg(regNumber reg1,
 //    reg1                     - First register of pair to restore.
 //    reg2                     - Second register of pair to restore.
 //    spOffset                 - The offset from SP to load reg1 (must be positive or zero).
-//    spDelta                  - If non-zero, the amount to add to SP after the register restores (must be positive or zero).
+//    spDelta                  - If non-zero, the amount to add to SP after the register restores (must be positive or
+//                               zero).
 //    tmpReg                   - An available temporary register. Needed for the case of large frames.
 //    pTmpRegIsZero            - If we use tmpReg, and pTmpRegIsZero is non-null, we set *pTmpRegIsZero to 'false'.
 //                               Otherwise, we don't touch it.
@@ -348,7 +354,8 @@ void CodeGen::genEpilogRestoreRegPair(regNumber reg1,
 // Arguments:
 //    reg1                     - Register to restore.
 //    spOffset                 - The offset from SP to restore reg1 (must be positive or zero).
-//    spDelta                  - If non-zero, the amount to add to SP after the register restores (must be positive or zero).
+//    spDelta                  - If non-zero, the amount to add to SP after the register restores (must be positive or
+//                               zero).
 //    tmpReg                   - An available temporary register. Needed for the case of large frames.
 //    pTmpRegIsZero            - If we use tmpReg, and pTmpRegIsZero is non-null, we set *pTmpRegIsZero to 'false'.
 //                               Otherwise, we don't touch it.
@@ -400,7 +407,8 @@ void CodeGen::genEpilogRestoreReg(regNumber reg1,
 //    lowestCalleeSavedOffset - The offset from SP that is the beginning of the callee-saved register area. Note that
 //                              if non-zero spDelta, then this is the offset of the first save *after* that
 //                              SP adjustment.
-//    spDelta                 - If non-zero, the amount to add to SP before the register saves (must be negative or zero).
+//    spDelta                 - If non-zero, the amount to add to SP before the register saves (must be negative or
+//                              zero).
 //
 // Return Value:
 //    None.
@@ -424,7 +432,8 @@ void CodeGen::genSaveCalleeSavedRegistersHelp(regMaskTP   regsToSaveMask,
 
     assert((spDelta % 16) == 0);
     assert((regsToSaveMask & RBM_FP) == 0); // we never save FP here
-    assert(regsToSaveCount <= genCountBits(RBM_CALLEE_SAVED | RBM_LR)); // We also save LR, even though it is not in RBM_CALLEE_SAVED.
+    assert(regsToSaveCount <= genCountBits(RBM_CALLEE_SAVED | RBM_LR)); // We also save LR, even though it is not in
+                                                                        // RBM_CALLEE_SAVED.
 
     regMaskTP maskSaveRegsFloat = regsToSaveMask & RBM_ALLFLOAT;
     regMaskTP maskSaveRegsInt   = regsToSaveMask & ~maskSaveRegsFloat;
@@ -469,8 +478,8 @@ void CodeGen::genSaveCalleeSavedRegistersHelp(regMaskTP   regsToSaveMask,
 
             genPrologSaveRegPair(reg1, reg2, spOffset, spDelta, lastSavedWasPair, REG_IP0, nullptr);
 
-            // TODO-ARM64-CQ: this code works in the prolog, but it's a bit weird to think about "next" when generating this epilog, to
-            // get the codes to match. Turn this off until that is better understood.
+            // TODO-ARM64-CQ: this code works in the prolog, but it's a bit weird to think about "next" when generating
+            // this epilog, to get the codes to match. Turn this off until that is better understood.
             // lastSavedWasPair = true;
 
             spOffset += 2 * REGSIZE_BYTES;
@@ -521,8 +530,8 @@ void CodeGen::genSaveCalleeSavedRegistersHelp(regMaskTP   regsToSaveMask,
 
             genPrologSaveRegPair(reg1, reg2, spOffset, spDelta, lastSavedWasPair, REG_IP0, nullptr);
 
-            // TODO-ARM64-CQ: this code works in the prolog, but it's a bit weird to think about "next" when generating this epilog, to
-            // get the codes to match. Turn this off until that is better understood.
+            // TODO-ARM64-CQ: this code works in the prolog, but it's a bit weird to think about "next" when generating
+            // this epilog, to get the codes to match. Turn this off until that is better understood.
             // lastSavedWasPair = true;
 
             spOffset += 2 * FPSAVE_REGSIZE_BYTES;
@@ -551,7 +560,8 @@ void CodeGen::genSaveCalleeSavedRegistersHelp(regMaskTP   regsToSaveMask,
 // Arguments:
 //    regsToRestoreMask       - The mask of callee-saved registers to restore. If empty, this function does nothing.
 //    lowestCalleeSavedOffset - The offset from SP that is the beginning of the callee-saved register area.
-//    spDelta                 - If non-zero, the amount to add to SP after the register restores (must be positive or zero).
+//    spDelta                 - If non-zero, the amount to add to SP after the register restores (must be positive or
+//                              zero).
 //
 // Here's an example restore sequence:
 //      ldp     x27, x28, [sp,#96]
@@ -568,8 +578,8 @@ void CodeGen::genSaveCalleeSavedRegistersHelp(regMaskTP   regsToSaveMask,
 //      ldp     x21, x22, [sp,#16]
 //      ldp     x19, x20, [sp], #80
 //
-// Note you call the unwind functions specifying the prolog operation that is being un-done. So, for example, when generating
-// a post-indexed load, you call the unwind function for specifying the corresponding preindexed store.
+// Note you call the unwind functions specifying the prolog operation that is being un-done. So, for example, when
+// generating a post-indexed load, you call the unwind function for specifying the corresponding preindexed store.
 //
 // Return Value:
 //    None.
@@ -717,7 +727,7 @@ void CodeGen::genRestoreCalleeSavedRegistersHelp(regMaskTP   regsToRestoreMask,
     assert(intRegsToRestoreCount == 0);
 }
 
-
+// clang-format off
 /*****************************************************************************
  *
  *  Generates code for an EH funclet prolog.
@@ -900,6 +910,7 @@ void CodeGen::genRestoreCalleeSavedRegistersHelp(regMaskTP   regsToRestoreMask,
  *      |       | downward      |         
  *              V
  */
+// clang-format on
 
 void                CodeGen::genFuncletProlog(BasicBlock* block)
 {
@@ -1125,7 +1136,8 @@ void                CodeGen::genCaptureFuncletPrologEpilogInfo()
         return;
 
     assert(isFramePointerUsed());
-    assert(compiler->lvaDoneFrameLayout == Compiler::FINAL_FRAME_LAYOUT); // The frame size and offsets must be finalized
+    assert(compiler->lvaDoneFrameLayout == Compiler::FINAL_FRAME_LAYOUT); // The frame size and offsets must be
+                                                                          // finalized
 
     genFuncletInfo.fiFunction_CallerSP_to_FP_delta = genCallerSPtoFPdelta();
 
@@ -1447,9 +1459,9 @@ void                CodeGen::genCodeForBBlist()
 
     regSet.rsSpillBeg();
 
+#ifdef DEBUGGING_SUPPORT
     /* Initialize the line# tracking logic */
 
-#ifdef DEBUGGING_SUPPORT
     if (compiler->opts.compScopeInfo)
     {
         siInit();
@@ -1538,9 +1550,9 @@ void                CodeGen::genCodeForBBlist()
         genUpdateLife(block->bbLiveIn);
 
         // Even if liveness didn't change, we need to update the registers containing GC references.
-        // genUpdateLife will update the registers live due to liveness changes. But what about registers that didn't change?
-        // We cleared them out above. Maybe we should just not clear them out, but update the ones that change here.
-        // That would require handling the changes in recordVarLocationsAtStartOfBB().
+        // genUpdateLife will update the registers live due to liveness changes. But what about registers that didn't
+        // change? We cleared them out above. Maybe we should just not clear them out, but update the ones that change
+        // here. That would require handling the changes in recordVarLocationsAtStartOfBB().
 
         regMaskTP newLiveRegSet = RBM_NONE;
         regMaskTP newRegGCrefSet = RBM_NONE;
@@ -2148,7 +2160,7 @@ void                CodeGen::instGen_Set_Reg_To_Imm(emitAttr    size,
             getEmitter()->emitIns_R_I(INS_mov, size, reg, (imm & 0xffff));
             getEmitter()->emitIns_R_I_I(INS_movk, size, reg, ((imm >> 16) & 0xffff), 16, INS_OPTS_LSL);
 
-            if ((size == EA_8BYTE) && ((imm >> 32) != 0))      // Sometimes the upper 32 bits are zero and the first mov has zero-ed them
+            if ((size == EA_8BYTE) && ((imm >> 32) != 0)) // Sometimes the upper 32 bits are zero and the first mov has zero-ed them
             {
                 getEmitter()->emitIns_R_I_I(INS_movk, EA_8BYTE, reg, ((imm >> 32) & 0xffff), 32, INS_OPTS_LSL);
                 if ((imm >> 48) != 0)   // Frequently the upper 16 bits are zero and the first mov has zero-ed them
@@ -2798,7 +2810,8 @@ CodeGen::genCodeForTreeNode(GenTreePtr treeNode)
                         //
                         emit->emitIns_R_R_R(INS_adds, size, REG_ZR, dividendReg, dividendReg);
                         inst_JMP(jmpNotEqual, sdivLabel);                  // goto sdiv if the Z flag is clear
-                        genJumpToThrowHlpBlk(EJ_vs, SCK_ARITH_EXCPN);      // if the V flags is set throw ArithmeticException
+                        genJumpToThrowHlpBlk(EJ_vs, SCK_ARITH_EXCPN);      // if the V flags is set throw
+                                                                           // ArithmeticException
 
                         genDefineTempLabel(sdivLabel);
                     }
@@ -3427,7 +3440,8 @@ CodeGen::genCodeForTreeNode(GenTreePtr treeNode)
         break;
 
     case GT_PUTARG_REG:
-        assert(targetType != TYP_STRUCT);  // Any TYP_STRUCT register args should have been removed by fgMorphMultiregStructArg
+        assert(targetType != TYP_STRUCT);  // Any TYP_STRUCT register args should have been removed by
+                                           // fgMorphMultiregStructArg
         // We have a normal non-Struct targetType
         {
             GenTree *op1 = treeNode->gtOp.gtOp1;
@@ -3824,7 +3838,8 @@ CodeGen::genLclHeap(GenTreePtr tree)
     //      Nothing needs to popped off from stack nor relocated.
     if  (compiler->lvaOutgoingArgSpaceSize > 0)
     {
-        assert((compiler->lvaOutgoingArgSpaceSize % STACK_ALIGN) == 0); // This must be true for the stack to remain aligned
+        assert((compiler->lvaOutgoingArgSpaceSize % STACK_ALIGN) == 0); // This must be true for the stack to remain
+                                                                        // aligned
         inst_RV_IV(INS_add, REG_SPBASE, compiler->lvaOutgoingArgSpaceSize, EA_PTRSIZE);
         stackAdjustment += compiler->lvaOutgoingArgSpaceSize;
     }
@@ -4091,9 +4106,9 @@ void CodeGen::genCodeForInitBlk(GenTreeInitBlk* initBlkNode)
     assert(!initVal->isContained());
     assert(!blockSize->isContained());
 
+#if 0
     // TODO-ARM64-CQ: When initblk loop unrolling is implemented
     //                put this assert back on.
-#if 0
     if (blockSize->IsCnsIntOrI())
     {
         assert(blockSize->gtIntCon.gtIconVal >= INITBLK_UNROLL_LIMIT);
@@ -4352,9 +4367,10 @@ void CodeGen::genCodeForCpBlk(GenTreeCpBlk* cpBlkNode)
     assert(!srcAddr->isContained());
     assert(!blockSize->isContained());
 
-    // Enable this when we support cpblk loop unrolling.
 #if 0
 #ifdef DEBUG
+    // Enable this when we support cpblk loop unrolling.
+
     if (blockSize->IsCnsIntOrI())
     {
         assert(blockSize->gtIntCon.gtIconVal >= CPBLK_UNROLL_LIMIT);
@@ -6425,8 +6441,9 @@ CodeGen::genFloatToFloatCast(GenTreePtr treeNode)
 
         getEmitter()->emitIns_R_R(INS_fcvt, emitTypeSize(treeNode), treeNode->gtRegNum, op1->gtRegNum, cvtOption);
     }
-    else if (treeNode->gtRegNum != op1->gtRegNum) // If double to double cast or float to float cast. Emit a move instruction.
+    else if (treeNode->gtRegNum != op1->gtRegNum)
     {
+        // If double to double cast or float to float cast. Emit a move instruction.
         getEmitter()->emitIns_R_R(INS_mov, emitTypeSize(treeNode), treeNode->gtRegNum, op1->gtRegNum);
     }
 
@@ -7405,6 +7422,7 @@ void                CodeGen::genArm64EmitterUnitTests()
 
     emitter*  theEmitter = getEmitter();
 
+#ifdef ALL_ARM64_EMITTER_UNIT_TESTS
     // We use this:
     //      genDefineTempLabel(genCreateTempLabel());
     // to create artificial labels to help separate groups of tests.
@@ -7412,8 +7430,6 @@ void                CodeGen::genArm64EmitterUnitTests()
     //
     // Loads/Stores basic general register
     //
-
-#ifdef ALL_ARM64_EMITTER_UNIT_TESTS
 
     genDefineTempLabel(genCreateTempLabel());
 
@@ -7472,11 +7488,10 @@ void                CodeGen::genArm64EmitterUnitTests()
 
 #endif // ALL_ARM64_EMITTER_UNIT_TESTS
 
+#ifdef ALL_ARM64_EMITTER_UNIT_TESTS
     //
     // Compares 
     //
-
-#ifdef ALL_ARM64_EMITTER_UNIT_TESTS
 
     genDefineTempLabel(genCreateTempLabel());
 
@@ -7507,11 +7522,9 @@ void                CodeGen::genArm64EmitterUnitTests()
 
 #endif // ALL_ARM64_EMITTER_UNIT_TESTS
 
-
+#ifdef ALL_ARM64_EMITTER_UNIT_TESTS
     // R_R
     //
-
-#ifdef ALL_ARM64_EMITTER_UNIT_TESTS
 
     genDefineTempLabel(genCreateTempLabel());
 
@@ -7530,11 +7543,11 @@ void                CodeGen::genArm64EmitterUnitTests()
 
 #endif // ALL_ARM64_EMITTER_UNIT_TESTS
 
+
+#ifdef ALL_ARM64_EMITTER_UNIT_TESTS
     //
     // R_I
     //
-
-#ifdef ALL_ARM64_EMITTER_UNIT_TESTS
 
     genDefineTempLabel(genCreateTempLabel());
 
@@ -7584,11 +7597,10 @@ void                CodeGen::genArm64EmitterUnitTests()
 
 #endif // ALL_ARM64_EMITTER_UNIT_TESTS
 
+#ifdef ALL_ARM64_EMITTER_UNIT_TESTS
     //
     // R_R
     //
-
-#ifdef ALL_ARM64_EMITTER_UNIT_TESTS
 
     genDefineTempLabel(genCreateTempLabel());
 
@@ -7622,11 +7634,10 @@ void                CodeGen::genArm64EmitterUnitTests()
 
 #endif // ALL_ARM64_EMITTER_UNIT_TESTS
 
+#ifdef ALL_ARM64_EMITTER_UNIT_TESTS
     //
     // R_I_I
     //
-
-#ifdef ALL_ARM64_EMITTER_UNIT_TESTS
 
     genDefineTempLabel(genCreateTempLabel());
 
@@ -7644,11 +7655,10 @@ void                CodeGen::genArm64EmitterUnitTests()
 
 #endif // ALL_ARM64_EMITTER_UNIT_TESTS
 
+#ifdef ALL_ARM64_EMITTER_UNIT_TESTS
     //
     // R_R_I
     //
-
-#ifdef ALL_ARM64_EMITTER_UNIT_TESTS
 
     genDefineTempLabel(genCreateTempLabel());
 
@@ -7755,11 +7765,11 @@ void                CodeGen::genArm64EmitterUnitTests()
 
 #endif // ALL_ARM64_EMITTER_UNIT_TESTS
 
+#ifdef ALL_ARM64_EMITTER_UNIT_TESTS
     //
     // R_R_I cmp/txt
     //
 
-#ifdef ALL_ARM64_EMITTER_UNIT_TESTS
     // cmp
     theEmitter->emitIns_R_R_I(INS_cmp,    EA_8BYTE, REG_R8, REG_R9, 0);
     theEmitter->emitIns_R_R_I(INS_cmp,    EA_4BYTE, REG_R8, REG_R9, 0);
@@ -7817,11 +7827,10 @@ void                CodeGen::genArm64EmitterUnitTests()
 
 #endif // ALL_ARM64_EMITTER_UNIT_TESTS
 
+#ifdef ALL_ARM64_EMITTER_UNIT_TESTS
     //
     // R_R_R
     //
-
-#ifdef ALL_ARM64_EMITTER_UNIT_TESTS
 
     genDefineTempLabel(genCreateTempLabel());
 
@@ -7873,11 +7882,10 @@ void                CodeGen::genArm64EmitterUnitTests()
 
 #endif // ALL_ARM64_EMITTER_UNIT_TESTS
 
+#ifdef ALL_ARM64_EMITTER_UNIT_TESTS
     //
     // R_R_I_I
     //
-
-#ifdef ALL_ARM64_EMITTER_UNIT_TESTS
 
     genDefineTempLabel(genCreateTempLabel());
 
@@ -7907,11 +7915,10 @@ void                CodeGen::genArm64EmitterUnitTests()
 
 #endif // ALL_ARM64_EMITTER_UNIT_TESTS
 
+#ifdef ALL_ARM64_EMITTER_UNIT_TESTS
     //
     // R_R_R_I
     //
-
-#ifdef ALL_ARM64_EMITTER_UNIT_TESTS
 
     genDefineTempLabel(genCreateTempLabel());
 
@@ -8015,11 +8022,10 @@ void                CodeGen::genArm64EmitterUnitTests()
 
 #endif // ALL_ARM64_EMITTER_UNIT_TESTS
 
+#ifdef ALL_ARM64_EMITTER_UNIT_TESTS
     //
     // R_R_R_I  -- load/store pair
     //
-
-#ifdef ALL_ARM64_EMITTER_UNIT_TESTS
 
     theEmitter->emitIns_R_R_R_I(INS_ldnp,    EA_8BYTE, REG_R8, REG_R9, REG_R10, 0);
     theEmitter->emitIns_R_R_R_I(INS_stnp,    EA_8BYTE, REG_R8, REG_R9, REG_R10, 0);
@@ -8064,11 +8070,10 @@ void                CodeGen::genArm64EmitterUnitTests()
 
 #endif // ALL_ARM64_EMITTER_UNIT_TESTS
 
+#ifdef ALL_ARM64_EMITTER_UNIT_TESTS
     //
     // R_R_R_Ext    -- load/store shifted/extend
     //
-
-#ifdef ALL_ARM64_EMITTER_UNIT_TESTS
 
     genDefineTempLabel(genCreateTempLabel());
 
@@ -8192,11 +8197,10 @@ void                CodeGen::genArm64EmitterUnitTests()
 
 #endif // ALL_ARM64_EMITTER_UNIT_TESTS
 
+#ifdef ALL_ARM64_EMITTER_UNIT_TESTS
     //
     // R_R_R_R
     //
-
-#ifdef ALL_ARM64_EMITTER_UNIT_TESTS
 
     genDefineTempLabel(genCreateTempLabel());
 
@@ -8216,10 +8220,9 @@ void                CodeGen::genArm64EmitterUnitTests()
 
 #endif // ALL_ARM64_EMITTER_UNIT_TESTS
 
+#ifdef ALL_ARM64_EMITTER_UNIT_TESTS
     // R_COND
     //
-
-#ifdef ALL_ARM64_EMITTER_UNIT_TESTS
 
     // cset reg, cond
     theEmitter->emitIns_R_COND(INS_cset, EA_8BYTE, REG_R9, INS_COND_EQ); // eq
@@ -8255,10 +8258,9 @@ void                CodeGen::genArm64EmitterUnitTests()
 
 #endif // ALL_ARM64_EMITTER_UNIT_TESTS
 
+#ifdef ALL_ARM64_EMITTER_UNIT_TESTS
     // R_R_COND
     //
-
-#ifdef ALL_ARM64_EMITTER_UNIT_TESTS
 
     // cinc reg, reg, cond
     // cinv reg, reg, cond
@@ -8280,10 +8282,9 @@ void                CodeGen::genArm64EmitterUnitTests()
 
 #endif // ALL_ARM64_EMITTER_UNIT_TESTS
 
+#ifdef ALL_ARM64_EMITTER_UNIT_TESTS
     // R_R_R_COND
     //
-
-#ifdef ALL_ARM64_EMITTER_UNIT_TESTS
 
     // csel  reg, reg, reg, cond
     // csinc reg, reg, reg, cond
@@ -8306,10 +8307,9 @@ void                CodeGen::genArm64EmitterUnitTests()
 
 #endif // ALL_ARM64_EMITTER_UNIT_TESTS
 
+#ifdef ALL_ARM64_EMITTER_UNIT_TESTS
     // R_R_FLAGS_COND
     //
-
-#ifdef ALL_ARM64_EMITTER_UNIT_TESTS
 
     // ccmp reg1, reg2, nzcv, cond
     theEmitter->emitIns_R_R_FLAGS_COND(INS_ccmp, EA_8BYTE, REG_R9, REG_R3, INS_FLAGS_V,    INS_COND_EQ); // eq
@@ -8393,11 +8393,10 @@ void                CodeGen::genArm64EmitterUnitTests()
 
 #endif // ALL_ARM64_EMITTER_UNIT_TESTS
 
+#ifdef ALL_ARM64_EMITTER_UNIT_TESTS
     //
     // Branch to register
     //
-
-#ifdef ALL_ARM64_EMITTER_UNIT_TESTS
 
     genDefineTempLabel(genCreateTempLabel());
 
@@ -8408,11 +8407,10 @@ void                CodeGen::genArm64EmitterUnitTests()
 
 #endif // ALL_ARM64_EMITTER_UNIT_TESTS
 
+#ifdef ALL_ARM64_EMITTER_UNIT_TESTS
     //
     // Misc
     //
-
-#ifdef ALL_ARM64_EMITTER_UNIT_TESTS
 
     genDefineTempLabel(genCreateTempLabel());
 
@@ -8437,6 +8435,7 @@ void                CodeGen::genArm64EmitterUnitTests()
 
 #endif // ALL_ARM64_EMITTER_UNIT_TESTS
 
+#ifdef ALL_ARM64_EMITTER_UNIT_TESTS
     ////////////////////////////////////////////////////////////////////////////////
     //
     // SIMD and Floating point
@@ -8446,8 +8445,6 @@ void                CodeGen::genArm64EmitterUnitTests()
     //
     // Load/Stores vector register
     //
-
-#ifdef ALL_ARM64_EMITTER_UNIT_TESTS
 
     genDefineTempLabel(genCreateTempLabel());
 
@@ -8614,11 +8611,10 @@ void                CodeGen::genArm64EmitterUnitTests()
 
 #endif // ALL_ARM64_EMITTER_UNIT_TESTS
 
+#ifdef ALL_ARM64_EMITTER_UNIT_TESTS
     //
     // R_R   mov and aliases for mov
     //
-
-#ifdef ALL_ARM64_EMITTER_UNIT_TESTS
 
     // mov vector to vector
     theEmitter->emitIns_R_R(INS_mov, EA_8BYTE,  REG_V0,  REG_V1);
@@ -8697,11 +8693,10 @@ void                CodeGen::genArm64EmitterUnitTests()
 
 #endif // ALL_ARM64_EMITTER_UNIT_TESTS
 
+#ifdef ALL_ARM64_EMITTER_UNIT_TESTS
     //
     // R_I   movi and mvni
     //
-
-#ifdef ALL_ARM64_EMITTER_UNIT_TESTS
 
     // movi  imm8  (vector)
     theEmitter->emitIns_R_I(INS_movi, EA_8BYTE,   REG_V0,  0x00,       INS_OPTS_8B);
@@ -8769,11 +8764,10 @@ void                CodeGen::genArm64EmitterUnitTests()
 
 #endif // ALL_ARM64_EMITTER_UNIT_TESTS
 
+#ifdef ALL_ARM64_EMITTER_UNIT_TESTS
     //
     // R_I   orr/bic vector immediate
     //
-
-#ifdef ALL_ARM64_EMITTER_UNIT_TESTS
 
     theEmitter->emitIns_R_I(INS_orr, EA_8BYTE,   REG_V0,  0x0022,     INS_OPTS_4H);
     theEmitter->emitIns_R_I(INS_orr, EA_8BYTE,   REG_V1,  0x2200,     INS_OPTS_4H);  // LSL  8
@@ -8807,11 +8801,10 @@ void                CodeGen::genArm64EmitterUnitTests()
 
 #endif // ALL_ARM64_EMITTER_UNIT_TESTS
 
+#ifdef ALL_ARM64_EMITTER_UNIT_TESTS
     //
     // R_F   cmp/fmov immediate
     //
-
-#ifdef ALL_ARM64_EMITTER_UNIT_TESTS
 
     // fmov  imm8  (scalar)
     theEmitter->emitIns_R_F(INS_fmov, EA_8BYTE,  REG_V14,  1.0);
@@ -8849,11 +8842,10 @@ void                CodeGen::genArm64EmitterUnitTests()
 
 #endif // ALL_ARM64_EMITTER_UNIT_TESTS
 
+#ifdef ALL_ARM64_EMITTER_UNIT_TESTS
     //
     // R_R   fmov/fcmp/fcvt
     //
-
-#ifdef ALL_ARM64_EMITTER_UNIT_TESTS
 
     // fmov to vector to vector
     theEmitter->emitIns_R_R(INS_fmov, EA_8BYTE,  REG_V0,  REG_V2);
@@ -8891,11 +8883,10 @@ void                CodeGen::genArm64EmitterUnitTests()
 
 #endif // ALL_ARM64_EMITTER_UNIT_TESTS
 
+#ifdef ALL_ARM64_EMITTER_UNIT_TESTS
     //
     // R_R   floating point conversions
     //
-
-#ifdef ALL_ARM64_EMITTER_UNIT_TESTS
 
     // fcvtas scalar
     theEmitter->emitIns_R_R(INS_fcvtas, EA_4BYTE,  REG_V0,  REG_V1);
@@ -9089,11 +9080,10 @@ void                CodeGen::genArm64EmitterUnitTests()
 
 #endif // ALL_ARM64_EMITTER_UNIT_TESTS
 
+#ifdef ALL_ARM64_EMITTER_UNIT_TESTS
     //
     // R_R   floating point operations, one dest, one source
     //
-
-#ifdef ALL_ARM64_EMITTER_UNIT_TESTS
 
     // fabs scalar
     theEmitter->emitIns_R_R(INS_fabs,  EA_4BYTE,  REG_V0,  REG_V1);
@@ -9204,11 +9194,10 @@ void                CodeGen::genArm64EmitterUnitTests()
 
 #endif
 
+#ifdef ALL_ARM64_EMITTER_UNIT_TESTS
     //
     // R_R   floating point round to int, one dest, one source
     //
-
-#ifdef ALL_ARM64_EMITTER_UNIT_TESTS
 
     // frinta scalar
     theEmitter->emitIns_R_R(INS_frinta, EA_4BYTE,  REG_V0,  REG_V1);
@@ -9275,11 +9264,10 @@ void                CodeGen::genArm64EmitterUnitTests()
 
 #endif // ALL_ARM64_EMITTER_UNIT_TESTS
 
+#ifdef ALL_ARM64_EMITTER_UNIT_TESTS
     //
     // R_R_R   floating point operations, one dest, two source
     //
-
-#ifdef ALL_ARM64_EMITTER_UNIT_TESTS
 
     genDefineTempLabel(genCreateTempLabel());
 
@@ -9351,11 +9339,10 @@ void                CodeGen::genArm64EmitterUnitTests()
 
 #endif // ALL_ARM64_EMITTER_UNIT_TESTS
 
+#ifdef ALL_ARM64_EMITTER_UNIT_TESTS
     //
     // R_R_I  vector operations, one dest, one source reg, one immed
     //
-
-#ifdef ALL_ARM64_EMITTER_UNIT_TESTS
 
     genDefineTempLabel(genCreateTempLabel());
 
@@ -9596,11 +9583,10 @@ void                CodeGen::genArm64EmitterUnitTests()
 
 #endif // ALL_ARM64_EMITTER_UNIT_TESTS
 
+#ifdef ALL_ARM64_EMITTER_UNIT_TESTS
     //
     // R_R_R   vector operations, one dest, two source
     //
-
-#ifdef ALL_ARM64_EMITTER_UNIT_TESTS
 
     genDefineTempLabel(genCreateTempLabel());
 
@@ -9700,11 +9686,10 @@ void                CodeGen::genArm64EmitterUnitTests()
     
 #endif // ALL_ARM64_EMITTER_UNIT_TESTS
 
+#ifdef ALL_ARM64_EMITTER_UNIT_TESTS
     //
     // R_R_R  vector multiply
     //
-
-#ifdef ALL_ARM64_EMITTER_UNIT_TESTS
 
     genDefineTempLabel(genCreateTempLabel());
 
@@ -9762,11 +9747,10 @@ void                CodeGen::genArm64EmitterUnitTests()
 
 #endif // ALL_ARM64_EMITTER_UNIT_TESTS
 
+#ifdef ALL_ARM64_EMITTER_UNIT_TESTS
     //
     // R_R_R   floating point operations, one source/dest, and two source
     //
-
-#ifdef ALL_ARM64_EMITTER_UNIT_TESTS
 
     genDefineTempLabel(genCreateTempLabel());
 
@@ -9792,11 +9776,10 @@ void                CodeGen::genArm64EmitterUnitTests()
 
 #endif // ALL_ARM64_EMITTER_UNIT_TESTS
 
+#ifdef ALL_ARM64_EMITTER_UNIT_TESTS
     //
     // R_R_R_R   floating point operations, one dest, and three source
     //
-
-#ifdef ALL_ARM64_EMITTER_UNIT_TESTS
 
     theEmitter->emitIns_R_R_R_R(INS_fmadd,   EA_4BYTE, REG_V0, REG_V8,  REG_V16, REG_V24);
     theEmitter->emitIns_R_R_R_R(INS_fmsub,   EA_4BYTE, REG_V1, REG_V9,  REG_V17, REG_V25);
