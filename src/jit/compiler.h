@@ -59,6 +59,8 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 
 #include "simd.h"
 
+#include "lir.h"
+
 // This is only used locally in the JIT to indicate that 
 // a verification block should be inserted 
 #define SEH_VERIFICATION_EXCEPTION 0xe0564552   // VER
@@ -3554,7 +3556,8 @@ public :
                                                              GenTreePtr relopNode,
                                                              GenTreePtr asgdLclVar);
 #else
-    void                fgPerStatementLocalVarLiveness(GenTreePtr startNode, GenTreePtr asgdLclVar);
+    void                fgPerNodeLocalVarLiveness(GenTree* node, GenTree* asgdLclVar);
+    void                fgPerStatementLocalVarLiveness(GenTree* node, GenTree* asgdLclVar);
 #endif
     void                fgPerBlockLocalVarLiveness();
 
@@ -3589,7 +3592,11 @@ public :
                                            bool*        pStmtInfoDirty
                                  DEBUGARG( bool *       treeModf));
 
+    VARSET_VALRET_TP    fgComputeLifeLIR(VARSET_VALARG_TP life, BasicBlock* block, VARSET_VALARG_TP volatileVars);
+
     bool fgRemoveDeadStore(GenTree** pTree, LclVarDsc* varDsc, VARSET_TP life, bool* doAgain, bool* pStmtInfoDirty DEBUGARG(bool* treeModf));
+
+    bool fgTryRemoveDeadLIRStore(LIR::Range& blockRange, GenTree* node, GenTree** next);
 
     // For updating liveset during traversal AFTER fgComputeLife has completed
     VARSET_VALRET_TP    fgGetVarBits    (GenTreePtr tree);

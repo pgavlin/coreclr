@@ -3,6 +3,8 @@
 // See the LICENSE file in the project root for more information.
 
 #include "jitpch.h"
+#include "smallhash.h"
+
 #ifdef _MSC_VER
 #pragma hdrstop
 #endif
@@ -761,14 +763,14 @@ bool LIR::Range::TryGetUse(GenTree* node, Use* use)
 
 //------------------------------------------------------------------------
 // LIR::Range::GetTreeRange: Computes the subrange that includes all nodes
-//                           in the dataflow tree rooted at a particular
-//                           node.
+//                           in the dataflow trees rooted at a particular
+//                           set of nodes.
 //
 // This method logically uses the following algorithm to compute the
 // range:
 //
-//    worklist = { root }
-//    firstNode = root
+//    worklist = { set }
+//    firstNode = start
 //    isClosed = true
 //
 //    while not worklist.isEmpty:
@@ -793,41 +795,42 @@ bool LIR::Range::TryGetUse(GenTree* node, Use* use)
 // occurring before uses).
 //
 // Arguments:
-//    root     - The root of the dataflow tree.
-//    isClosed - An output parameter that is set to true if the returned
-//               range contains only nodes in the dataflow tree and false
-//               otherwise.
+//    root        - The root of the dataflow tree.
+//    isClosed    - An output parameter that is set to true if the returned
+//                  range contains only nodes in the dataflow tree and false
+//                  otherwise.
 //
 // Returns:
 //    The computed subrange.
-LIR::Range LIR::Range::GetTreeRange(GenTree* root, bool* isClosed) const
+//
+LIR::Range LIR::Range::GetMarkedRange(unsigned markCount, GenTree* start, bool* isClosed, unsigned* sideEffects) const
 {
-    assert(root != nullptr);
+    assert(markCount != 0);
+    assert(start != nullptr);
     assert(isClosed != nullptr);
+    assert(sideEffects != nullptr);
 
-    // Mark the root of the tree
-    unsigned markCount = 1;
-    root->gtLIRFlags |= LIR::Flags::Mark;
-
+    bool sawMarkedNode = false;
     bool sawUnmarkedNode = false;
+    unsigned sideEffectsInRange = 0;
 
     GenTree* firstNode;
-    for (firstNode = root; markCount > 0; firstNode = firstNode->gtPrev)
+    for (firstNode = start; markCount > 0; firstNode = firstNode->gtPrev)
     {
         // This assert will fail if the dataflow that feeds the root node
         // is incorrect in that it crosses a block boundary or if it involves
         // a use that occurs before its corresponding def.
         assert(firstNode != nullptr);
 
+        sideEffectsInRange |= (firstNode->gtFlags & GTF_ALL_EFFECT);
+
         if ((firstNode->gtLIRFlags & LIR::Flags::Mark) != 0)
         {
+            sawMarkedNode = true;
+
             // Mark the node's operands
-            //
-            // TODO(pdg): replace with operand iterator
-            unsigned operandCount = firstNode->NumOperands();
-            for (unsigned i = 0; i < operandCount; i++)
+            for (GenTree* operand : firstNode->Operands())
             {
-                GenTree* operand = *firstNode->GetOperand(i);
                 operand->gtLIRFlags |= LIR::Flags::Mark;
                 markCount++;
             }
@@ -842,8 +845,65 @@ LIR::Range LIR::Range::GetTreeRange(GenTree* root, bool* isClosed) const
         }
     }
 
-    *isClosed = !sawUnmarkedNode;
-    return LIR::AsRange(firstNode, root);
+    *isClosed = sawMarkedNode && !sawUnmarkedNode;
+    *sideEffects = sideEffectsInRange;
+    return LIR::Range(firstNode, start);
+}
+
+LIR::Range LIR::Range::GetTreeRange(GenTree* root, bool* isClosed) const
+{
+    unsigned unused;
+    return GetTreeRange(root, isClosed, &unused);
+}
+
+//------------------------------------------------------------------------
+// LIR::Range::GetTreeRange: Computes the subrange that includes all nodes
+//                           in the dataflow tree rooted at a particular
+//                           node.
+//
+// Arguments:
+//    root        - The root of the dataflow tree.
+//    isClosed    - An output parameter that is set to true if the returned
+//                  range contains only nodes in the dataflow tree and false
+//                  otherwise.
+//    sideEffects - An output parameter that summarizes the side effects
+//                  contained in the returned range.
+//
+// Returns:
+//    The computed subrange.
+LIR::Range LIR::Range::GetTreeRange(GenTree* root, bool* isClosed, unsigned* sideEffects) const
+{
+    assert(root != nullptr);
+
+    // Mark the root of the tree
+    const unsigned markCount = 1;
+    root->gtLIRFlags |= LIR::Flags::Mark;
+
+    return GetMarkedRange(markCount, root, isClosed, sideEffects);
+}
+
+LIR::Range LIR::Range::GetRangeOfOperandTrees(GenTree* root, bool* isClosed, unsigned* sideEffects) const
+{
+    assert(root != nullptr);
+    assert(isClosed != nullptr);
+    assert(sideEffects != nullptr);
+
+    // Mark the root node's operands
+    unsigned markCount = 0;
+    for (GenTree* operand : root->Operands())
+    {
+        operand->gtLIRFlags |= LIR::Flags::Mark;
+        markCount++;
+    }
+
+    if (markCount == 0)
+    {
+        *isClosed = true;
+        *sideEffects = 0;
+        return LIR::EmptyRange();
+    }
+
+    return GetMarkedRange(markCount, root, isClosed, sideEffects);
 }
 
 #ifdef DEBUG
@@ -895,39 +955,13 @@ bool LIR::Range::ContainsNode(GenTree* node) const
 //
 // Return Value:
 //
-bool LIR::Range::CheckLIR(Compiler* compiler) const
+bool LIR::Range::CheckLIR(Compiler* compiler, bool checkUnusedValues) const
 {
     // The check that uses are correctly linked into this range may fail
     // erroneously if this range is a sub-range.
     assert(!IsSubRange());
 
-    // This code uses a stack as a map. Lookup is accomplished by scanning downward from the top.
-    // This relies on defs being near uses for efficiency.
-    ArrayStack<GenTree*> unusedDefs(compiler);
-    auto recordDef = [&unusedDefs](GenTree* def)
-    {
-        unusedDefs.Push(def);
-    };
-
-    auto tryConsumeDef = [&unusedDefs](GenTree* def) -> bool
-    {
-        int height = unusedDefs.Height();
-        for (int i = 0; i < height; i++)
-        {
-            if (unusedDefs.Index(i) == def)
-            {
-                for (; i > 0; i--)
-                {
-                    unusedDefs.IndexRef(i) = unusedDefs.Index(i - 1);
-                }
-
-                unusedDefs.Pop();
-                return true;
-            }
-        }
-
-        return false;
-    };
+    SmallHashTable<GenTree*, bool, 32> unusedDefs(compiler);
 
     bool pastPhis = false;
     GenTree* prev = nullptr;
@@ -946,17 +980,15 @@ bool LIR::Range::CheckLIR(Compiler* compiler) const
             pastPhis = true;
         }
 
-        // Skip nodes that do not produce values.
-        if (!node->IsValue())
-        {
-            continue;
-        }
-
         unsigned numOperands = node->NumOperands();
         for (unsigned i = 0; i < numOperands; i++)
         {
             GenTree** use = node->GetOperand(i);
             GenTree* def = *use;
+
+            assert((!checkUnusedValues || ((def->gtLIRFlags & LIR::Flags::IsUnusedValue) == 0)) &&
+                "operands should never be marked as unused values");
+
             if (def->OperGet() == GT_ARGPLACE)
             {
                 // ARGPLACE nodes are not represented in the LIR sequence. Ignore them.
@@ -970,7 +1002,8 @@ bool LIR::Range::CheckLIR(Compiler* compiler) const
                 continue;
             }
 
-            bool foundDef = tryConsumeDef(def);
+            bool v;
+            bool foundDef = unusedDefs.TryRemove(def, &v);
             if (!foundDef)
             {
                 // First, scan backwards and look for a preceding use.
@@ -997,10 +1030,24 @@ bool LIR::Range::CheckLIR(Compiler* compiler) const
             }
         }
 
-        recordDef(*node);
+        if (node->IsValue())
+        {
+            bool added = unusedDefs.AddOrUpdate(*node, true);
+            assert(added);
+        }
     }
 
     assert(prev == LastNode());
+
+    // At this point the unusedDefs map should contain only unused values.
+    if (checkUnusedValues)
+    {
+        for (auto kvp : unusedDefs)
+        {
+            GenTree* node = kvp.Key();
+            assert(((node->gtLIRFlags & LIR::Flags::IsUnusedValue) != 0) && "found an unmarked unused value");
+        }
+    }
 
     return true;
 }

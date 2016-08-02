@@ -3609,8 +3609,6 @@ void Lowering::DoPhase()
     }
     comp->EndPhase(PHASE_LOWERING_DECOMP);
 
-    NYI("later phases cannot yet process LIR!");
-
     comp->fgLocalVarLiveness();
     // local var liveness can delete code, which may create empty blocks
     if  (!comp->opts.MinOpts() && !comp->opts.compDbgCode)
@@ -3662,11 +3660,11 @@ void Lowering::DoPhase()
         // are in increasing location order.
         currentLoc += 2;
 
-        for (stmt = block->FirstNonPhiDef(); stmt; stmt = stmt->gtNext)
-        {
-            if (stmt->gtStmt.gtStmtIsEmbedded())
-                continue;
+        m_block = block;
+        m_blockRange = LIR::AsRange(block);
 
+        for (GenTree* node = m_blockRange.FirstNonPhiNode(), *end = m_blockRange.End(); node != end; node = node->gtNext)
+        {
             /* We increment the number position of each tree node by 2 to
             * simplify the logic when there's the case of a tree that implicitly
             * does a dual-definition of temps (the long case).  In this case
@@ -3674,44 +3672,39 @@ void Lowering::DoPhase()
             * of making some messy adjustments if we only increment the
             * number position by one.
             */
-            GenTreePtr node;
-            foreach_treenode_execution_order(node, stmt)
-            {
 #ifdef DEBUG
-                node->gtSeqNum = currentLoc;
+            node->gtSeqNum = currentLoc;
 #endif
 
-                node->gtLsraInfo.Initialize(m_lsra, node, currentLoc);
-                node->gtClearReg(comp);
-                currentLoc += 2;
+            node->gtLsraInfo.Initialize(m_lsra, node, currentLoc);
+            node->gtClearReg(comp);
+
+            // Mark the node's operands as used
+            for (GenTree* operand : node->Operands())
+            {
+                operand->gtLIRFlags &= ~LIR::Flags::IsUnusedValue;
             }
+
+            // If the node produces a value, mark it as unused.
+            if (node->IsValue())
+            {
+                node->gtLIRFlags |= LIR::Flags::IsUnusedValue;
+            }
+
+            currentLoc += 2;
         }
 
-        for (stmt = block->FirstNonPhiDef(); stmt; stmt = stmt->gtNext)
+        for (GenTree* node = m_blockRange.FirstNonPhiNode(), *end = m_blockRange.End(); node != end; node = node->gtNext)
         {
-            if (stmt->gtStmt.gtStmtIsEmbedded())
-                continue;
+            TreeNodeInfoInit(node);
 
-            comp->compCurStmt = stmt;
-
-            TreeNodeInfoInit(stmt);
-
-            // In the special case where a comma node is at the top level, make it consume
-            // its (op2) source
-            GenTreePtr tree = stmt->gtStmt.gtStmtExpr;
-            if (tree->gtOper == GT_COMMA && tree->TypeGet() != TYP_VOID)
+            // If the node produces an unused value, mark it as a local def-use
+            if ((node->gtLIRFlags & LIR::Flags::IsUnusedValue) != 0)
             {
-                tree->gtLsraInfo.srcCount = 1;
+                node->gtLsraInfo.isLocalDefUse = true;
+                node->gtLsraInfo.dstCount = 0;
             }
-            // In the special case where a lclVar node is at the top level, set it as
-            // localDefUse
-            // TODO-Cleanup: This used to be isCandidateLocalRef, but we haven't initialized the
-            // lvLRACandidate field yet.  Fix this.
-            else if (comp->optIsTrackedLocal(tree))
-            {
-                tree->gtLsraInfo.isLocalDefUse = true;
-                tree->gtLsraInfo.dstCount = 0;
-            }
+
 #if 0
             // TODO-CQ: Enable this code after fixing the isContained() logic to not abort for these
             // top-level nodes that throw away their result.
@@ -3726,6 +3719,8 @@ void Lowering::DoPhase()
             }
 #endif
         }
+
+        assert(m_blockRange.CheckLIR(comp, true));
     }
     DBEXEC(VERBOSE, DumpNodeInfoMap());
 }
@@ -3978,17 +3973,12 @@ void Lowering::DumpNodeInfoMap()
 
     for (BasicBlock* block = comp->fgFirstBB; block != nullptr; block = block->bbNext)
     {
-        for (GenTree* stmt = block->FirstNonPhiDef(); stmt != nullptr; stmt = stmt->gtNext)
+        LIR::Range blockRange = LIR::AsRange(block);
+        for (GenTree* node = blockRange.FirstNonPhiNode(), *end = blockRange.End(); node != end; node = node->gtNext)
         {
-            GenTreePtr node;
-            foreach_treenode_execution_order(node, stmt)
-            {
-                if (stmt->gtStmt.gtStmtIsEmbedded())
-                    continue;
-                comp->gtDispTree(node, nullptr, nullptr, true);
-                printf("    +");
-                node->gtLsraInfo.dump(m_lsra);
-            }
+            comp->gtDispTree(node, nullptr, nullptr, true);
+            printf("    +");
+            node->gtLsraInfo.dump(m_lsra);
         }
     }
 }

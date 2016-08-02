@@ -25,9 +25,17 @@ public:
         enum : unsigned char
         {
             None = 0x00,
+
             Mark = 0x01, // An aribtrary "mark" bit that can be used in place of
                          // a more expensive data structure when processing a set
                          // of LIR nodes. See for example `LIR::GetTreeRange`.
+
+            IsUnusedValue = 0x02, // Set on a node if it produces a value that is noy
+                                  // subsequently used. Should never be set on nodes
+                                  // that return `false` for `GenTree::IsValue`. Note
+                                  // that this bit should not be assumed to be valid
+                                  // at all points during compilation: it is currently
+                                  // only computed during taget-dependent lowering.
         };
     };
 
@@ -86,6 +94,8 @@ public:
 
         GenTree*& FirstNode() const;
         GenTree*& LastNode() const;
+
+        Range GetMarkedRange(unsigned markCount, GenTree* start, bool* isClosed, unsigned* sideEffects) const;
 
     public:
         class Iterator
@@ -160,10 +170,12 @@ public:
         bool TryGetUse(GenTree* node, Use* use);
 
         Range GetTreeRange(GenTree* root, bool* isClosed) const;
+        Range GetTreeRange(GenTree* root, bool* isClosed, unsigned* sideEffects) const;
+        Range GetRangeOfOperandTrees(GenTree* root, bool* isClosed, unsigned* sideEffects) const;
 
 #ifdef DEBUG
         bool ContainsNode(GenTree* node) const;
-        bool CheckLIR(Compiler* compiler) const;
+        bool CheckLIR(Compiler* compiler, bool checkUnusedValues = false) const;
 #endif
     };
 
