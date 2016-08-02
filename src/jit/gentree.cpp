@@ -8208,7 +8208,7 @@ GenTree** GenTree::GetOperand(unsigned operandNum)
             {
                 return &blkOp->gtOp1->AsArgList()->gtOp2;
             }
-            else if (operandNum == 3)
+            else if (operandNum == 2)
             {
                 return &blkOp->gtOp2;
             }
