@@ -1747,25 +1747,21 @@ GenTree* Lowering::LowerTailCallViaHelper(GenTreeCall* call, GenTree *callTarget
     }
 
     // Remove gtCallAddr from execution order if present.
-    LIR::Range callTargetRange;
     if (call->gtCallType == CT_INDIRECT)
     {
         assert(call->gtCallAddr != nullptr);
 
         bool isClosed;
-        callTargetRange = m_blockRange.GetTreeRange(call->gtCallAddr, &isClosed);
+        LIR::Range callAddrRange = m_blockRange.GetTreeRange(call->gtCallAddr, &isClosed);
         assert(isClosed);
 
-        m_blockRange.Remove(callTargetRange);
+        m_blockRange.Remove(callAddrRange);
     }
-    else
-    {
-        assert(call->gtCallAddr == nullptr);
-        callTargetRange = LIR::SeqTree(comp, callTarget);
-    }
+
+    // The callTarget tree needs to be sequenced.
+    LIR::Range callTargetRange = LIR::SeqTree(comp, callTarget);
 
     fgArgTabEntry* argEntry;
-
 
 #if defined(_TARGET_AMD64_)
 
