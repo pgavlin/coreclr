@@ -2386,9 +2386,19 @@ bool Compiler::fgTryRemoveDeadLIRStore(LIR::Range& blockRange, GenTree* node, Ge
     }
 
     // Okay, the operands to the store form a contiguous range that has no side effects. Remove the
-    // range containing the operands and then remove the store.
+    // range containing the operands and then remove the store. Once these have been removed, walk
+    // them and decrement local var ref counts appropriately.
     blockRange.Remove(operandsRange);
     blockRange.Remove(store);
+
+    // TODO(pdg): this scan should really be folded into LIR::Range::Remove().
+    LIR::DecRefCnts(this, compCurBB, operandsRange);
+
+    if (store->IsLocal())
+    {
+        lvaDecRefCnts(store);
+    }
+
     return true;
 }
 

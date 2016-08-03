@@ -1232,3 +1232,15 @@ LIR::Range LIR::SeqTree(Compiler* compiler, GenTree* tree)
     compiler->gtSetEvalOrder(tree);
     return AsRange(compiler->fgSetTreeSeq(tree, nullptr, true), tree);
 }
+
+// TODO(pdg): this should probably just be folded into LIR::Range::Remove(const Range& range);
+void LIR::DecRefCnts(Compiler* compiler, BasicBlock* block, const Range& range)
+{
+    for (GenTree* node : range)
+    {
+        if (((node->OperGet() == GT_CALL) && ((node->gtFlags & GTF_CALL_UNMANAGED) != 0)) || node->OperIsLocal())
+        {
+            compiler->lvaDecRefCnts(block, node);
+        }
+    }
+}
