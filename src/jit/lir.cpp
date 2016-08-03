@@ -3,6 +3,8 @@
 // See the LICENSE file in the project root for more information.
 
 #include "jitpch.h"
+#include "smallhash.h"
+
 #ifdef _MSC_VER
 #pragma hdrstop
 #endif
@@ -77,7 +79,7 @@ LIR::Use LIR::Use::GetDummyUse(Range& range, GenTree* node)
     dummyUse.m_user = node;
     dummyUse.m_edge = &dummyUse.m_user;
 
-    dummyUse.AssertIsValid();
+    assert(dummyUse.IsInitialized());
     return dummyUse;
 }
 
@@ -484,7 +486,7 @@ LIR::Range::Iterator LIR::Range::end() const
 //
 LIR::Range::ReverseIterator LIR::Range::rbegin() const
 {
-    return ReverseIterator(End());
+    return ReverseIterator(EndExclusive());
 }
 
 //------------------------------------------------------------------------
@@ -493,7 +495,7 @@ LIR::Range::ReverseIterator LIR::Range::rbegin() const
 //
 LIR::Range::ReverseIterator LIR::Range::rend() const
 {
-    return ReverseIterator(Begin());
+    return ReverseIterator(Begin()->gtPrev);
 }
 
 //------------------------------------------------------------------------
@@ -903,27 +905,30 @@ LIR::Range LIR::Range::GetMarkedRange(unsigned markCount, GenTree* start, bool* 
     assert(isClosed != nullptr);
     assert(sideEffects != nullptr);
 
-    bool sawMarkedNode = false;
     bool sawUnmarkedNode = false;
     unsigned sideEffectsInRange = 0;
 
-    GenTree* firstNode;
-    for (firstNode = start; markCount > 0; firstNode = firstNode->gtPrev)
+    GenTree* firstNode = start;
+    GenTree* lastNode = nullptr;
+    for (;;)
     {
-        // This assert will fail if the dataflow that feeds the root node
-        // is incorrect in that it crosses a block boundary or if it involves
-        // a use that occurs before its corresponding def.
-        assert(firstNode != nullptr);
-
-        sideEffectsInRange |= (firstNode->gtFlags & GTF_ALL_EFFECT);
-
         if ((firstNode->gtLIRFlags & LIR::Flags::Mark) != 0)
         {
-            sawMarkedNode = true;
+            if (lastNode == nullptr)
+            {
+                lastNode = firstNode;
+            }
 
             // Mark the node's operands
             for (GenTree* operand : firstNode->Operands())
             {
+                // Do not mark nodes that do not appear in the execution order
+                assert(operand->OperGet() != GT_LIST);
+                if (operand->OperGet() == GT_ARGPLACE)
+                {
+                    continue;
+                }
+
                 operand->gtLIRFlags |= LIR::Flags::Mark;
                 markCount++;
             }
@@ -932,15 +937,34 @@ LIR::Range LIR::Range::GetMarkedRange(unsigned markCount, GenTree* start, bool* 
             firstNode->gtLIRFlags &= ~LIR::Flags::Mark;
             markCount--;
         }
-        else
+        else if (lastNode != nullptr)
         {
             sawUnmarkedNode = true;
         }
+
+        if (lastNode != nullptr)
+        {
+            sideEffectsInRange |= (firstNode->gtFlags & GTF_ALL_EFFECT);
+        }
+
+        if (markCount == 0)
+        {
+            break;
+        }
+
+        firstNode = firstNode->gtPrev;
+
+        // This assert will fail if the dataflow that feeds the root node
+        // is incorrect in that it crosses a block boundary or if it involves
+        // a use that occurs before its corresponding def.
+        assert(firstNode != nullptr);
     }
 
-    *isClosed = sawMarkedNode && !sawUnmarkedNode;
+    assert(lastNode != nullptr);
+
+    *isClosed = !sawUnmarkedNode;
     *sideEffects = sideEffectsInRange;
-    return LIR::Range(firstNode, start);
+    return LIR::Range(firstNode, lastNode);
 }
 
 LIR::Range LIR::Range::GetTreeRange(GenTree* root, bool* isClosed) const
@@ -1049,7 +1073,7 @@ bool LIR::Range::ContainsNode(GenTree* node) const
 // Return Value:
 //    'true' if the LIR for the specified range is legal.
 //
-bool LIR::Range::CheckLIR(Compiler* compiler) const
+bool LIR::Range::CheckLIR(Compiler* compiler, bool checkUnusedValues) const
 {
     // The check that uses are correctly linked into this range may fail
     // erroneously if this range is a sub-range.
@@ -1058,39 +1082,7 @@ bool LIR::Range::CheckLIR(Compiler* compiler) const
     // Make sure the range itself is valid.
     assert(IsValid());
 
-    // This code uses a stack as a map. Lookup is accomplished by scanning downward from the top.
-    // This relies on defs being near uses for efficiency.
-    ArrayStack<GenTree*> unusedDefs(compiler);
-    auto recordDef = [&unusedDefs](GenTree* def)
-    {
-        unusedDefs.Push(def);
-    };
-
-    auto tryConsumeDef = [&unusedDefs](GenTree* def) -> bool
-    {
-        int height = unusedDefs.Height();
-        for (int i = 0; i < height; i++)
-        {
-            if (unusedDefs.Index(i) == def)
-            {
-                // REVIEW: isn't this the reverse? Shouldn't it be:
-                // for (; i < height - 1; i++) {
-                //    unusedDefs.IndexRef(i) = unusedDefs.Index(i + 1);
-                // }
-                // unusedDefs.Pop();
-                // --- better, just add an unusedDefs.Remove(i) member function.
-                for (; i > 0; i--)
-                {
-                    unusedDefs.IndexRef(i) = unusedDefs.Index(i - 1);
-                }
-
-                unusedDefs.Pop();
-                return true;
-            }
-        }
-
-        return false;
-    };
+    SmallHashTable<GenTree*, bool, 32> unusedDefs(compiler);
 
     bool pastPhis = false;
     GenTree* prev = nullptr;
@@ -1109,17 +1101,13 @@ bool LIR::Range::CheckLIR(Compiler* compiler) const
             pastPhis = true;
         }
 
-        // Skip nodes that do not produce values.
-        if (!node->IsValue())
+        for (GenTree** useEdge : node->UseEdges())
         {
-            continue;
-        }
+            GenTree* def = *useEdge;
 
-        unsigned numOperands = node->NumOperands();
-        for (unsigned i = 0; i < numOperands; i++)
-        {
-            GenTree** use = node->GetOperand(i);
-            GenTree* def = *use;
+            assert((!checkUnusedValues || ((def->gtLIRFlags & LIR::Flags::IsUnusedValue) == 0)) &&
+                "operands should never be marked as unused values");
+
             if (def->OperGet() == GT_ARGPLACE)
             {
                 // ARGPLACE nodes are not represented in the LIR sequence. Ignore them.
@@ -1133,15 +1121,16 @@ bool LIR::Range::CheckLIR(Compiler* compiler) const
                 continue;
             }
 
-            bool foundDef = tryConsumeDef(def);
+            bool v;
+            bool foundDef = unusedDefs.TryRemove(def, &v);
             if (!foundDef)
             {
                 // First, scan backwards and look for a preceding use.
                 for (GenTree* prev = *node; prev != nullptr; prev = prev->gtPrev)
                 {
                     // TODO: dump the users and the def
-                    GenTree** earlierUse;
-                    bool foundEarlierUse = prev->TryGetUse(def, &earlierUse) && earlierUse != use;
+                    GenTree** earlierUseEdge;
+                    bool foundEarlierUse = prev->TryGetUse(def, &earlierUseEdge) && earlierUseEdge != useEdge;
                     assert(!foundEarlierUse && "found multiply-used LIR node");
                 }
 
@@ -1160,10 +1149,24 @@ bool LIR::Range::CheckLIR(Compiler* compiler) const
             }
         }
 
-        recordDef(*node);
+        if (node->IsValue())
+        {
+            bool added = unusedDefs.AddOrUpdate(*node, true);
+            assert(added);
+        }
     }
 
     assert(prev == LastNode());
+
+    // At this point the unusedDefs map should contain only unused values.
+    if (checkUnusedValues)
+    {
+        for (auto kvp : unusedDefs)
+        {
+            GenTree* node = kvp.Key();
+            assert(((node->gtLIRFlags & LIR::Flags::IsUnusedValue) != 0) && "found an unmarked unused value");
+        }
+    }
 
     return true;
 }
@@ -1207,10 +1210,5 @@ LIR::Range LIR::AsRange(GenTree* firstNode, GenTree* lastNode)
 LIR::Range LIR::SeqTree(Compiler* compiler, GenTree* tree)
 {
     compiler->gtSetEvalOrder(tree);
-    compiler->fgSetTreeSeq(tree);
-
-    // fgSetTreeSeq() sets the Compiler::fgTreeSeqBeg member to point at the
-    // first node in execution order of the sequenced tree. Use that to
-    // create a Range of the sequenced nodes.
-    return AsRange(compiler->fgTreeSeqBeg, tree);
+    return AsRange(compiler->fgSetTreeSeq(tree, nullptr, true), tree);
 }

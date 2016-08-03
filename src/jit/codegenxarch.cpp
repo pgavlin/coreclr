@@ -638,7 +638,8 @@ void                CodeGen::genCodeForBBlist()
 #ifdef DEBUGGING_SUPPORT
         IL_OFFSETX currentILOffset = BAD_IL_OFFSET;
 #endif
-        for (GenTree* node : LIR::AsRange(block))
+        LIR::Range blockRange = LIR::AsRange(block);
+        for (GenTree* node = blockRange.FirstNonPhiNode(), *end = blockRange.End(); node != end; node = node->gtNext)
         {
 #ifdef DEBUGGING_SUPPORT
             // Do we have a new IL offset?
@@ -680,6 +681,8 @@ void                CodeGen::genCodeForBBlist()
                 genConsumeReg(node);
             }
 
+            // TODO(pdg): re-enable the debug checks below after making sure they are valid on a node-by-node basis.
+#if 0
 #ifdef DEBUG
 #ifdef FEATURE_SIMD
             // Look for a following SIMDIntrinsicUpperRestore two nodes after a node that kills FP registers.
@@ -744,6 +747,7 @@ void                CodeGen::genCodeForBBlist()
 
             noway_assert(nonVarPtrRegs == 0);
 #endif // DEBUG
+#endif
         }
 
 #if defined(DEBUG) && defined(LATE_DISASM) && defined(_TARGET_AMD64_)
@@ -2858,6 +2862,10 @@ CodeGen::genCodeForTreeNode(GenTreePtr treeNode)
         genConsumeRegs(treeNode);
         break;
 #endif
+
+    case GT_IL_OFFSET:
+        // Do nothing; these nodes are simply markers for debug info.
+        break;
 
     default:
         {

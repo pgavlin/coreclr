@@ -232,6 +232,7 @@ public:
     }
 };
 
+class GenTreeUseEdgeIterator;
 class GenTreeOperandIterator;
 
 /*****************************************************************************/
@@ -1426,7 +1427,7 @@ public:
 
     // Given a tree node, if this node uses that node, return the use as an out parameter and return true.
     // Otherwise, return false.
-    bool              TryGetUse(GenTree* def, GenTree*** use);
+    bool              TryGetUse(GenTree* def, GenTree*** use, bool expandMultiRegArgs = true);
 
     // Get the parent of this node, and optionally capture the pointer to the child so that it can be modified.
     GenTreePtr        gtGetParent(GenTreePtr** parentChildPtrPtr);
@@ -1732,13 +1733,14 @@ public:
     // Requires "childNum < NumChildren()".  Returns the "n"th child of "this."
     GenTreePtr GetChild(unsigned childNum);
 
-    // Returns the number of operands to the current node. Differs from NumChildren only in the
-    // case of call nodes.
-    unsigned NumOperands();
+    // Returns an iterator that will produce the use edge to each operand of this node. Differs
+    // from the sequence of nodes produced by a loop over `GetChild` in its handling of call, phi,
+    // and block op nodes. If `expandMultiRegArgs` is true, an multi-reg args passed to a call
+    // will appear be expanded from their GT_LIST node into that node's contents.
+    GenTreeUseEdgeIterator GenTree::UseEdgesBegin(bool expandMultiRegArgs = true);
+    GenTreeUseEdgeIterator GenTree::UseEdgesEnd();
 
-    // Returns the use-to-def edge for the nth operand of the current node. Differs from GetChild
-    // only in the case of call nodes and its handling of GTF_REVERSE_OPS.
-    GenTree** GetOperand(unsigned operandNum);
+    IteratorPair<GenTreeUseEdgeIterator> GenTree::UseEdges(bool expandMultiRegArgs = true);
 
     // Returns an iterator that will produce each operand of this node. Differs from the sequence
     // of nodes produced by a loop over `GetChild` in its handling of call, phi, and block op
@@ -1748,7 +1750,7 @@ public:
     GenTreeOperandIterator OperandsEnd();
 
     // Returns a range that will produce the operands of this node in use order.
-    IteratorPair<GenTreeOperandIterator> Operands(bool expandMultiRegArgs = false);
+    IteratorPair<GenTreeOperandIterator> Operands(bool expandMultiRegArgs = true);
 
     bool Precedes(GenTree* other);
 
@@ -1818,48 +1820,105 @@ public:
 //
 // Note: valid values of this type may be obtained by calling
 // `GenTree::OperandsBegin` and `GenTree::OperandsEnd`.
-class GenTreeOperandIterator
+//
+class GenTreeUseEdgeIterator final
 {
-    friend GenTreeOperandIterator GenTree::OperandsBegin(bool expandMultiRegArgs);
-    friend GenTreeOperandIterator GenTree::OperandsEnd();
+    friend class GenTreeOperandIterator;
+    friend GenTreeUseEdgeIterator GenTree::UseEdgesBegin(bool expandMultiRegArgs);
+    friend GenTreeUseEdgeIterator GenTree::UseEdgesEnd();
 
     GenTree* m_node;
-    GenTree* m_operand;
+    GenTree** m_edge;
     GenTree* m_argList;
     GenTree* m_multiRegArg;
     bool m_expandMultiRegArgs;
     int m_state;
 
-    GenTreeOperandIterator(GenTree* node, bool expandMultiRegArgs);
+    GenTreeUseEdgeIterator(GenTree* node, bool expandMultiRegArgs);
 
-    GenTree* GetNextOperand() const;
-    void MoveToNextCallOperand();
-    void MoveToNextPhiOperand();
+    GenTree** GetNextUseEdge() const;
+    void MoveToNextCallUseEdge();
+    void MoveToNextPhiUseEdge();
 #ifdef FEATURE_SIMD
-    void MoveToNextSIMDOperand();
+    void MoveToNextSIMDUseEdge();
 #endif
 
 public:
-    GenTreeOperandIterator();
+    GenTreeUseEdgeIterator();
 
-    inline GenTree*& operator*()
+    inline GenTree** operator*()
     {
-        return m_operand;
+        return m_edge;
     }
 
     inline GenTree** operator->()
     {
-        return &m_operand;
+        return m_edge;
     }
 
-    inline bool operator==(const GenTreeOperandIterator& other) const
+    inline bool operator==(const GenTreeUseEdgeIterator& other) const
     {
         if (m_state == -1 || other.m_state == -1)
         {
             return m_state == other.m_state;
         }
 
-        return (m_node == other.m_node) && (m_operand == other.m_operand) && (m_argList == other.m_argList) && (m_state == other.m_state);
+        return (m_node == other.m_node) && (m_edge == other.m_edge) && (m_argList == other.m_argList) && (m_state == other.m_state);
+    }
+
+    inline bool operator!=(const GenTreeUseEdgeIterator& other) const
+    {
+        return !(operator==(other));
+    }
+
+    GenTreeUseEdgeIterator& operator++();
+};
+
+//------------------------------------------------------------------------
+// GenTreeOperandIterator: an iterator that will produce each operand of a
+//                         GenTree node in the order in which they are
+//                         used. Note that the operands of a node may not
+//                         correspond exactly to the nodes on the other
+//                         ends of its use edges: in particular, GT_LIST
+//                         nodes are expanded into their component parts
+//                         (with the optional exception of multi-reg
+//                         arguments). This differs from the behavior of
+//                         GenTree::GetChild(), which does not expand
+//                         lists.
+//
+// Note: valid values of this type may be obtained by calling
+// `GenTree::OperandsBegin` and `GenTree::OperandsEnd`.
+class GenTreeOperandIterator final
+{
+    friend GenTreeOperandIterator GenTree::OperandsBegin(bool expandMultiRegArgs);
+    friend GenTreeOperandIterator GenTree::OperandsEnd();
+
+    GenTreeUseEdgeIterator m_useEdges;
+
+    GenTreeOperandIterator(GenTree* node, bool expandMultiRegArgs)
+        : m_useEdges(node, expandMultiRegArgs)
+    {
+    }
+
+public:
+    GenTreeOperandIterator()
+        : m_useEdges()
+    {
+    }
+
+    inline GenTree* operator*()
+    {
+        return *(*m_useEdges);
+    }
+
+    inline GenTree* operator->()
+    {
+        return *(*m_useEdges);
+    }
+
+    inline bool operator==(const GenTreeOperandIterator& other) const
+    {
+        return m_useEdges == other.m_useEdges;
     }
 
     inline bool operator!=(const GenTreeOperandIterator& other) const
@@ -1867,7 +1926,11 @@ public:
         return !(operator==(other));
     }
 
-    GenTreeOperandIterator& operator++();
+    inline GenTreeOperandIterator& operator++()
+    {
+        ++m_useEdges;
+        return *this;
+    }
 };
 
 

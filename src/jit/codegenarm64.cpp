@@ -3619,6 +3619,10 @@ CodeGen::genCodeForTreeNode(GenTreePtr treeNode)
         NYI("GT_CLS_VAR_ADDR");
         break;
 
+    case GT_IL_OFFSET:
+        // Do nothing; these nodes are simply markers for debug info.
+        break;
+
     default:
         {
 #ifdef  DEBUG

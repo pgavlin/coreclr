@@ -2290,6 +2290,8 @@ void Lowering::InsertPInvokeMethodProlog()
 
     JITDUMP("======= Inserting PInvoke method prolog\n");
 
+    LIR::Range firstBlockRange = LIR::AsRange(comp->fgFirstBB);
+
     const CORINFO_EE_INFO* pInfo = comp->eeGetEEInfo();
     const CORINFO_EE_INFO::InlinedCallFrameInfo& callFrameInfo = pInfo->inlinedCallFrameInfo;
 
@@ -2321,10 +2323,14 @@ void Lowering::InsertPInvokeMethodProlog()
     store->gtOp.gtOp1 = call;
     store->gtFlags |= GTF_VAR_DEF;
 
-    GenTree* insertionPoint = m_blockRange.FirstNonPhiOrCatchArgNode();
+    GenTree* insertionPoint = firstBlockRange.FirstNonPhiOrCatchArgNode();
+    if (insertionPoint == nullptr)
+    {
+        insertionPoint = firstBlockRange.EndExclusive();
+    }
 
     comp->fgMorphTree(store);
-    m_blockRange.InsertAfter(LIR::SeqTree(comp, store), insertionPoint);
+    firstBlockRange.InsertAfter(LIR::SeqTree(comp, store), insertionPoint);
     insertionPoint = store;
 
     DISPTREE(store);
@@ -2339,7 +2345,7 @@ void Lowering::InsertPInvokeMethodProlog()
                                                     callFrameInfo.offsetOfCallSiteSP);
     storeSP->gtOp1 = PhysReg(REG_SPBASE);
 
-    m_blockRange.InsertAfter(LIR::SeqTree(comp, storeSP), insertionPoint);
+    firstBlockRange.InsertAfter(LIR::SeqTree(comp, storeSP), insertionPoint);
     insertionPoint = storeSP;
 
     DISPTREE(storeSP);
@@ -2354,7 +2360,7 @@ void Lowering::InsertPInvokeMethodProlog()
                                                     callFrameInfo.offsetOfCalleeSavedFP);
     storeFP->gtOp1 = PhysReg(REG_FPBASE);
 
-    m_blockRange.InsertAfter(LIR::SeqTree(comp, storeFP), insertionPoint);
+    firstBlockRange.InsertAfter(LIR::SeqTree(comp, storeFP), insertionPoint);
     insertionPoint = storeFP;
 
     DISPTREE(storeFP);
@@ -2366,7 +2372,7 @@ void Lowering::InsertPInvokeMethodProlog()
         // Push a frame - if we are NOT in an IL stub, this is done right before the call
         // The init routine sets InlinedCallFrame's m_pNext, so we just set the thead's top-of-stack
         GenTree* frameUpd = CreateFrameLinkUpdate(PushFrame);
-        m_blockRange.InsertAfter(LIR::SeqTree(comp, frameUpd), insertionPoint);
+        firstBlockRange.InsertAfter(LIR::SeqTree(comp, frameUpd), insertionPoint);
         DISPTREE(frameUpd);
     }
 }
@@ -2400,7 +2406,9 @@ void Lowering::InsertPInvokeMethodEpilog(BasicBlock *returnBB
     // Method doing PInvoke calls has exactly one return block unless it has "jmp" or tail calls.
     assert(((returnBB == comp->genReturnBB) && (returnBB->bbJumpKind == BBJ_RETURN)) || returnBB->endsWithTailCallOrJmp(comp));
 
-    GenTree* insertionPoint = LIR::AsRange(returnBB).EndExclusive();
+    LIR::Range returnBlockRange = LIR::AsRange(returnBB);
+
+    GenTree* insertionPoint = returnBlockRange.EndExclusive();
 
     // Note: PInvoke Method Epilog (PME) needs to be inserted just before GT_RETURN, GT_JMP or GT_CALL node in execution
     // order so that it is guaranteed that there will be no further PInvokes after that point in the method.
@@ -2427,13 +2435,13 @@ void Lowering::InsertPInvokeMethodEpilog(BasicBlock *returnBB
     // Thread.offsetOfGcState = 0/1 
     // That is [tcb + offsetOfGcState] = 1
     GenTree* storeGCState = SetGCState(1);
-    m_blockRange.InsertBefore(LIR::SeqTree(comp, storeGCState), insertionPoint);
+    returnBlockRange.InsertBefore(LIR::SeqTree(comp, storeGCState), insertionPoint);
 
     if (comp->opts.eeFlags & CORJIT_FLG_IL_STUB)
     {
         // Pop the frame, in non-stubs we do this around each PInvoke call
         GenTree* frameUpd = CreateFrameLinkUpdate(PopFrame);
-        m_blockRange.InsertBefore(LIR::SeqTree(comp, frameUpd), insertionPoint);
+        returnBlockRange.InsertBefore(LIR::SeqTree(comp, frameUpd), insertionPoint);
     }
 }
 
@@ -2452,13 +2460,12 @@ void Lowering::InsertPInvokeCallProlog(GenTreeCall* call)
 {
     JITDUMP("======= Inserting PInvoke call prolog\n");
 
-    // TODO(pdg): This code relies on tree order when it calls fgGetFirstNode. NYI out for now.
-
     GenTree* insertBefore = call;
     if (call->gtCallType == CT_INDIRECT)
     {
-        NYI("use of tree order in lowering!");
-        insertBefore = comp->fgGetFirstNode(call->gtCallAddr);
+        bool isClosed;
+        insertBefore = m_blockRange.GetTreeRange(call->gtCallAddr, &isClosed).Begin();
+        assert(isClosed);
     }
 
     const CORINFO_EE_INFO::InlinedCallFrameInfo& callFrameInfo = comp->eeGetEEInfo()->inlinedCallFrameInfo;
@@ -2989,13 +2996,10 @@ void Lowering::AddrModeCleanupHelper(GenTreeAddrMode* addrMode, GenTree* node)
         return;
     }
 
-    // TODO(pdg): change this to use the operand iterator once LSRA changes are in
-    //
-    // Also, change this to use the LIR mark bit and iterate instead of recursing
-    unsigned childCount = node->NumOperands();
-    for (unsigned i = 0; i < childCount; i++)
+    // TODO(pdg): change this to use the LIR mark bit and iterate instead of recursing
+    for (GenTree* operand : node->Operands())
     {
-        AddrModeCleanupHelper(addrMode, *node->GetOperand(i));
+        AddrModeCleanupHelper(addrMode, operand);
     }
 
     m_blockRange.Remove(node);
@@ -3633,8 +3637,6 @@ void Lowering::DoPhase()
     }
 #endif
 
-    NYI("later phases cannot yet process LIR!");
-
     // The initialization code for the TreeNodeInfo map was initially part of a single full IR
     // traversal and it has been split because the order of traversal performed by fgWalkTreePost
     // does not necessarily lower nodes in execution order and also, it could potentially
@@ -3665,11 +3667,11 @@ void Lowering::DoPhase()
         // are in increasing location order.
         currentLoc += 2;
 
-        for (stmt = block->FirstNonPhiDef(); stmt; stmt = stmt->gtNext)
-        {
-            if (stmt->gtStmt.gtStmtIsEmbedded())
-                continue;
+        m_block = block;
+        m_blockRange = LIR::AsRange(block);
 
+        for (GenTree* node = m_blockRange.FirstNonPhiNode(), *end = m_blockRange.End(); node != end; node = node->gtNext)
+        {
             /* We increment the number position of each tree node by 2 to
             * simplify the logic when there's the case of a tree that implicitly
             * does a dual-definition of temps (the long case).  In this case
@@ -3677,44 +3679,39 @@ void Lowering::DoPhase()
             * of making some messy adjustments if we only increment the
             * number position by one.
             */
-            GenTreePtr node;
-            foreach_treenode_execution_order(node, stmt)
-            {
 #ifdef DEBUG
-                node->gtSeqNum = currentLoc;
+            node->gtSeqNum = currentLoc;
 #endif
 
-                node->gtLsraInfo.Initialize(m_lsra, node, currentLoc);
-                node->gtClearReg(comp);
-                currentLoc += 2;
+            node->gtLsraInfo.Initialize(m_lsra, node, currentLoc);
+            node->gtClearReg(comp);
+
+            // Mark the node's operands as used
+            for (GenTree* operand : node->Operands())
+            {
+                operand->gtLIRFlags &= ~LIR::Flags::IsUnusedValue;
             }
+
+            // If the node produces a value, mark it as unused.
+            if (node->IsValue())
+            {
+                node->gtLIRFlags |= LIR::Flags::IsUnusedValue;
+            }
+
+            currentLoc += 2;
         }
 
-        for (stmt = block->FirstNonPhiDef(); stmt; stmt = stmt->gtNext)
+        for (GenTree* node = m_blockRange.FirstNonPhiNode(), *end = m_blockRange.End(); node != end; node = node->gtNext)
         {
-            if (stmt->gtStmt.gtStmtIsEmbedded())
-                continue;
+            TreeNodeInfoInit(node);
 
-            comp->compCurStmt = stmt;
-
-            TreeNodeInfoInit(stmt);
-
-            // In the special case where a comma node is at the top level, make it consume
-            // its (op2) source
-            GenTreePtr tree = stmt->gtStmt.gtStmtExpr;
-            if (tree->gtOper == GT_COMMA && tree->TypeGet() != TYP_VOID)
+            // If the node produces an unused value, mark it as a local def-use
+            if ((node->gtLIRFlags & LIR::Flags::IsUnusedValue) != 0)
             {
-                tree->gtLsraInfo.srcCount = 1;
+                node->gtLsraInfo.isLocalDefUse = true;
+                node->gtLsraInfo.dstCount = 0;
             }
-            // In the special case where a lclVar node is at the top level, set it as
-            // localDefUse
-            // TODO-Cleanup: This used to be isCandidateLocalRef, but we haven't initialized the
-            // lvLRACandidate field yet.  Fix this.
-            else if (comp->optIsTrackedLocal(tree))
-            {
-                tree->gtLsraInfo.isLocalDefUse = true;
-                tree->gtLsraInfo.dstCount = 0;
-            }
+
 #if 0
             // TODO-CQ: Enable this code after fixing the isContained() logic to not abort for these
             // top-level nodes that throw away their result.
@@ -3729,6 +3726,8 @@ void Lowering::DoPhase()
             }
 #endif
         }
+
+        assert(m_blockRange.CheckLIR(comp, true));
     }
     DBEXEC(VERBOSE, DumpNodeInfoMap());
 }
@@ -3981,17 +3980,12 @@ void Lowering::DumpNodeInfoMap()
 
     for (BasicBlock* block = comp->fgFirstBB; block != nullptr; block = block->bbNext)
     {
-        for (GenTree* stmt = block->FirstNonPhiDef(); stmt != nullptr; stmt = stmt->gtNext)
+        LIR::Range blockRange = LIR::AsRange(block);
+        for (GenTree* node = blockRange.FirstNonPhiNode(), *end = blockRange.End(); node != end; node = node->gtNext)
         {
-            GenTreePtr node;
-            foreach_treenode_execution_order(node, stmt)
-            {
-                if (stmt->gtStmt.gtStmtIsEmbedded())
-                    continue;
-                comp->gtDispTree(node, nullptr, nullptr, true);
-                printf("    +");
-                node->gtLsraInfo.dump(m_lsra);
-            }
+            comp->gtDispTree(node, nullptr, nullptr, true);
+            printf("    +");
+            node->gtLsraInfo.dump(m_lsra);
         }
     }
 }

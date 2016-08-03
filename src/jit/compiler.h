@@ -4538,9 +4538,9 @@ private:
     GenTree *           fgTreeSeqLst;
     GenTree *           fgTreeSeqBeg;
 
-    GenTree*            fgSetTreeSeq      (GenTree* tree, GenTree* prev = nullptr);
-    void                fgSetTreeSeqHelper(GenTree    *   tree);
-    void                fgSetTreeSeqFinish(GenTreePtr     tree);
+    GenTree*            fgSetTreeSeq      (GenTree* tree, GenTree* prev = nullptr, bool isLIR = false);
+    void                fgSetTreeSeqHelper(GenTree    *   tree, bool isLIR);
+    void                fgSetTreeSeqFinish(GenTreePtr     tree, bool isLIR);
     void                fgSetStmtSeq      (GenTree    *   tree);
     void                fgSetBlockOrder   (BasicBlock *   block);
 

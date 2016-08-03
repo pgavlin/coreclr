@@ -848,6 +848,7 @@ GenTree::GenTree(genTreeOps oper, var_types type DEBUGARG(bool largeNode))
     gtOper     = oper;
     gtType     = type;
     gtFlags    = 0;
+    gtLIRFlags = 0;
 #ifdef DEBUG
     gtDebugFlags = 0;
 #endif // DEBUG
