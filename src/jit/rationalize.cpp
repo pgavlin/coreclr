@@ -1023,7 +1023,9 @@ void Rationalizer::RewriteAssignment(LIR::Use& use)
         {
             GenTreeStoreInd* store = new(comp, GT_STOREIND) GenTreeStoreInd(location->TypeGet(), location->gtGetOp1(), value);
 
-            store->gtFlags |= location->gtFlags & GTF_IND_FLAGS;
+            copyFlags(store, assignment, GTF_ALL_EFFECT);
+            copyFlags(store, location, GTF_IND_FLAGS);
+
             if (assignment->IsReverseOp())
             {
                 store->gtFlags |= GTF_REVERSE_OPS;
