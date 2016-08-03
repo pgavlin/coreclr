@@ -845,6 +845,7 @@ void                Compiler::fgRemoveReturnBlock(BasicBlock* block)
     }
 }
 
+// TODO-LIR: remove function, or rewrite?
 //------------------------------------------------------------------------
 // fgReplaceStmt: Replaces the top-level tree of 'stmt' with newTree
 //
@@ -8615,6 +8616,8 @@ GenTreeStmt* Compiler::fgNewStmtFromTree(GenTreePtr tree, IL_OFFSETX offs)
 
 IL_OFFSET Compiler::fgFindBlockILOffset(BasicBlock* block)
 {
+    // TODO(btf): make work for LIR
+    //
 #if defined(DEBUGGING_SUPPORT) || defined(DEBUG)
     for (GenTree* stmt = block->bbTreeList; stmt != nullptr; stmt = stmt->gtNext)
     {
@@ -8748,6 +8751,68 @@ BasicBlock* Compiler::fgSplitBlockAfterStatement(BasicBlock* curr, GenTree* stmt
     {
         assert(curr->bbTreeList == nullptr); // if no tree was given then it better be an empty block
     }
+
+    return newBlock;
+}
+
+//------------------------------------------------------------------------------
+// fgSplitBlockAfterNode - Split the given block, with all code after
+//                         the given node going into the second block.
+//                         This function is only used in LIR.
+//------------------------------------------------------------------------------
+BasicBlock* Compiler::fgSplitBlockAfterNode(BasicBlock* curr, GenTree* node)
+{
+    assert(curr->IsLIR());
+
+    BasicBlock* newBlock = fgSplitBlockAtEnd(curr);
+
+    if (node != nullptr)
+    {
+        newBlock->bbTreeList = node->gtNext;
+        newBlock->bbLastNode = curr->bbLastNode;
+
+        curr->bbLastNode = node;
+
+        // Update the IL offsets of the blocks to match the split.
+
+        assert(newBlock->bbCodeOffs    == BAD_IL_OFFSET);
+        assert(newBlock->bbCodeOffsEnd == BAD_IL_OFFSET);
+
+        // curr->bbCodeOffs remains the same
+        newBlock->bbCodeOffsEnd = curr->bbCodeOffsEnd;
+
+        // Search backwards from the end of the current block looking for the IL offset to use
+        // for the end IL offset for the original block.
+        IL_OFFSET splitPointILOffset = BAD_IL_OFFSET;
+        LIR::Range::ReverseIterator riter;
+        LIR::Range::ReverseIterator riterEnd;
+        LIR::Range currBBRange = LIR::AsRange(curr);
+        for (riter = currBBRange.rbegin(), riterEnd = currBBRange.rend(); riter != riterEnd; ++riter)
+        {
+            if ((*riter)->gtOper == GT_IL_OFFSET)
+            {
+                GenTreeStmt* stmt = (*riter)->AsStmt();
+                if (stmt->gtStmtILoffsx != BAD_IL_OFFSET)
+                {
+                    splitPointILOffset = jitGetILoffs(stmt->gtStmtILoffsx);
+                    break;
+                }
+            }
+        }
+
+        curr->bbCodeOffsEnd  = splitPointILOffset;
+
+        // Also use this as the beginning offset of the next block. Presumably we could/should
+        // look to see if the first node is a GT_IL_OFFSET node, and use that instead.
+        newBlock->bbCodeOffs = splitPointILOffset;
+    }
+    else
+    {
+        assert(curr->bbTreeList == nullptr); // if no node was given then it better be an empty block
+    }
+
+    assert(LIR::AsRange(curr).CheckLIR(this));
+    assert(LIR::AsRange(newBlock).CheckLIR(this));
 
     return newBlock;
 }
@@ -9188,6 +9253,7 @@ AGAIN:
 #endif // DEBUG
 }
 
+// TODO-LIR: remove function, or rewrite?
 /*****************************************************************************
  * fgRemoveLinearOrderDependencies --
  *
@@ -18346,6 +18412,7 @@ GenTreePtr Compiler::fgGetFirstNode(GenTreePtr tree)
     return child;
 }
 
+// TODO-LIR: remove function (use LIR::Range::Remove() instead)
 //------------------------------------------------------------------------
 // fgSnipNode: Remove a single tree node (and not its children, if any) from the execution order.
 //
@@ -18402,6 +18469,7 @@ void Compiler::fgSnipNode(GenTreeStmt* stmt, GenTreePtr node)
     }
 }
 
+// TODO-LIR: remove function (use LIR::Range::Remove() instead)
 //------------------------------------------------------------------------
 // fgSnipInnerNode: Remove a single tree node (and not its children, if any) from the execution order.
 //
@@ -18429,6 +18497,7 @@ void Compiler::fgSnipInnerNode(GenTreePtr node)
     nextNode->gtPrev = prevNode;
 }
 
+// TODO-LIR: remove function. Use LIR::Range::Remove with a range?
 //------------------------------------------------------------------------
 // fgDeleteTreeFromList: Remove an entire tree from the execution order.
 //
@@ -18501,6 +18570,7 @@ bool Compiler::fgTreeIsInStmt(GenTree* tree, GenTreeStmt* stmt)
     return false;
 }
 
+// TODO-LIR: remove function? Is it used in tree mode?
 //------------------------------------------------------------------------
 // fgInsertTreeInListAfter: Insert 'tree' in the execution order list before 'insertionPoint'.
 // 'stmt' is required, so we can insert before the first node in the statement.
@@ -18544,6 +18614,7 @@ void Compiler::fgInsertTreeInListBefore(GenTree* tree, GenTree* insertionPoint, 
     }
 }
 
+// TODO-LIR: remove function? Is it used in tree mode?
 //------------------------------------------------------------------------
 // fgInsertTreeInListAfter: Insert tree in execution order list after 'insertionPoint'.
 // 'stmt' is required, so we can insert after the last node in the statement.
@@ -18579,6 +18650,7 @@ void Compiler::fgInsertTreeInListAfter(GenTree* tree, GenTree* insertionPoint, G
     }
 }
 
+// TODO-LIR: remove function
 //------------------------------------------------------------------------
 // fgInsertTreeBeforeAsEmbedded: Insert a tree before 'insertionPoint' as an embedded statement under 'stmt'.
 //
@@ -18605,6 +18677,7 @@ GenTreeStmt* Compiler::fgInsertTreeBeforeAsEmbedded(GenTree* tree, GenTree* inse
     return result;
 }
 
+// TODO-LIR: remove function
 //------------------------------------------------------------------------
 // fgInsertTreeAfterAsEmbedded: Insert a tree after 'insertionPoint' as an embedded statement under 'stmt'.
 // If it is inserted after all nodes in the given tree, just make it a new statement.
@@ -20723,12 +20796,13 @@ void Compiler::fgDebugCheckNodeLinks(BasicBlock* block, GenTree* node)
     if (block->IsLIR())
     {
         LIR::AsRange(block).CheckLIR(this);
+        // TODO: return?
     }
 
     GenTreeStmt* stmt = node->AsStmt();
 
     assert(fgStmtListThreaded);
-    if (fgOrder == FGOrderLinear)
+    if (fgOrder == FGOrderLinear)   // remove for LIR?
     {
         fgDebugCheckLinearNodeLinks(block, stmt);
         return;
@@ -20890,6 +20964,7 @@ unsigned Compiler::fgDebugCheckLinearTree(BasicBlock* block,
     return nodeCount;
 }
 
+// TODO-LIR: remove function?
 //------------------------------------------------------------------------
 // fgDebugCheckLinearNodeLinks: DEBUG routine to check correctness of the internal
 //    gtNext, gtPrev threading of a statement.
@@ -21179,6 +21254,7 @@ void Compiler::fgDebugCheckBlockLinks()
 #endif // DEBUG
 /*****************************************************************************/
 
+// TODO-LIR: remove function
 //------------------------------------------------------------------------
 // fgNodeContainsEmbeddedStatement:
 //    Predicate that verifies whether the given tree has an embedded statement
@@ -21214,6 +21290,7 @@ bool Compiler::fgNodeContainsEmbeddedStatement(GenTree* tree, GenTreeStmt* topLe
     return false;
 }
 
+// TODO-LIR: remove function
 //------------------------------------------------------------------------
 // fgRemoveContainedEmbeddedStatements:
 //    If a tree contains a subtree, recursively remove all embedded

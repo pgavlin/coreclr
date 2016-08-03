@@ -3515,6 +3515,7 @@ public :
     BasicBlock*         fgSplitBlockAtBeginning    (BasicBlock* curr);
     BasicBlock*         fgSplitBlockAtEnd          (BasicBlock* curr);
     BasicBlock*         fgSplitBlockAfterStatement (BasicBlock* curr, GenTree *stmt);
+    BasicBlock*         fgSplitBlockAfterNode      (BasicBlock* curr, GenTree* node);       // for LIR
     BasicBlock*         fgSplitEdge                (BasicBlock* curr, BasicBlock* succ);
 
     GenTreeStmt*        fgNewStmtFromTree       (GenTreePtr tree, BasicBlock* block, 
