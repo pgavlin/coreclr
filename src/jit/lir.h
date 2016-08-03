@@ -88,6 +88,8 @@ public:
         GenTree*& FirstNode() const;
         GenTree*& LastNode() const;
 
+        Range GetMarkedRange(unsigned markCount, GenTree* start, bool* isClosed, unsigned* sideEffects) const;
+
     public:
         class Iterator
         {
@@ -214,6 +216,8 @@ public:
         bool TryGetUse(GenTree* node, Use* use);
 
         Range GetTreeRange(GenTree* root, bool* isClosed) const;
+        Range GetTreeRange(GenTree* root, bool* isClosed, unsigned* sideEffects) const;
+        Range GetRangeOfOperandTrees(GenTree* root, bool* isClosed, unsigned* sideEffects) const;
 
 #ifdef DEBUG
         bool ContainsNode(GenTree* node) const;

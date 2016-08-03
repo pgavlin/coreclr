@@ -3612,8 +3612,6 @@ void Lowering::DoPhase()
     }
     comp->EndPhase(PHASE_LOWERING_DECOMP);
 
-    NYI("later phases cannot yet process LIR!");
-
     comp->fgLocalVarLiveness();
     // local var liveness can delete code, which may create empty blocks
     if  (!comp->opts.MinOpts() && !comp->opts.compDbgCode)
@@ -3634,6 +3632,8 @@ void Lowering::DoPhase()
         comp->fgDispBasicBlocks(true);
     }
 #endif
+
+    NYI("later phases cannot yet process LIR!");
 
     // The initialization code for the TreeNodeInfo map was initially part of a single full IR
     // traversal and it has been split because the order of traversal performed by fgWalkTreePost
