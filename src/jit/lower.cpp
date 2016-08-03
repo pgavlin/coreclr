@@ -2330,8 +2330,7 @@ void Lowering::InsertPInvokeMethodProlog()
     }
 
     comp->fgMorphTree(store);
-    firstBlockRange.InsertAfter(LIR::SeqTree(comp, store), insertionPoint);
-    insertionPoint = store;
+    firstBlockRange.InsertBefore(LIR::SeqTree(comp, store), insertionPoint);
 
     DISPTREE(store);
 
@@ -2345,8 +2344,7 @@ void Lowering::InsertPInvokeMethodProlog()
                                                     callFrameInfo.offsetOfCallSiteSP);
     storeSP->gtOp1 = PhysReg(REG_SPBASE);
 
-    firstBlockRange.InsertAfter(LIR::SeqTree(comp, storeSP), insertionPoint);
-    insertionPoint = storeSP;
+    firstBlockRange.InsertBefore(LIR::SeqTree(comp, storeSP), insertionPoint);
 
     DISPTREE(storeSP);
 
@@ -2360,8 +2358,7 @@ void Lowering::InsertPInvokeMethodProlog()
                                                     callFrameInfo.offsetOfCalleeSavedFP);
     storeFP->gtOp1 = PhysReg(REG_FPBASE);
 
-    firstBlockRange.InsertAfter(LIR::SeqTree(comp, storeFP), insertionPoint);
-    insertionPoint = storeFP;
+    firstBlockRange.InsertBefore(LIR::SeqTree(comp, storeFP), insertionPoint);
 
     DISPTREE(storeFP);
 
@@ -2372,7 +2369,7 @@ void Lowering::InsertPInvokeMethodProlog()
         // Push a frame - if we are NOT in an IL stub, this is done right before the call
         // The init routine sets InlinedCallFrame's m_pNext, so we just set the thead's top-of-stack
         GenTree* frameUpd = CreateFrameLinkUpdate(PushFrame);
-        firstBlockRange.InsertAfter(LIR::SeqTree(comp, frameUpd), insertionPoint);
+        firstBlockRange.InsertBefore(LIR::SeqTree(comp, frameUpd), insertionPoint);
         DISPTREE(frameUpd);
     }
 }
