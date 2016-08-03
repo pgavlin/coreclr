@@ -120,61 +120,50 @@ bool Lowering::IsSafeToContainMem(GenTree* parentNode, GenTree* childNode)
 //------------------------------------------------------------------------
 
 // This is the main entry point for Lowering.  
-void Lowering::LowerNode(GenTree* node)
+GenTree* Lowering::LowerNode(GenTree* node)
 {
     assert(node != nullptr);
     switch (node->gtOper)
     {
     case GT_IND:
         TryCreateAddrMode(LIR::Use(m_blockRange, &node->gtOp.gtOp1, node), true);
-        break;
+        return node;
 
     case GT_STOREIND:
-        LowerStoreInd(node);
-        break;
+        return LowerStoreInd(node);
 
     case GT_ADD:
-        LowerAdd(node);
-        break;
+        return LowerAdd(node);
         
     case GT_UDIV:
     case GT_UMOD:
-        LowerUnsignedDivOrMod(node);
-        break;
+        return LowerUnsignedDivOrMod(node);
 
     case GT_DIV:
     case GT_MOD:
-        LowerSignedDivOrMod(node);
-        break;
+        return LowerSignedDivOrMod(node);
 
     case GT_SWITCH:
-        LowerSwitch(node);
-        break;
+        return LowerSwitch(node);
 
     case GT_CALL:
-        LowerCall(node);
-        break;
+        return LowerCall(node);
 
     case GT_JMP:
-        LowerJmpMethod(node);
-        break;
+        return LowerJmpMethod(node);
 
     case GT_RETURN:
-        LowerRet(node);
-        break;
+        return LowerRet(node);
 
     case GT_CAST:
-        LowerCast(node);
-        break;
+        return LowerCast(node);
 
     case GT_ARR_ELEM:
-        LowerArrElem(node);
-        break;
+        return LowerArrElem(node);
 
     case GT_ROL:
     case GT_ROR:
-        LowerRotate(node);
-        break;
+        return LowerRotate(node);
 
 #ifdef FEATURE_SIMD
     case GT_SIMD:
@@ -223,6 +212,8 @@ void Lowering::LowerNode(GenTree* node)
     default:
         break;
     }
+
+    return node;
 }
 
 /**  -- Switch Lowering --
@@ -291,7 +282,7 @@ void Lowering::LowerNode(GenTree* node)
  *     InstrGroups downstream.
  */
 
-void Lowering::LowerSwitch(GenTree* node)
+GenTree* Lowering::LowerSwitch(GenTree* node)
 {
     unsigned     jumpCnt;
     unsigned     targetCnt;
@@ -364,7 +355,7 @@ void Lowering::LowerSwitch(GenTree* node)
         switchBBRange.InsertAfter(store, node);
         switchBBRange.Remove(node);
 
-        return;
+        return store;
     }
 
     noway_assert(jumpCnt >= 2);
@@ -648,6 +639,9 @@ void Lowering::LowerSwitch(GenTree* node)
     // Get rid of the GT_SWITCH(temp).
     switchBBRange.Remove(node->gtOp.gtOp1);
     switchBBRange.Remove(node);
+
+    // TODO(pdg): is this correct?
+    return switchBBRange.EndExclusive();
 }
 
 // NOTE: this method deliberately does not update the call arg table. It must only
@@ -1152,7 +1146,7 @@ GenTree* Lowering::AddrGen(void* addr, regNumber reg)
 //   - adding nodes for other operations that occur after the call sequence starts and before
 //        control transfer occurs (profiling and tail call helpers, pinvoke incantations)
 //
-void Lowering::LowerCall(GenTree* node)
+GenTree* Lowering::LowerCall(GenTree* node)
 {
     GenTreeCall* call = node->AsCall();
 
@@ -1283,6 +1277,8 @@ void Lowering::LowerCall(GenTree* node)
     JITDUMP("lowering call (after):\n");
     DISPTREE(call);
     JITDUMP("\n");
+
+    return call;
 }
 
 // Though the below described issue gets fixed in intellitrace dll of VS2015 (a.k.a Dev14), 
@@ -1874,7 +1870,7 @@ GenTree* Lowering::LowerTailCallViaHelper(GenTreeCall* call, GenTree *callTarget
 }
 
 // Lower "jmp <method>" tail call to insert PInvoke method epilog if required.
-void Lowering::LowerJmpMethod(GenTree* jmp)
+GenTree* Lowering::LowerJmpMethod(GenTree* jmp)
 {
     assert(jmp->OperGet() == GT_JMP);
 
@@ -1888,10 +1884,12 @@ void Lowering::LowerJmpMethod(GenTree* jmp)
     {
         InsertPInvokeMethodEpilog(comp->compCurBB DEBUGARG(jmp));
     }
+
+    return jmp;
 }
 
 // Lower GT_RETURN node to insert PInvoke method epilog if required.
-void Lowering::LowerRet(GenTree* ret)
+GenTree* Lowering::LowerRet(GenTree* ret)
 {
     assert(ret->OperGet() == GT_RETURN);
 
@@ -1904,6 +1902,8 @@ void Lowering::LowerRet(GenTree* ret)
     {
         InsertPInvokeMethodEpilog(comp->compCurBB DEBUGARG(ret));
     }
+
+    return ret;
 }
 
 GenTree* Lowering::LowerDirectCall(GenTreeCall* call)
@@ -3046,7 +3046,7 @@ bool Lowering::AreSourcesPossiblyModified(GenTree* addr, GenTree* base, GenTree*
 //    use:     the use of the address we want to transform
 //    isIndir: true if this addressing mode is the child of an indir
 //
-void Lowering::TryCreateAddrMode(LIR::Use&& use, bool isIndir)
+GenTree* Lowering::TryCreateAddrMode(LIR::Use&& use, bool isIndir)
 {
     GenTree*    addr   = use.Def();
     GenTreePtr  base   = nullptr;
@@ -3067,13 +3067,13 @@ void Lowering::TryCreateAddrMode(LIR::Use&& use, bool isIndir)
         // this is just a reg-const add
         if (index == nullptr)
         {
-            return;
+            return addr;
         }
 
         // this is just a reg-reg add
         if (scale == 1 && offset == 0)
         {
-            return;
+            return addr;
         }
     }
 
@@ -3081,7 +3081,7 @@ void Lowering::TryCreateAddrMode(LIR::Use&& use, bool isIndir)
     if (!doAddrMode || AreSourcesPossiblyModified(addr, base, index))
     {
         JITDUMP("  No addressing mode\n");
-        return;
+        return addr;
     }
         
     GenTreePtr arrLength = NULL;
@@ -3143,6 +3143,8 @@ void Lowering::TryCreateAddrMode(LIR::Use&& use, bool isIndir)
 
     // Replace the original address node with the addrMode.
     use.ReplaceWith(comp, addrMode);
+
+    return addrMode;
 }
 
 //------------------------------------------------------------------------
@@ -3151,29 +3153,29 @@ void Lowering::TryCreateAddrMode(LIR::Use&& use, bool isIndir)
 // Arguments:
 //    node - the node we care about
 //
-void Lowering::LowerAdd(GenTree* node)
+GenTree* Lowering::LowerAdd(GenTree* node)
 {
 #ifdef _TARGET_ARMARCH_
     // For ARM architectures we don't have the LEA instruction
     // therefore we won't get much benefit from doing this.
-    return;
+    return node;
 #else // _TARGET_ARMARCH_
     if (!varTypeIsIntegralOrI(node))
-        return;
+        return node;
 
     LIR::Use use;
     if (!m_blockRange.TryGetUse(node, &use))
-        return;
+        return node;
 
     // if this is a child of an indir, let the parent handle it
     if (use.User()->OperIsIndir())
-        return;
+        return node;
 
     // if there is a chain of adds, only look at the topmost one
     if (use.User()->gtOper == GT_ADD)
-        return;
+        return node;
 
-    TryCreateAddrMode(std::move(use), false);
+    return TryCreateAddrMode(std::move(use), false);
 #endif // !_TARGET_ARMARCH_
 }
 
@@ -3184,7 +3186,7 @@ void Lowering::LowerAdd(GenTree* node)
 // Arguments:
 //    node - pointer to the GT_UDIV/GT_UMOD node to be lowered
 //
-void Lowering::LowerUnsignedDivOrMod(GenTree* node)
+GenTree* Lowering::LowerUnsignedDivOrMod(GenTree* node)
 {
     assert((node->OperGet() == GT_UDIV) || (node->OperGet() == GT_UMOD));
 
@@ -3213,6 +3215,8 @@ void Lowering::LowerUnsignedDivOrMod(GenTree* node)
             divisor->gtIntCon.SetIconValue(divisorValue);
         }
     }
+
+    return node;
 }
 
 //------------------------------------------------------------------------
@@ -3222,7 +3226,7 @@ void Lowering::LowerUnsignedDivOrMod(GenTree* node)
 // Arguments:
 //    node - pointer to node we care about
 //
-void Lowering::LowerSignedDivOrMod(GenTreePtr node)
+GenTree* Lowering::LowerSignedDivOrMod(GenTreePtr node)
 {
     assert((node->OperGet() == GT_DIV) || (node->OperGet() == GT_MOD));
 
@@ -3230,7 +3234,7 @@ void Lowering::LowerSignedDivOrMod(GenTreePtr node)
     GenTree* divisor = divMod->gtGetOp2();
 
     if (!divisor->IsCnsIntOrI())
-        return; // no transformations to make
+        return node; // no transformations to make
 
     const var_types type = divMod->TypeGet();
     assert((type == TYP_INT) || (type == TYP_LONG));
@@ -3242,7 +3246,7 @@ void Lowering::LowerSignedDivOrMod(GenTreePtr node)
         // We shouldn't see a divmod with constant operands here but if we do then it's likely 
         // because optimizations are disabled or it's a case that's supposed to throw an exception. 
         // Don't optimize this.
-        return;
+        return node;
     }
 
     ssize_t divisorValue = divisor->gtIntCon.IconValue();
@@ -3256,7 +3260,7 @@ void Lowering::LowerSignedDivOrMod(GenTreePtr node)
         // case so optimizing this case would break C# code.
 
         // A runtime check could be used to handle this case but it's probably too rare to matter.
-        return;
+        return node;
     }
 
     bool isDiv = divMod->OperGet() == GT_DIV;
@@ -3269,21 +3273,21 @@ void Lowering::LowerSignedDivOrMod(GenTreePtr node)
             // If the divisor is the minimum representable integer value then we can use a compare, 
             // the result is 1 iff the dividend equals divisor.
             divMod->SetOper(GT_EQ);
-            return;
+            return node;
         }
     }
 
     size_t absDivisorValue = (divisorValue == SSIZE_T_MIN) ? static_cast<size_t>(divisorValue) : static_cast<size_t>(abs(divisorValue));
 
     if (!isPow2(absDivisorValue))
-        return;
+        return node;
 
     // We're committed to the conversion now. Go find the use.
     LIR::Use use;
     if (!m_blockRange.TryGetUse(node, &use))
     {
         assert(!"signed DIV/MOD node is unused");
-        return;
+        return node;
     }
 
     // We need to use the dividend node multiple times so its value needs to be
@@ -3367,6 +3371,8 @@ void Lowering::LowerSignedDivOrMod(GenTreePtr node)
 
     // replace the original divmod node with the new divmod tree
     use.ReplaceWith(comp, newDivMod);
+
+    return newDivMod;
 }
 
 //------------------------------------------------------------------------
@@ -3376,7 +3382,7 @@ void Lowering::LowerSignedDivOrMod(GenTreePtr node)
 // Arguments:
 //    node - the node we care about
 //
-void Lowering::LowerStoreInd(GenTree* node)
+GenTree* Lowering::LowerStoreInd(GenTree* node)
 {
     assert(node != nullptr);
     assert(node->OperGet() == GT_STOREIND);
@@ -3389,6 +3395,8 @@ void Lowering::LowerStoreInd(GenTree* node)
     // TODO(pdg): could this be conditional on whether or not TryCreateAddrMode
     // actually created an address mode?
     node->AsStoreInd()->SetRMWStatusDefault();
+
+    return node;
 }
 
 //------------------------------------------------------------------------
@@ -3434,8 +3442,7 @@ void Lowering::LowerStoreInd(GenTree* node)
 //    reference to NewTemp), because that provides more accurate lifetimes.
 //    There may be 1, 2 or 3 dimensions, with 1, 2 or 3 arrMDIdx nodes, respectively.
 //
-void
-Lowering::LowerArrElem(GenTree* node)
+GenTree* Lowering::LowerArrElem(GenTree* node)
 {
     // This will assert if we don't have an ArrElem node
     GenTreeArrElem* arrElem = node->AsArrElem();
@@ -3532,6 +3539,8 @@ Lowering::LowerArrElem(GenTree* node)
     JITDUMP("Results of lowering ArrElem:\n");
     DISPTREE(leaNode);
     JITDUMP("\n\n");
+
+    return leaNode;
 }
 
 void Lowering::DoPhase()
@@ -3733,9 +3742,15 @@ void Lowering::LowerBlock(BasicBlock* block)
     m_block = block;
     m_blockRange = LIR::AsRange(block);
 
-    for (GenTree* node = m_blockRange.FirstNonPhiNode(), *end = m_blockRange.End(); node != end; node = node->gtNext)
+    for (GenTree* node = m_blockRange.FirstNonPhiNode(), *end = m_blockRange.End(), *next; node != end; node = next)
     {
-        LowerNode(node);
+        node = LowerNode(node);
+
+        assert(node != nullptr || node == end);
+        if (node != nullptr)
+        {
+            next = node->gtNext;
+        }
     }
 
     assert(m_blockRange.CheckLIR(comp));

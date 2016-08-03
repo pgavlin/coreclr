@@ -29,8 +29,9 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 #include "lower.h"
 
 // xarch supports both ROL and ROR instructions so no lowering is required.
-void Lowering::LowerRotate(GenTreePtr tree)
+GenTree* Lowering::LowerRotate(GenTreePtr tree)
 {
+    return tree;
 }
 
 // there is not much lowering to do with storing a local but 
@@ -3252,7 +3253,7 @@ void Lowering::LowerCmp(GenTreePtr tree)
  * system.windows.forms, scimark, fractals, bio mums). If we ever find evidence that
  * doing this optimization is a win, should consider generating in-lined code.
  */
-void Lowering::LowerCast(GenTree* tree)
+GenTree* Lowering::LowerCast(GenTree* tree)
 {
     assert(tree->OperGet() == GT_CAST);
 
@@ -3314,6 +3315,8 @@ void Lowering::LowerCast(GenTree* tree)
         tree->gtOp.gtOp1 = tmp;
         m_blockRange.InsertAfter(tmp, op1);
     }
+
+    return tree;
 }
 
  //----------------------------------------------------------------------------------------------

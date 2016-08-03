@@ -1829,7 +1829,7 @@ void Lowering::LowerCmp(GenTreePtr tree)
  * i) GT_CAST(float/double, int type with overflow detection) 
  *
  */
-void Lowering::LowerCast(GenTree* tree) 
+GenTree* Lowering::LowerCast(GenTree* tree)
 {
     assert(tree->OperGet() == GT_CAST);
 
@@ -1870,9 +1870,11 @@ void Lowering::LowerCast(GenTree* tree)
         tree->gtOp.gtOp1 = tmp;
         m_blockRange.InsertAfter(tmp, op1);
     }
+
+    return tree;
 }
 
-void Lowering::LowerRotate(GenTreePtr tree)
+GenTree* Lowering::LowerRotate(GenTreePtr tree)
 {
     if (tree->OperGet() == GT_ROL)
     {
@@ -1896,6 +1898,8 @@ void Lowering::LowerRotate(GenTreePtr tree)
         }
         tree->ChangeOper(GT_ROR);
     }
+
+    return tree;
 }
 
 // returns true if the tree can use the read-modify-write memory instruction form

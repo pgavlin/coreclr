@@ -1139,7 +1139,9 @@ bool LIR::Range::CheckLIR(Compiler* compiler, bool checkUnusedValues) const
             {
                 // Calls may contain "uses" of nodes that do not produce a value. This is an artifact of
                 // the HIR and should probably be fixed, but doing so is an unknown amount of work.
-                assert(node->OperGet() == GT_CALL);
+                //
+                // TODO(pdg): Switch tables may also contains such uses. Find out why.
+                assert(node->OperGet() == GT_CALL || node->OperGet() == GT_SWITCH_TABLE);
                 continue;
             }
 

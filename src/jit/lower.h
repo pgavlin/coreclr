@@ -50,21 +50,17 @@ public:
 #endif // _TARGET_64BIT_
 
 private:
-    // Friends
-    static Compiler::fgWalkResult LowerNodeHelper   (GenTreePtr* ppTree, Compiler::fgWalkData* data);
-    static Compiler::fgWalkResult TreeInfoInitHelper(GenTreePtr* ppTree, Compiler::fgWalkData* data);
-    
     // Member Functions
     void LowerBlock(BasicBlock* block);
-    void LowerNode(GenTree* node);
+    GenTree* LowerNode(GenTree* node);
     void CheckVSQuirkStackPaddingNeeded(GenTreeCall* call);
 
     // ------------------------------
     // Call Lowering
     // ------------------------------
-    void LowerCall                    (GenTree*     call);
-    void LowerJmpMethod               (GenTree*     jmp);
-    void LowerRet                     (GenTree*     ret);
+    GenTree* LowerCall                (GenTree*     call);
+    GenTree* LowerJmpMethod           (GenTree*     jmp);
+    GenTree* LowerRet                 (GenTree*     ret);
     GenTree* LowerDelegateInvoke      (GenTreeCall* call);
     GenTree* LowerIndirectNonvirtCall (GenTreeCall* call);
     GenTree* LowerDirectCall          (GenTreeCall* call);
@@ -204,16 +200,16 @@ private:
     void DumpNodeInfoMap();
 
     // Per tree node member functions
-    void LowerStoreInd(GenTree* node);
-    void LowerAdd(GenTree* node);
-    void LowerUnsignedDivOrMod(GenTree* node);
-    void LowerSignedDivOrMod(GenTree* node);
+    GenTree* LowerStoreInd(GenTree* node);
+    GenTree* LowerAdd(GenTree* node);
+    GenTree* LowerUnsignedDivOrMod(GenTree* node);
+    GenTree* LowerSignedDivOrMod(GenTree* node);
 
-    void TryCreateAddrMode(LIR::Use&& use, bool isIndir);
+    GenTree* TryCreateAddrMode(LIR::Use&& use, bool isIndir);
     void AddrModeCleanupHelper(GenTreeAddrMode* addrMode, GenTree* node);
 
-    void LowerSwitch(GenTree* node);
-    void LowerCast(GenTree* node);
+    GenTree* LowerSwitch(GenTree* node);
+    GenTree* LowerCast(GenTree* node);
 
 #if defined(_TARGET_XARCH_)
     void SetMulOpCounts(GenTreePtr tree);
@@ -229,8 +225,8 @@ private:
     void LowerStoreLoc(GenTreeLclVarCommon* tree);
     void SetIndirAddrOpCounts(GenTree *indirTree);
     void LowerGCWriteBarrier(GenTree *tree);
-    void LowerArrElem(GenTree* node);
-    void LowerRotate(GenTree *tree);
+    GenTree* LowerArrElem(GenTree* node);
+    GenTree* LowerRotate(GenTree *tree);
 
     // Utility functions
     void MorphBlkIntoHelperCall         (GenTreePtr pTree, GenTreePtr treeStmt);
