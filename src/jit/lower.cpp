@@ -2322,6 +2322,10 @@ void Lowering::InsertPInvokeMethodProlog()
     store->gtFlags |= GTF_VAR_DEF;
 
     GenTree* insertionPoint = m_blockRange.FirstNonPhiOrCatchArgNode();
+    if (insertionPoint == nullptr)
+    {
+        insertionPoint = m_blockRange.EndExclusive();
+    }
 
     comp->fgMorphTree(store);
     m_blockRange.InsertAfter(LIR::SeqTree(comp, store), insertionPoint);
@@ -2452,13 +2456,12 @@ void Lowering::InsertPInvokeCallProlog(GenTreeCall* call)
 {
     JITDUMP("======= Inserting PInvoke call prolog\n");
 
-    // TODO(pdg): This code relies on tree order when it calls fgGetFirstNode. NYI out for now.
-
     GenTree* insertBefore = call;
     if (call->gtCallType == CT_INDIRECT)
     {
-        NYI("use of tree order in lowering!");
-        insertBefore = comp->fgGetFirstNode(call->gtCallAddr);
+        bool isClosed;
+        insertBefore = m_blockRange.GetTreeRange(call->gtCallAddr, &isClosed).Begin();
+        assert(isClosed);
     }
 
     const CORINFO_EE_INFO::InlinedCallFrameInfo& callFrameInfo = comp->eeGetEEInfo()->inlinedCallFrameInfo;

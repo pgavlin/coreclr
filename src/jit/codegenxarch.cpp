@@ -638,7 +638,8 @@ void                CodeGen::genCodeForBBlist()
 #ifdef DEBUGGING_SUPPORT
         IL_OFFSETX currentILOffset = BAD_IL_OFFSET;
 #endif
-        for (GenTree* node : LIR::AsRange(block))
+        LIR::Range blockRange = LIR::AsRange(block);
+        for (GenTree* node = blockRange.FirstNonPhiNode(), *end = blockRange.End(); node != end; node = node->gtNext)
         {
 #ifdef DEBUGGING_SUPPORT
             // Do we have a new IL offset?

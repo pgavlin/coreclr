@@ -1177,18 +1177,46 @@ Compiler::fgWalkResult Rationalizer::RewriteNode(GenTree** useEdge, ArrayStack<G
 
     case GT_COMMA:
         {
-            // Commas are replaced with their right-hand side unless the RHS is a true NOP, in which case
-            // they are replaced by their LHS.
-
-            // TODO: drop range defined by LHS if it is side-effect-free.
-
-            GenTree* replacement = node->gtGetOp2();
-            if (replacement->IsNothingNode())
+            GenTree* op1 = node->gtGetOp1();
+            if ((op1->gtFlags & GTF_ALL_EFFECT) == 0)
             {
-                replacement = node->gtGetOp1();
+                // The LHS has no side effects. Remove it.
+                bool isClosed = false;
+                unsigned sideEffects = 0;
+                LIR::Range lhsRange = m_range.GetTreeRange(op1, &isClosed, &sideEffects);
+
+                // None of the transforms performed herein violate tree order, so these
+                // should always be true.
+                assert(isClosed);
+                assert((sideEffects & GTF_ALL_EFFECT) == 0);
+
+                m_range.Remove(lhsRange);
             }
 
-            use.ReplaceWith(comp, replacement);
+            GenTree* replacement = node->gtGetOp2();
+            if (!use.IsDummyUse())
+            {
+                use.ReplaceWith(comp, replacement);
+            }
+            else
+            {
+                // This is a top-level comma. If the RHS has no side effects we can remove
+                // it as well.
+                if ((replacement->gtFlags & GTF_ALL_EFFECT) == 0)
+                {
+                    bool isClosed = false;
+                    unsigned sideEffects = 0;
+                    LIR::Range rhsRange = m_range.GetTreeRange(replacement, &isClosed, &sideEffects);
+
+                    // None of the transforms performed herein violate tree order, so these
+                    // should always be true.
+                    assert(isClosed);
+                    assert((sideEffects & GTF_ALL_EFFECT) == 0);
+
+                    m_range.Remove(rhsRange);
+                }
+            }
+
             m_range.Remove(node);
         }
         break;

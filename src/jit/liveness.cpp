@@ -1953,7 +1953,13 @@ VARSET_VALRET_TP    Compiler::fgComputeLifeLIR(VARSET_VALARG_TP lifeArg, BasicBl
     noway_assert(VarSetOps::Equal(this, VarSetOps::Intersection(this, keepAliveVars, life), keepAliveVars));
 
     LIR::Range blockRange = LIR::AsRange(block);
-    for (GenTree* node = blockRange.EndExclusive(), *next = nullptr; node != nullptr; node = next)
+    GenTree* firstNonPhiNode = blockRange.FirstNonPhiNode();
+    if (firstNonPhiNode == nullptr)
+    {
+        return life;
+    }
+
+    for (GenTree* node = blockRange.EndExclusive(), *next = nullptr, *end = firstNonPhiNode->gtPrev; node != end; node = next)
     {
         next = node->gtPrev;
 
