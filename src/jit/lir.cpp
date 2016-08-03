@@ -506,15 +506,26 @@ GenTree* LIR::Range::FirstNonPhiNode() const
 {
     assert(IsValid());
 
-    for (GenTree* node : *this)
+    GenTree* node, *end;
+    for (node = Begin(), end = End(); node != end; node = node->gtNext)
     {
-        if ((node->OperGet() != GT_PHI_ARG) && (node->OperGet() != GT_PHI) && !node->IsPhiDefn())
+        if (node->OperGet() == GT_PHI_ARG)
         {
-            return node;
+            continue;
         }
+        else if (node->OperGet() == GT_PHI)
+        {
+            continue;
+        }
+        else if (node->IsPhiDefn())
+        {
+            continue;
+        }
+
+        break;
     }
 
-    return End();
+    return node;
 }
 
 //------------------------------------------------------------------------
@@ -526,16 +537,22 @@ GenTree* LIR::Range::FirstNonPhiOrCatchArgNode() const
 {
     assert(IsValid());
 
-    for (GenTree* node = FirstNonPhiNode(), *end = End(); node != end; node = node->gtNext)
+    GenTree* node, *end;
+    for (node = FirstNonPhiNode(), end = End(); node != end; node = node->gtNext)
     {
-        if ((node->OperGet() != GT_CATCH_ARG) &&
-            ((node->OperGet() != GT_STORE_LCL_VAR) || (node->gtOp.gtOp1->OperGet() != GT_CATCH_ARG)))
+        if (node->OperGet() == GT_CATCH_ARG)
         {
-            return node;
+            continue;
         }
+        else if ((node->OperGet() == GT_STORE_LCL_VAR) && (node->gtGetOp1()->OperGet() == GT_CATCH_ARG))
+        {
+            continue;
+        }
+
+        break;
     }
 
-    return End();
+    return node;
 }
 
 //------------------------------------------------------------------------
