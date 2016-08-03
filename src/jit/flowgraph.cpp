@@ -17616,8 +17616,15 @@ BasicBlock*         Compiler::fgAddCodeRef(BasicBlock*      srcBlk,
     tree = fgMorphArgs(tree);
 
     // Store the tree in the new basic block.
-
-    fgInsertStmtAtEnd(newBlk, fgNewStmtFromTree(tree));
+    assert(!srcBlk->isEmpty());
+    if (!srcBlk->IsLIR())
+    {
+        fgInsertStmtAtEnd(newBlk, fgNewStmtFromTree(tree));
+    }
+    else
+    {
+        LIR::AsRange(newBlk).InsertAtEnd(LIR::SeqTree(this, tree));
+    }
 
     return  add->acdDstBlk;
 }
