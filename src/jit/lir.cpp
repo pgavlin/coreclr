@@ -1198,6 +1198,7 @@ bool LIR::Range::CheckLIR(Compiler* compiler, bool checkUnusedValues) const
 //------------------------------------------------------------------------
 // LIR::EmptyRange: Constructs and returns an empty range.
 //
+// static
 LIR::Range LIR::EmptyRange()
 {
     return Range(static_cast<GenTree*>(nullptr), static_cast<GenTree*>(nullptr));
@@ -1211,9 +1212,22 @@ LIR::Range LIR::EmptyRange()
 //    firstNode - The first node in the range. Must precede lastNode.
 //    lastNode - The last node in the range. Must follow firstNode.
 //
+// static
 LIR::Range LIR::AsRange(GenTree* firstNode, GenTree* lastNode)
 {
     return Range(firstNode, lastNode);
+}
+
+//------------------------------------------------------------------------
+// LIR::AsRange: Constructs and returns a range given a sequenced HIR tree.
+//
+// Arguments:
+//    tree - The sequenced HIR tree.
+//
+// static
+LIR::Range LIR::AsRange(Compiler* compiler, GenTree* tree)
+{
+    return Range(compiler->fgGetFirstNode(tree), tree);
 }
 
 //------------------------------------------------------------------------

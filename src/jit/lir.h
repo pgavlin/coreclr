@@ -236,6 +236,7 @@ public:
 public:
     static Range EmptyRange();
     static Range AsRange(GenTree* firstNode, GenTree* lastNode);
+    static Range AsRange(Compiler* compiler, GenTree* tree);
     static Range SeqTree(Compiler* compiler, GenTree* tree);
     static void DecRefCnts(Compiler* compiler, BasicBlock* block, const Range& range);
 
