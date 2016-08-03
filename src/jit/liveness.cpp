@@ -488,7 +488,7 @@ void Compiler::fgPerStatementLocalVarLiveness(GenTree* startNode, GenTree* asgdL
     }
 }
 
-#endif // LEGACY_BACKEND
+#endif // !LEGACY_BACKEND
 
 /*****************************************************************************/
 void                Compiler::fgPerBlockLocalVarLiveness()
@@ -631,13 +631,16 @@ void                Compiler::fgPerBlockLocalVarLiveness()
 
                 // We must have walked to the end of this statement.
                 noway_assert(!tree);
-#else
+#else // !LEGACY_BACKEND
                 fgPerStatementLocalVarLiveness(stmt->gtStmt.gtStmtList, asgdLclVar);
-#endif // LEGACY_BACKEND
+#endif // !LEGACY_BACKEND
             }
         }
         else
         {
+#ifdef LEGACY_BACKEND
+            unreached();
+#else // !LEGACY_BACKEND
             // NOTE: the `asgdLclVar` analysis done above is not correct for LIR: it depends
             // on all of the nodes that precede `asgdLclVar` in execution order to factor into the
             // dataflow for the value being assigned to the local var, which is not necessarily the
@@ -647,6 +650,7 @@ void                Compiler::fgPerBlockLocalVarLiveness()
             {
                 fgPerNodeLocalVarLiveness(node, nullptr);
             }
+#endif // !LEGACY_BACKEND
         }
 
         /* Get the TCB local and mark it as used */
@@ -3037,7 +3041,11 @@ void                Compiler::fgInterBlockLocalVarLiveness()
         }
         else
         {
+#ifdef LEGACY_BACKEND
+            unreached();
+#else // !LEGACY_BACKEND
             VarSetOps::AssignNoCopy(this, life, fgComputeLifeLIR(life, block, volatileVars));
+#endif // !LEGACY_BACKEND
         }
 
         /* Done with the current block - if we removed any statements, some

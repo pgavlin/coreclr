@@ -71,7 +71,8 @@ void DecomposeLongs::DecomposeBlock(BasicBlock* block)
 
     m_block = block;
     m_blockRange = LIR::AsRange(block);
-    for (GenTree* node = m_blockRange.FirstNonPhiNode(), *end = m_blockRange.End(); node != end; node = node->gtNext)
+    GenTree* nextNode;
+    for (GenTree* node = m_blockRange.FirstNonPhiNode(), *end = m_blockRange.End(); node != end; node = nextNode)
     {
         LIR::Use use;
         if (!m_blockRange.TryGetUse(node, &use))
@@ -79,7 +80,11 @@ void DecomposeLongs::DecomposeBlock(BasicBlock* block)
             use = LIR::Use::GetDummyUse(m_blockRange, node);
         }
 
-        node = DecomposeNode(use);
+        nextNode = DecomposeNode(use);
+        if (nextNode == nullptr)
+        {
+            nextNode = node->gtNext;
+        }
     }
 
     assert(m_blockRange.CheckLIR(m_compiler));
@@ -90,15 +95,16 @@ void DecomposeLongs::DecomposeBlock(BasicBlock* block)
 // DecomposeNode: Decompose long-type trees into lower and upper halves.
 //
 // Arguments:
-//    *ppTree - A node that may or may not require decomposition.
-//    data    - The tree-walk data that provides the context.
+//    use - the LIR::Use object for the def that needs to be decomposed.
 //
 // Return Value:
-//    None. It the tree at *ppTree is of TYP_LONG, it will generally be replaced.
+//    The next node to process, or nullptr if the naturally next node
+//    should be used (namely, use.Def()->gtNext).
 //
 GenTree* DecomposeLongs::DecomposeNode(LIR::Use& use)
 {
     GenTree* tree = use.Def();
+    GenTree* nextNode = nullptr;
 
     // Handle the case where we are implicitly using the lower half of a long lclVar.
     if ((tree->TypeGet() == TYP_INT) && tree->OperIsLocal())
@@ -117,13 +123,13 @@ GenTree* DecomposeLongs::DecomposeNode(LIR::Use& use)
             unsigned loVarNum = varDsc->lvFieldLclStart;
             tree->AsLclVarCommon()->SetLclNum(loVarNum);
             m_compiler->lvaIncRefCnts(tree);
-            return tree;
+            return nullptr;
         }
     }
 
     if (tree->TypeGet() != TYP_LONG)
     {
-        return tree;
+        return nullptr;
     }
 
 #ifdef DEBUG
@@ -141,27 +147,27 @@ GenTree* DecomposeLongs::DecomposeNode(LIR::Use& use)
         break;
 
     case GT_LCL_VAR:
-        tree = DecomposeLclVar(use);
+        nextNode = DecomposeLclVar(use);
         break;
 
     case GT_LCL_FLD:
-        tree = DecomposeLclFld(use);
+        nextNode = DecomposeLclFld(use);
         break;
 
     case GT_STORE_LCL_VAR:
-        tree = DecomposeStoreLclVar(use);
+        nextNode = DecomposeStoreLclVar(use);
         break;
 
     case GT_CAST:
-        tree = DecomposeCast(use);
+        nextNode = DecomposeCast(use);
         break;
 
     case GT_CNS_LNG:
-        tree = DecomposeCnsLng(use);
+        nextNode = DecomposeCnsLng(use);
         break;
 
     case GT_CALL:
-        tree = DecomposeCall(use);
+        nextNode = DecomposeCall(use);
         break;
 
     case GT_RETURN:
@@ -169,7 +175,7 @@ GenTree* DecomposeLongs::DecomposeNode(LIR::Use& use)
         break;
 
     case GT_STOREIND:
-        tree = DecomposeStoreInd(use);
+        nextNode = DecomposeStoreInd(use);
         break;
 
     case GT_STORE_LCL_FLD:
@@ -178,15 +184,15 @@ GenTree* DecomposeLongs::DecomposeNode(LIR::Use& use)
         break;
 
     case GT_IND:
-        DecomposeInd(use);
+        nextNode = DecomposeInd(use);
         break;
 
     case GT_NOT:
-        tree = DecomposeNot(use);
+        nextNode = DecomposeNot(use);
         break;
 
     case GT_NEG:
-        tree = DecomposeNeg(use);
+        nextNode = DecomposeNeg(use);
         break;
 
     // Binary operators. Those that require different computation for upper and lower half are
@@ -196,7 +202,7 @@ GenTree* DecomposeLongs::DecomposeNode(LIR::Use& use)
     case GT_OR:
     case GT_XOR:
     case GT_AND:
-        tree = DecomposeArith(use);
+        nextNode = DecomposeArith(use);
         break;
 
     case GT_MUL:
@@ -257,7 +263,7 @@ GenTree* DecomposeLongs::DecomposeNode(LIR::Use& use)
     }
 #endif
 
-    return tree;
+    return nextNode;
 }
  
 
@@ -267,17 +273,16 @@ GenTree* DecomposeLongs::DecomposeNode(LIR::Use& use)
 // with a new GT_LONG node that will replace the original node.
 //
 // Arguments:
-//    ppTree - the original tree node
-//    data - tree walk context
+//    use - the LIR::Use object for the def that needs to be decomposed.
 //    loResult - the decomposed low part
 //    hiResult - the decomposed high part
 //
 // Return Value:
-//    None.
+//    The next node to process.
 //
 GenTree* DecomposeLongs::FinalizeDecomposition(LIR::Use& use, GenTree* loResult, GenTree* hiResult)
 {
-    assert(use.IsValid());
+    assert(use.IsInitialized());
     assert(loResult != nullptr);
     assert(hiResult != nullptr);
     assert(m_blockRange.ContainsNode(loResult));
@@ -297,15 +302,14 @@ GenTree* DecomposeLongs::FinalizeDecomposition(LIR::Use& use, GenTree* loResult,
 // DecomposeLclVar: Decompose GT_LCL_VAR.
 //
 // Arguments:
-//    ppTree - the tree to decompose
-//    data - tree walk context
+//    use - the LIR::Use object for the def that needs to be decomposed.
 //
 // Return Value:
-//    None.
+//    The next node to process.
 //
 GenTree* DecomposeLongs::DecomposeLclVar(LIR::Use& use)
 {
-    assert(use.IsValid());
+    assert(use.IsInitialized());
     assert(use.Def()->OperGet() == GT_LCL_VAR);
 
     GenTree* tree = use.Def();
@@ -351,15 +355,14 @@ GenTree* DecomposeLongs::DecomposeLclVar(LIR::Use& use)
 // DecomposeLclFld: Decompose GT_LCL_FLD.
 //
 // Arguments:
-//    ppTree - the tree to decompose
-//    data - tree walk context
+//    use - the LIR::Use object for the def that needs to be decomposed.
 //
 // Return Value:
-//    None.
+//    The next node to process.
 //
 GenTree* DecomposeLongs::DecomposeLclFld(LIR::Use& use)
 {
-    assert(use.IsValid());
+    assert(use.IsInitialized());
     assert(use.Def()->OperGet() == GT_LCL_FLD);
 
     GenTree* tree = use.Def();
@@ -367,8 +370,8 @@ GenTree* DecomposeLongs::DecomposeLclFld(LIR::Use& use)
     loResult->gtType = TYP_INT;
 
     GenTree* hiResult = m_compiler->gtNewLclFldNode(loResult->gtLclNum,
-                                              TYP_INT,
-                                              loResult->gtLclOffs + 4);
+                                                    TYP_INT,
+                                                    loResult->gtLclOffs + 4);
     m_blockRange.InsertAfter(hiResult, loResult);
 
     return FinalizeDecomposition(use, loResult, hiResult);
@@ -379,15 +382,15 @@ GenTree* DecomposeLongs::DecomposeLclFld(LIR::Use& use)
 // DecomposeStoreLclVar: Decompose GT_STORE_LCL_VAR.
 //
 // Arguments:
-//    ppTree - the tree to decompose
-//    data - tree walk context
+//    use - the LIR::Use object for the def that needs to be decomposed.
 //
 // Return Value:
-//    None.
+//    The next node to process, or nullptr if the naturally next node
+//    should be used (namely, use.Def()->gtNext).
 //
 GenTree* DecomposeLongs::DecomposeStoreLclVar(LIR::Use& use)
 {
-    assert(use.IsValid());
+    assert(use.IsInitialized());
     assert(use.Def()->OperGet() == GT_STORE_LCL_VAR);
 
     GenTree* tree = use.Def();
@@ -396,7 +399,7 @@ GenTree* DecomposeLongs::DecomposeStoreLclVar(LIR::Use& use)
     {
         // GT_CALLs are not decomposed, so will not be converted to GT_LONG
         // GT_STORE_LCL_VAR = GT_CALL are handled in genMultiRegCallStoreToLocal
-        return tree;
+        return nullptr;
     }
 
     noway_assert(rhs->OperGet() == GT_LONG);
@@ -450,15 +453,14 @@ GenTree* DecomposeLongs::DecomposeStoreLclVar(LIR::Use& use)
 // DecomposeCast: Decompose GT_CAST.
 //
 // Arguments:
-//    ppTree - the tree to decompose
-//    data - tree walk context
+//    use - the LIR::Use object for the def that needs to be decomposed.
 //
 // Return Value:
-//    None.
+//    The next node to process.
 //
 GenTree* DecomposeLongs::DecomposeCast(LIR::Use& use)
 {
-    assert(use.IsValid());
+    assert(use.IsInitialized());
     assert(use.Def()->OperGet() == GT_CAST);
 
     GenTree* tree = use.Def();
@@ -497,15 +499,14 @@ GenTree* DecomposeLongs::DecomposeCast(LIR::Use& use)
 // DecomposeCnsLng: Decompose GT_CNS_LNG.
 //
 // Arguments:
-//    ppTree - the tree to decompose
-//    data - tree walk context
+//    use - the LIR::Use object for the def that needs to be decomposed.
 //
 // Return Value:
-//    None.
+//    The next node to process.
 //
 GenTree* DecomposeLongs::DecomposeCnsLng(LIR::Use& use)
 {
-    assert(use.IsValid());
+    assert(use.IsInitialized());
     assert(use.Def()->OperGet() == GT_CNS_LNG);
 
     GenTree* tree = use.Def();
@@ -526,20 +527,20 @@ GenTree* DecomposeLongs::DecomposeCnsLng(LIR::Use& use)
 // DecomposeCall: Decompose GT_CALL.
 //
 // Arguments:
-//    ppTree - the tree to decompose
-//    data - tree walk context
+//    use - the LIR::Use object for the def that needs to be decomposed.
 //
 // Return Value:
-//    None.
+//    The next node to process, or nullptr if the naturally next node
+//    should be used (namely, use.Def()->gtNext).
 //
 GenTree* DecomposeLongs::DecomposeCall(LIR::Use& use)
 {
-    assert(use.IsValid());
+    assert(use.IsInitialized());
     assert(use.Def()->OperGet() == GT_CALL);
 
     // We only need to force var = call() if the call's result is used.
     if (use.IsDummyUse())
-        return use.Def();
+        return nullptr;
 
     GenTree* user = use.User();
     if (user->OperGet() == GT_STORE_LCL_VAR)
@@ -549,13 +550,13 @@ GenTree* DecomposeLongs::DecomposeCall(LIR::Use& use)
         unsigned varNum = user->AsLclVarCommon()->gtLclNum;
         if (m_compiler->lvaTable[varNum].lvIsMultiRegRet)
         {
-            return use.Def();
+            return nullptr;
         }
         else if (!m_compiler->lvaTable[varNum].lvPromoted)
         {
             // If var wasn't promoted, we can just set lvIsMultiRegRet.
             m_compiler->lvaTable[varNum].lvIsMultiRegRet = true;
-            return use.Def();
+            return nullptr;
         }
     }
 
@@ -574,14 +575,15 @@ GenTree* DecomposeLongs::DecomposeCall(LIR::Use& use)
 // DecomposeStoreInd: Decompose GT_STOREIND.
 //
 // Arguments:
-//    tree - the tree to decompose
+//    use - the LIR::Use object for the def that needs to be decomposed.
 //
 // Return Value:
-//    None.
+//    The next node to process.
 //
+// TODO-LIR: replace comments below that use embedded statements with ones that do not.
 GenTree* DecomposeLongs::DecomposeStoreInd(LIR::Use& use)
 {
-    assert(use.IsValid());
+    assert(use.IsInitialized());
     assert(use.Def()->OperGet() == GT_STOREIND);
 
     GenTree* tree = use.Def();
@@ -769,12 +771,12 @@ GenTree* DecomposeLongs::DecomposeStoreInd(LIR::Use& use)
 // DecomposeInd: Decompose GT_IND.
 //
 // Arguments:
-//    tree - the tree to decompose
+//    use - the LIR::Use object for the def that needs to be decomposed.
 //
 // Return Value:
-//    None.
+//    The next node to process.
 //
-void DecomposeLongs::DecomposeInd(LIR::Use& use)
+GenTree* DecomposeLongs::DecomposeInd(LIR::Use& use)
 {
     GenTree* indLow = use.Def();
 
@@ -797,22 +799,21 @@ void DecomposeLongs::DecomposeInd(LIR::Use& use)
     m_blockRange.InsertAfter(addrHigh, addrBaseHigh);
     m_blockRange.InsertAfter(indHigh, addrHigh);
 
-    FinalizeDecomposition(use, indLow, indHigh);
+    return FinalizeDecomposition(use, indLow, indHigh);
 }
 
 //------------------------------------------------------------------------
 // DecomposeNot: Decompose GT_NOT.
 //
 // Arguments:
-//    ppTree - the tree to decompose
-//    data - tree walk context
+//    use - the LIR::Use object for the def that needs to be decomposed.
 //
 // Return Value:
-//    None.
+//    The next node to process.
 //
 GenTree* DecomposeLongs::DecomposeNot(LIR::Use& use)
 {
-    assert(use.IsValid());
+    assert(use.IsInitialized());
     assert(use.Def()->OperGet() == GT_NOT);
 
     GenTree* tree = use.Def();
@@ -837,15 +838,14 @@ GenTree* DecomposeLongs::DecomposeNot(LIR::Use& use)
 // DecomposeNeg: Decompose GT_NEG.
 //
 // Arguments:
-//    ppTree - the tree to decompose
-//    data - tree walk context
+//    use - the LIR::Use object for the def that needs to be decomposed.
 //
 // Return Value:
-//    None.
+//    The next node to process.
 //
 GenTree* DecomposeLongs::DecomposeNeg(LIR::Use& use)
 {
-    assert(use.IsValid());
+    assert(use.IsInitialized());
     assert(use.Def()->OperGet() == GT_NEG);
 
     GenTree* tree = use.Def();
@@ -885,15 +885,14 @@ GenTree* DecomposeLongs::DecomposeNeg(LIR::Use& use)
 // DecomposeArith: Decompose GT_ADD, GT_SUB, GT_OR, GT_XOR, GT_AND.
 //
 // Arguments:
-//    ppTree - the tree to decompose
-//    data - tree walk context
+//    use - the LIR::Use object for the def that needs to be decomposed.
 //
 // Return Value:
-//    None.
+//    The next node to process.
 //
 GenTree* DecomposeLongs::DecomposeArith(LIR::Use& use)
 {
-    assert(use.IsValid());
+    assert(use.IsInitialized());
 
     GenTree* tree = use.Def();
     genTreeOps oper = tree->OperGet();
