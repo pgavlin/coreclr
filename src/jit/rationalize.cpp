@@ -1193,6 +1193,8 @@ Compiler::fgWalkResult Rationalizer::RewriteNode(GenTree** useEdge, ArrayStack<G
                 assert((sideEffects & GTF_ALL_EFFECT) == 0);
 
                 m_range.Remove(lhsRange);
+
+                LIR::DecRefCnts(comp, m_block, lhsRange);
             }
 
             GenTree* replacement = node->gtGetOp2();
@@ -1216,6 +1218,8 @@ Compiler::fgWalkResult Rationalizer::RewriteNode(GenTree** useEdge, ArrayStack<G
                     assert((sideEffects & GTF_ALL_EFFECT) == 0);
 
                     m_range.Remove(rhsRange);
+
+                    LIR::DecRefCnts(comp, m_block, rhsRange);
                 }
             }
 
@@ -1359,6 +1363,15 @@ Compiler::fgWalkResult Rationalizer::RewriteNode(GenTree** useEdge, ArrayStack<G
         break;
     }
 
+    // Do some extra processing on top-level nodes to remove unused local reads.
+    if (use.IsDummyUse() && node->OperIsLocalRead())
+    {
+        assert((node->gtFlags & GTF_ALL_EFFECT) == 0);
+
+        comp->lvaDecRefCnts(node);
+        m_range.Remove(node);
+    }
+
     return Compiler::WALK_CONTINUE;
 }
 
@@ -1373,6 +1386,8 @@ void Rationalizer::DoPhase()
 
     for (BasicBlock* block = comp->fgFirstBB; block != nullptr; block = block->bbNext)
     {
+        m_block = block;
+
         // Establish the first and last nodes for the block. This is necessary in order for the LIR
         // utilities that hang off the BasicBlock type to work correctly.
         GenTreeStmt* firstStatement = block->firstStmt();

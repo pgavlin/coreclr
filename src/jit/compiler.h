@@ -2481,6 +2481,7 @@ public :
 
     static fgWalkPreFn  lvaDecRefCntsCB;
     void                lvaDecRefCnts           (GenTreePtr tree);
+    void                lvaDecRefCnts           (BasicBlock* basicBlock, GenTreePtr tree);
     void                lvaRecursiveDecRefCounts(GenTreePtr tree);
     void                lvaRecursiveIncRefCounts(GenTreePtr tree);
 

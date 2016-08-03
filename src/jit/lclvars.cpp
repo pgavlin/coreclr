@@ -2245,6 +2245,15 @@ void Compiler::lvaRecursiveIncRefCounts(GenTreePtr tree)
  */
 void               Compiler::lvaDecRefCnts(GenTreePtr tree)
 {
+    assert(compCurBB != nullptr);
+    lvaDecRefCnts(compCurBB, tree);
+}
+
+void               Compiler::lvaDecRefCnts(BasicBlock* block, GenTreePtr tree)
+{
+    assert(block != nullptr);
+    assert(tree != nullptr);
+
     unsigned        lclNum;
     LclVarDsc   *   varDsc;
 
@@ -2264,8 +2273,8 @@ void               Compiler::lvaDecRefCnts(GenTreePtr tree)
 
             /* Decrement the reference counts twice */
 
-            varDsc->decRefCnts(compCurBB->getBBWeight(this), this);  
-            varDsc->decRefCnts(compCurBB->getBBWeight(this), this);
+            varDsc->decRefCnts(block->getBBWeight(this), this);  
+            varDsc->decRefCnts(block->getBBWeight(this), this);
         }
     }
     else
@@ -2283,7 +2292,7 @@ void               Compiler::lvaDecRefCnts(GenTreePtr tree)
 
         /* Decrement its lvRefCnt and lvRefCntWtd */
 
-        varDsc->decRefCnts(compCurBB->getBBWeight(this), this);
+        varDsc->decRefCnts(block->getBBWeight(this), this);
     }
 }
 

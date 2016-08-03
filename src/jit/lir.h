@@ -237,6 +237,7 @@ public:
     static Range EmptyRange();
     static Range AsRange(GenTree* firstNode, GenTree* lastNode);
     static Range SeqTree(Compiler* compiler, GenTree* tree);
+    static void DecRefCnts(Compiler* compiler, BasicBlock* block, const Range& range);
 
     //------------------------------------------------------------------------
     // LIR::AsRange: Constructs and returns an LIR::Range value given a value

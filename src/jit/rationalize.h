@@ -8,6 +8,7 @@
 class Rationalizer : public Phase
 {
 private:
+    BasicBlock* m_block;
     LIR::Range m_range;
     GenTreeStmt* m_statement;
 
