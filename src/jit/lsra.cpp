@@ -7732,7 +7732,7 @@ LinearScan::insertUpperVectorSaveAndReload(GenTreePtr tree, RefPosition* refPosi
         simdNode->gtFlags |= GTF_SPILL;
     }
 
-    blockRange.InsertBefore(LIR::SetTreeSeq(compiler, simdNode), tree);
+    blockRange.InsertBefore(LIR::SeqTree(compiler, simdNode), tree);
 
     // Now insert the restore after the call.
 
@@ -7750,7 +7750,7 @@ LinearScan::insertUpperVectorSaveAndReload(GenTreePtr tree, RefPosition* refPosi
         simdNode->gtFlags |= GTF_SPILLED;
     }
 
-    blockRange.InsertAfter(LIR::SetTreeSeq(compiler, simdNode), tree);
+    blockRange.InsertAfter(LIR::SeqTree(compiler, simdNode), tree);
 
 }
 #endif // FEATURE_PARTIAL_SIMD_CALLEE_SAVE
@@ -8560,7 +8560,7 @@ LinearScan::insertMove(BasicBlock * block,
     }
     top->gtLsraInfo.isLocalDefUse = true;
 
-    LIR::Range treeRange = LIR::SetTreeSeq(compiler, top);
+    LIR::Range treeRange = LIR::SeqTree(compiler, top);
     LIR::Range blockRange = LIR::AsRange(block);
 
     if (insertionPoint != nullptr)
@@ -8636,7 +8636,7 @@ LinearScan::insertSwap(BasicBlock* block,
     lcl2->gtNext = swap;
     swap->gtPrev = lcl2;
 
-    LIR::Range swapRange = LIR::SetTreeSeq(compiler, swap);
+    LIR::Range swapRange = LIR::SeqTree(compiler, swap);
     LIR::Range blockRange = LIR::AsRange(block);
     
     if (insertionPoint != nullptr)

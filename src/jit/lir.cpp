@@ -79,7 +79,7 @@ LIR::Use LIR::Use::GetDummyUse(Range& range, GenTree* node)
     dummyUse.m_user = node;
     dummyUse.m_edge = &dummyUse.m_user;
 
-    dummyUse.AssertIsValid();
+    assert(dummyUse.IsInitialized());
     return dummyUse;
 }
 
@@ -486,7 +486,7 @@ LIR::Range::Iterator LIR::Range::end() const
 //
 LIR::Range::ReverseIterator LIR::Range::rbegin() const
 {
-    return ReverseIterator(End());
+    return ReverseIterator(EndExclusive());
 }
 
 //------------------------------------------------------------------------
@@ -495,7 +495,7 @@ LIR::Range::ReverseIterator LIR::Range::rbegin() const
 //
 LIR::Range::ReverseIterator LIR::Range::rend() const
 {
-    return ReverseIterator(Begin());
+    return ReverseIterator(Begin()->gtPrev);
 }
 
 //------------------------------------------------------------------------
@@ -1210,10 +1210,5 @@ LIR::Range LIR::AsRange(GenTree* firstNode, GenTree* lastNode)
 LIR::Range LIR::SeqTree(Compiler* compiler, GenTree* tree)
 {
     compiler->gtSetEvalOrder(tree);
-    compiler->fgSetTreeSeq(tree);
-
-    // fgSetTreeSeq() sets the Compiler::fgTreeSeqBeg member to point at the
-    // first node in execution order of the sequenced tree. Use that to
-    // create a Range of the sequenced nodes.
-    return AsRange(compiler->fgTreeSeqBeg, tree);
+    return AsRange(compiler->fgSetTreeSeq(tree, nullptr, true), tree);
 }

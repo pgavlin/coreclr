@@ -8768,10 +8768,16 @@ BasicBlock* Compiler::fgSplitBlockAfterNode(BasicBlock* curr, GenTree* node)
 
     if (node != nullptr)
     {
-        newBlock->bbTreeList = node->gtNext;
-        newBlock->bbLastNode = curr->bbLastNode;
+        LIR::Range currBBRange = LIR::AsRange(curr);
+        LIR::Range newBlockRange = LIR::AsRange(newBlock);
 
-        curr->bbLastNode = node;
+        if (node != curr->bbLastNode)
+        {
+            LIR::Range nodesToMove = LIR::AsRange(node->gtNext, curr->bbLastNode);
+
+            currBBRange.Remove(nodesToMove);
+            newBlockRange.InsertAtBeginning(nodesToMove);
+        }
 
         // Update the IL offsets of the blocks to match the split.
 
@@ -8786,7 +8792,6 @@ BasicBlock* Compiler::fgSplitBlockAfterNode(BasicBlock* curr, GenTree* node)
         IL_OFFSET splitPointILOffset = BAD_IL_OFFSET;
         LIR::Range::ReverseIterator riter;
         LIR::Range::ReverseIterator riterEnd;
-        LIR::Range currBBRange = LIR::AsRange(curr);
         for (riter = currBBRange.rbegin(), riterEnd = currBBRange.rend(); riter != riterEnd; ++riter)
         {
             if ((*riter)->gtOper == GT_IL_OFFSET)
@@ -17670,7 +17675,7 @@ BasicBlock*         Compiler::fgRngChkTarget(BasicBlock* block, unsigned stkDept
 // Sequences the tree.
 // prevTree is what gtPrev of the first node in execution order gets set to.
 // Returns the first node (execution order) in the sequenced tree.
-GenTree*            Compiler::fgSetTreeSeq(GenTree* tree, GenTree* prevTree)
+GenTree*            Compiler::fgSetTreeSeq(GenTree* tree, GenTree* prevTree, bool isLIR)
 {
     GenTree list;
 
@@ -17681,7 +17686,7 @@ GenTree*            Compiler::fgSetTreeSeq(GenTree* tree, GenTree* prevTree)
     fgTreeSeqLst = prevTree;
     fgTreeSeqNum = 0;
     fgTreeSeqBeg = nullptr;
-    fgSetTreeSeqHelper(tree);
+    fgSetTreeSeqHelper(tree, isLIR);
 
     GenTree* result = prevTree->gtNext;
     if (prevTree == &list)
@@ -17699,7 +17704,7 @@ GenTree*            Compiler::fgSetTreeSeq(GenTree* tree, GenTree* prevTree)
  *  Uses 'global' - fgTreeSeqLst
  */
 
-void                Compiler::fgSetTreeSeqHelper(GenTreePtr tree)
+void                Compiler::fgSetTreeSeqHelper(GenTreePtr tree, bool isLIR)
 {
     genTreeOps      oper;
     unsigned        kind;
@@ -17717,7 +17722,7 @@ void                Compiler::fgSetTreeSeqHelper(GenTreePtr tree)
 
     if  (kind & (GTK_CONST|GTK_LEAF))
     {
-        fgSetTreeSeqFinish(tree);
+        fgSetTreeSeqFinish(tree, isLIR);
         return;
     }
 
@@ -17740,9 +17745,9 @@ void                Compiler::fgSetTreeSeqHelper(GenTreePtr tree)
                 // The use must appear before the def because of the case where a local is cpblk'ed to itself.
                 // If it were otherwise, upstream stores to the local would appear to be dead.
                 assert(tree->gtOp.gtOp1->gtOper != GT_LIST);
-                fgSetTreeSeqHelper(tree->gtOp.gtOp2);
-                fgSetTreeSeqHelper(tree->gtOp.gtOp1);
-                fgSetTreeSeqFinish(tree);
+                fgSetTreeSeqHelper(tree->gtOp.gtOp2, isLIR);
+                fgSetTreeSeqHelper(tree->gtOp.gtOp1, isLIR);
+                fgSetTreeSeqFinish(tree, isLIR);
                 return;
             }
 
@@ -17755,7 +17760,7 @@ void                Compiler::fgSetTreeSeqHelper(GenTreePtr tree)
             {
                 list = nextList;
                 GenTreePtr listItem = list->gtOp.gtOp1;
-                fgSetTreeSeqHelper(listItem);
+                fgSetTreeSeqHelper(listItem, isLIR);
                 nextList = list->gtOp.gtOp2;
                 if (nextList != nullptr)
                 {
@@ -17772,7 +17777,7 @@ void                Compiler::fgSetTreeSeqHelper(GenTreePtr tree)
                 assert(list != nullptr);
                 list = nextList;
                 nextList = list->gtNext;
-                fgSetTreeSeqFinish(list);
+                fgSetTreeSeqFinish(list, isLIR);
             } while (list != tree);
             return;
         }
@@ -17784,18 +17789,18 @@ void                Compiler::fgSetTreeSeqHelper(GenTreePtr tree)
             if (reverse)
             {
                 assert(op1 != NULL && op2 != NULL);
-                fgSetTreeSeqHelper(op2);
+                fgSetTreeSeqHelper(op2, isLIR);
             }
             if (op1 != NULL)
             {
-                fgSetTreeSeqHelper(op1);
+                fgSetTreeSeqHelper(op1, isLIR);
             }
             if (!reverse && op2 != NULL)
             {
-                fgSetTreeSeqHelper(op2);
+                fgSetTreeSeqHelper(op2, isLIR);
             }
 
-            fgSetTreeSeqFinish(tree);
+            fgSetTreeSeqFinish(tree, isLIR);
             return;
         }
 
@@ -17804,7 +17809,7 @@ void                Compiler::fgSetTreeSeqHelper(GenTreePtr tree)
         if (op1 == NULL)
         {
             noway_assert(op2 == NULL);
-            fgSetTreeSeqFinish(tree);
+            fgSetTreeSeqFinish(tree, isLIR);
             return;
         }
 
@@ -17816,8 +17821,8 @@ void                Compiler::fgSetTreeSeqHelper(GenTreePtr tree)
             /* Visit the indirection first - op2 may point to the
              * jump Label for array-index-out-of-range */
 
-            fgSetTreeSeqHelper(op1);
-            fgSetTreeSeqFinish(tree);
+            fgSetTreeSeqHelper(op1, isLIR);
+            fgSetTreeSeqFinish(tree, isLIR);
             return;
         }
 
@@ -17827,8 +17832,8 @@ void                Compiler::fgSetTreeSeqHelper(GenTreePtr tree)
         {
             /* Visit the (only) operand and we're done */
 
-            fgSetTreeSeqHelper(op1);
-            fgSetTreeSeqFinish(tree);
+            fgSetTreeSeqHelper(op1, isLIR);
+            fgSetTreeSeqFinish(tree, isLIR);
             return;
         }
 
@@ -17847,22 +17852,22 @@ void                Compiler::fgSetTreeSeqHelper(GenTreePtr tree)
         {
             noway_assert((tree->gtFlags & GTF_REVERSE_OPS) == 0);
 
-            fgSetTreeSeqHelper(op1);
+            fgSetTreeSeqHelper(op1, isLIR);
             // Here, for the colon, the sequence does not actually represent "order of evaluation":
             // one or the other of the branches is executed, not both.  Still, to make debugging checks
             // work, we want the sequence to match the order in which we'll generate code, which means
             // "else" clause then "then" clause.
-            fgSetTreeSeqHelper(op2->AsColon()->ElseNode());
-            fgSetTreeSeqHelper(op2);
-            fgSetTreeSeqHelper(op2->AsColon()->ThenNode());
+            fgSetTreeSeqHelper(op2->AsColon()->ElseNode(), isLIR);
+            fgSetTreeSeqHelper(op2, isLIR);
+            fgSetTreeSeqHelper(op2->AsColon()->ThenNode(), isLIR);
 
-            fgSetTreeSeqFinish(tree);
+            fgSetTreeSeqFinish(tree, isLIR);
             return;
         }
 
         if  (oper == GT_COLON)
         {
-            fgSetTreeSeqFinish(tree);
+            fgSetTreeSeqFinish(tree, isLIR);
             return;
         }
 
@@ -17870,16 +17875,16 @@ void                Compiler::fgSetTreeSeqHelper(GenTreePtr tree)
 
         if  (tree->gtFlags & GTF_REVERSE_OPS)
         {
-            fgSetTreeSeqHelper(op2);
-            fgSetTreeSeqHelper(op1);
+            fgSetTreeSeqHelper(op2, isLIR);
+            fgSetTreeSeqHelper(op1, isLIR);
         }
         else
         {
-            fgSetTreeSeqHelper(op1);
-            fgSetTreeSeqHelper(op2);
+            fgSetTreeSeqHelper(op1, isLIR);
+            fgSetTreeSeqHelper(op2, isLIR);
         }
 
-        fgSetTreeSeqFinish(tree);
+        fgSetTreeSeqFinish(tree, isLIR);
         return;
     }
 
@@ -17896,7 +17901,7 @@ void                Compiler::fgSetTreeSeqHelper(GenTreePtr tree)
         /* We'll evaluate the 'this' argument value first */
         if  (tree->gtCall.gtCallObjp)
         {
-            fgSetTreeSeqHelper(tree->gtCall.gtCallObjp);
+            fgSetTreeSeqHelper(tree->gtCall.gtCallObjp, isLIR);
         }
 
         /* We'll evaluate the arguments next, left to right
@@ -17904,7 +17909,7 @@ void                Compiler::fgSetTreeSeqHelper(GenTreePtr tree)
 
         if  (tree->gtCall.gtCallArgs)
         {
-            fgSetTreeSeqHelper(tree->gtCall.gtCallArgs);
+            fgSetTreeSeqHelper(tree->gtCall.gtCallArgs, isLIR);
         }
 
         /* Evaluate the temp register arguments list
@@ -17913,49 +17918,49 @@ void                Compiler::fgSetTreeSeqHelper(GenTreePtr tree)
 
         if  (tree->gtCall.gtCallLateArgs)
         {
-            fgSetTreeSeqHelper(tree->gtCall.gtCallLateArgs);
+            fgSetTreeSeqHelper(tree->gtCall.gtCallLateArgs, isLIR);
         }
 
         if ((tree->gtCall.gtCallType == CT_INDIRECT) && (tree->gtCall.gtCallCookie != NULL))
         {
-            fgSetTreeSeqHelper(tree->gtCall.gtCallCookie);
+            fgSetTreeSeqHelper(tree->gtCall.gtCallCookie, isLIR);
         }
 
         if (tree->gtCall.gtCallType == CT_INDIRECT)
         {
-            fgSetTreeSeqHelper(tree->gtCall.gtCallAddr);
+            fgSetTreeSeqHelper(tree->gtCall.gtCallAddr, isLIR);
         }
 
         if (tree->gtCall.gtControlExpr)
         {
-            fgSetTreeSeqHelper(tree->gtCall.gtControlExpr);
+            fgSetTreeSeqHelper(tree->gtCall.gtControlExpr, isLIR);
         }
 
         break;
 
     case GT_ARR_ELEM:
 
-        fgSetTreeSeqHelper(tree->gtArrElem.gtArrObj);
+        fgSetTreeSeqHelper(tree->gtArrElem.gtArrObj, isLIR);
 
         unsigned dim;
         for (dim = 0; dim < tree->gtArrElem.gtArrRank; dim++)
         {
-            fgSetTreeSeqHelper(tree->gtArrElem.gtArrInds[dim]);
+            fgSetTreeSeqHelper(tree->gtArrElem.gtArrInds[dim], isLIR);
         }
 
         break;
 
     case GT_ARR_OFFSET:
-        fgSetTreeSeqHelper(tree->gtArrOffs.gtOffset);
-        fgSetTreeSeqHelper(tree->gtArrOffs.gtIndex);
-        fgSetTreeSeqHelper(tree->gtArrOffs.gtArrObj);
+        fgSetTreeSeqHelper(tree->gtArrOffs.gtOffset, isLIR);
+        fgSetTreeSeqHelper(tree->gtArrOffs.gtIndex, isLIR);
+        fgSetTreeSeqHelper(tree->gtArrOffs.gtArrObj, isLIR);
         break;
 
     case GT_CMPXCHG:
         //Evaluate the trees left to right
-        fgSetTreeSeqHelper(tree->gtCmpXchg.gtOpLocation);
-        fgSetTreeSeqHelper(tree->gtCmpXchg.gtOpValue);
-        fgSetTreeSeqHelper(tree->gtCmpXchg.gtOpComparand);
+        fgSetTreeSeqHelper(tree->gtCmpXchg.gtOpLocation, isLIR);
+        fgSetTreeSeqHelper(tree->gtCmpXchg.gtOpValue, isLIR);
+        fgSetTreeSeqHelper(tree->gtCmpXchg.gtOpComparand, isLIR);
         break;
 
     case GT_ARR_BOUNDS_CHECK:
@@ -17963,8 +17968,8 @@ void                Compiler::fgSetTreeSeqHelper(GenTreePtr tree)
     case GT_SIMD_CHK:
 #endif // FEATURE_SIMD
         //Evaluate the trees left to right
-        fgSetTreeSeqHelper(tree->gtBoundsChk.gtArrLen);
-        fgSetTreeSeqHelper(tree->gtBoundsChk.gtIndex);
+        fgSetTreeSeqHelper(tree->gtBoundsChk.gtArrLen, isLIR);
+        fgSetTreeSeqHelper(tree->gtBoundsChk.gtIndex, isLIR);
         break;
 
     default:
@@ -17975,12 +17980,19 @@ void                Compiler::fgSetTreeSeqHelper(GenTreePtr tree)
         break;
     }
 
-    fgSetTreeSeqFinish(tree);
+    fgSetTreeSeqFinish(tree, isLIR);
 }
 
 void
-Compiler::fgSetTreeSeqFinish(GenTreePtr tree)
+Compiler::fgSetTreeSeqFinish(GenTreePtr tree, bool isLIR)
 {
+    // If we are sequencing a node that does not appear in LIR,
+    // do not add it to the list.
+    if (isLIR && ((tree->OperGet() == GT_LIST) || tree->OperGet() == GT_ARGPLACE))
+    {
+        return;
+    }
+
     /* Append to the node list */
     ++fgTreeSeqNum;
 
@@ -18166,7 +18178,7 @@ void                Compiler::fgSetStmtSeq(GenTreePtr tree)
     fgTreeSeqLst = &list;
     fgTreeSeqBeg = NULL;
 
-    fgSetTreeSeqHelper(tree->gtStmt.gtStmtExpr);
+    fgSetTreeSeqHelper(tree->gtStmt.gtStmtExpr, false);
 
     /* Record the address of the first node */
 
