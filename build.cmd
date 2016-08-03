@@ -75,42 +75,40 @@ if /i "%1" == "-?"    goto Usage
 if /i "%1" == "-h"    goto Usage
 if /i "%1" == "-help" goto Usage
 
-if /i "%1" == "all"                 (set __BuildAll=1&set processedArgs=!processedArgs! %1&goto Arg_Next)
-if /i "%1" == "x64"                 (set __BuildArchX64=1&set processedArgs=!processedArgs! %1&goto Arg_Next)
-if /i "%1" == "x86"                 (set __BuildArchX86=1&set processedArgs=!processedArgs! %1&goto Arg_Next)
-if /i "%1" == "arm"                 (set __BuildArchArm=1&set processedArgs=!processedArgs! %1&goto Arg_Next)
-if /i "%1" == "arm64"               (set __BuildArchArm64=1&set processedArgs=!processedArgs! %1&goto Arg_Next)
+if /i "%1" == "all"                 (set __BuildAll=1&set processedArgs=!processedArgs! %1&shift&goto Arg_Loop)
+if /i "%1" == "x64"                 (set __BuildArchX64=1&set processedArgs=!processedArgs! %1&shift&goto Arg_Loop)
+if /i "%1" == "x86"                 (set __BuildArchX86=1&set processedArgs=!processedArgs! %1&shift&goto Arg_Loop)
+if /i "%1" == "arm"                 (set __BuildArchArm=1&set processedArgs=!processedArgs! %1&shift&goto Arg_Loop)
+if /i "%1" == "arm64"               (set __BuildArchArm64=1&set processedArgs=!processedArgs! %1&shift&goto Arg_Loop)
 
-if /i "%1" == "debug"               (set __BuildTypeDebug=1&set processedArgs=!processedArgs! %1&goto Arg_Next)
-if /i "%1" == "checked"             (set __BuildTypeChecked=1&set processedArgs=!processedArgs! %1&goto Arg_Next)
-if /i "%1" == "release"             (set __BuildTypeRelease=1&set processedArgs=!processedArgs! %1&goto Arg_Next)
+if /i "%1" == "debug"               (set __BuildTypeDebug=1&set processedArgs=!processedArgs! %1&shift&goto Arg_Loop)
+if /i "%1" == "checked"             (set __BuildTypeChecked=1&set processedArgs=!processedArgs! %1&shift&goto Arg_Loop)
+if /i "%1" == "release"             (set __BuildTypeRelease=1&set processedArgs=!processedArgs! %1&shift&goto Arg_Loop)
 
 REM All arguments after this point will be passed through directly to build.cmd on nested invocations
 REM using the "all" argument, and must be added to the __PassThroughArgs variable.
 set __PassThroughArgs=%__PassThroughArgs% %1
 
-if /i "%1" == "freebsdmscorlib"     (set __BuildNativeCoreLib=0&set __BuildNative=0&set __BuildTests=0&set __BuildPackages=0&set __BuildOS=FreeBSD&set __SkipNugetPackage=1&set processedArgs=!processedArgs! %1&goto Arg_Next)
-if /i "%1" == "linuxmscorlib"       (set __BuildNativeCoreLib=0&set __BuildNative=0&set __BuildTests=0&set __BuildPackages=0&set __BuildOS=Linux&set __SkipNugetPackage=1&set processedArgs=!processedArgs! %1&goto Arg_Next)
-if /i "%1" == "netbsdmscorlib"      (set __BuildNativeCoreLib=0&set __BuildNative=0&set __BuildTests=0&set __BuildPackages=0&set __BuildOS=NetBSD&set __SkipNugetPackage=1&set processedArgs=!processedArgs! %1&goto Arg_Next)
-if /i "%1" == "osxmscorlib"         (set __BuildNativeCoreLib=0&set __BuildNative=0&set __BuildTests=0&set __BuildPackages=0&set __BuildOS=OSX&set __SkipNugetPackage=1&set processedArgs=!processedArgs! %1&goto Arg_Next)
-if /i "%1" == "windowsmscorlib"     (set __BuildNativeCoreLib=0&set __BuildNative=0&set __BuildTests=0&set __BuildPackages=0&set __BuildOS=Windows_NT&set __SkipNugetPackage=1&set processedArgs=!processedArgs! %1&goto Arg_Next)
-if /i "%1" == "nativemscorlib"      (set __BuildNativeCoreLib=1&set __BuildCoreLib=0&set __BuildNative=0&set __BuildTests=0&set __BuildPackages=0&set processedArgs=!processedArgs! %1&goto Arg_Next)
-if /i "%1" == "configureonly"       (set __ConfigureOnly=1&set __BuildNative=1&set __BuildNativeCoreLib=0&set __BuildCoreLib=0&set __BuildTests=0&set __BuildPackages=0&set processedArgs=!processedArgs! %1&goto Arg_Next)
-if /i "%1" == "skipconfigure"       (set __SkipConfigure=1&set processedArgs=!processedArgs! %1&goto Arg_Next)
-if /i "%1" == "skipmscorlib"        (set __BuildCoreLib=0&set __BuildNativeCoreLib=0&set processedArgs=!processedArgs! %1&goto Arg_Next)
-if /i "%1" == "skipnative"          (set __BuildNative=0&set processedArgs=!processedArgs! %1&goto Arg_Next)
-if /i "%1" == "skiptests"           (set __BuildTests=0&set processedArgs=!processedArgs! %1&goto Arg_Next)
-if /i "%1" == "skipbuildpackages"   (set __BuildPackages=0&set processedArgs=!processedArgs! %1&goto Arg_Next)
-if /i "%1" == "buildjit32"          (set __BuildJit32="-DBUILD_JIT32=1"&set processedArgs=!processedArgs! %1&goto Arg_Next)
-if /i "%1" == "toolset_dir"         (set __ToolsetDir=%2&set __PassThroughArgs=%__PassThroughArgs% %2&set processedArgs=!processedArgs! %1 %2&shift&goto Arg_Next)
-if /i "%1" == "-priority"           (set __UnprocessedBuildArgs=!__UnprocessedBuildArgs! %1=%2&shift&goto Arg_Next)
-if /i "%1" == "-officialbuildid"    (set __UnprocessedBuildArgs=!__UnprocessedBuildArgs! %1=%2&shift&goto Arg_Next)
+if /i "%1" == "freebsdmscorlib"     (set __BuildNativeCoreLib=0&set __BuildNative=0&set __BuildTests=0&set __BuildPackages=0&set __BuildOS=FreeBSD&set __SkipNugetPackage=1&set processedArgs=!processedArgs! %1&shift&goto Arg_Loop)
+if /i "%1" == "linuxmscorlib"       (set __BuildNativeCoreLib=0&set __BuildNative=0&set __BuildTests=0&set __BuildPackages=0&set __BuildOS=Linux&set __SkipNugetPackage=1&set processedArgs=!processedArgs! %1&shift&goto Arg_Loop)
+if /i "%1" == "netbsdmscorlib"      (set __BuildNativeCoreLib=0&set __BuildNative=0&set __BuildTests=0&set __BuildPackages=0&set __BuildOS=NetBSD&set __SkipNugetPackage=1&set processedArgs=!processedArgs! %1&shift&goto Arg_Loop)
+if /i "%1" == "osxmscorlib"         (set __BuildNativeCoreLib=0&set __BuildNative=0&set __BuildTests=0&set __BuildPackages=0&set __BuildOS=OSX&set __SkipNugetPackage=1&set processedArgs=!processedArgs! %1&shift&goto Arg_Loop)
+if /i "%1" == "windowsmscorlib"     (set __BuildNativeCoreLib=0&set __BuildNative=0&set __BuildTests=0&set __BuildPackages=0&set __BuildOS=Windows_NT&set __SkipNugetPackage=1&set processedArgs=!processedArgs! %1&shift&goto Arg_Loop)
+if /i "%1" == "nativemscorlib"      (set __BuildNativeCoreLib=1&set __BuildCoreLib=0&set __BuildNative=0&set __BuildTests=0&set __BuildPackages=0&set processedArgs=!processedArgs! %1&shift&goto Arg_Loop)
+if /i "%1" == "configureonly"       (set __ConfigureOnly=1&set __BuildNative=1&set __BuildNativeCoreLib=0&set __BuildCoreLib=0&set __BuildTests=0&set __BuildPackages=0&set processedArgs=!processedArgs! %1&shift&goto Arg_Loop)
+if /i "%1" == "skipconfigure"       (set __SkipConfigure=1&set processedArgs=!processedArgs! %1&shift&goto Arg_Loop)
+if /i "%1" == "skipmscorlib"        (set __BuildCoreLib=0&set __BuildNativeCoreLib=0&set processedArgs=!processedArgs! %1&shift&goto Arg_Loop)
+if /i "%1" == "skipnative"          (set __BuildNative=0&set processedArgs=!processedArgs! %1&shift&goto Arg_Loop)
+if /i "%1" == "skiptests"           (set __BuildTests=0&set processedArgs=!processedArgs! %1&shift&goto Arg_Loop)
+if /i "%1" == "skipbuildpackages"   (set __BuildPackages=0&set processedArgs=!processedArgs! %1&shift&goto Arg_Loop)
+if /i "%1" == "buildjit32"          (set __BuildJit32="-DBUILD_JIT32=1"&set processedArgs=!processedArgs! %1&shift&goto Arg_Loop)
+if /i "%1" == "toolset_dir"         (set __ToolsetDir=%2&set __PassThroughArgs=%__PassThroughArgs% %2&set processedArgs=!processedArgs! %1 %2&shift&shift&goto Arg_Loop)
 
-set __UnprocessedBuildArgs=!__UnprocessedBuildArgs! %1
-
-:Arg_Next
-shift /1
-goto :Arg_Loop
+if [!processedArgs!]==[] (
+  call set __UnprocessedBuildArgs=!__args!
+) else (
+  call set __UnprocessedBuildArgs=%%__args:*!processedArgs!=%%
+)
 
 :ArgsDone
 
@@ -178,7 +176,10 @@ REM === Start the build steps
 REM ===
 REM =========================================================================================
 
-@call %~dp0run.cmd build -generateHeaderWindows -NativeVersionHeaderFile="%__RootBinDir%\obj\_version.h" %__RunArgs% %__UnprocessedBuildArgs% 
+echo %__MsgPrefix%Using environment: "%__VSToolsRoot%\VsDevCmd.bat"
+call                                 "%__VSToolsRoot%\VsDevCmd.bat"
+
+@call %__ProjectDir%\run.cmd build -Project=%__ProjectDir%\build.proj -generateHeaderWindows -NativeVersionHeaderFile="%__RootBinDir%\obj\_version.h" %__RunArgs% %__UnprocessedBuildArgs% 
 
 REM =========================================================================================
 REM ===
@@ -232,9 +233,9 @@ if %__BuildNative% EQU 1 (
         exit /b 1
     )
 
-    @call %~dp0run.cmd build -Project=%__IntermediatesDir%\install.vcxproj -MsBuildLog=!__MsbuildLog! -MsBuildWrn=!__MsbuildWrn! -MsBuildErr=!__MsbuildErr! -configuration=%__BuildType% %nativePlatfromArgs% %__RunArgs% %__UnprocessedBuildArgs%
+    @call %__ProjectDir%\run.cmd build -Project=%__IntermediatesDir%\install.vcxproj -MsBuildLog=!__MsbuildLog! -MsBuildWrn=!__MsbuildWrn! -MsBuildErr=!__MsbuildErr! -configuration=%__BuildType% %nativePlatfromArgs% %__RunArgs% %__UnprocessedBuildArgs%
 
-    if %errorlevel% == 1 (
+    if not !errorlevel! == 0 (
         echo %__MsgPrefix%Error: native component build failed. Refer to the build log files for details:
         echo     "%__LogsDir%\CoreCLR_%__BuildOS%__%__BuildArch%__%__BuildType%.log"
         echo     "%__LogsDir%\CoreCLR_%__BuildOS%__%__BuildArch%__%__BuildType%.wrn"
@@ -267,9 +268,9 @@ if /i "%__BuildArch%"=="arm64" (
 
     pushd "%__CrossCompIntermediatesDir%"
     set __CMakeBinDir=%__CrossComponentBinDir%
-    set "__CMakeBinDir=%__CMakeBinDir:\=/%"
+    set "__CMakeBinDir=!__CMakeBinDir:\=/!"
     set __ExtraCmakeArgs="-DCLR_CROSS_COMPONENTS_BUILD=1" "-DCLR_CMAKE_TARGET_ARCH=%__BuildArch%"
-    call "%__SourceDir%\pal\tools\gen-buildsys-win.bat" "%__ProjectDir%" %__VSVersion% %__CrossArch% %__ExtraCmakeArgs%
+    call "%__SourceDir%\pal\tools\gen-buildsys-win.bat" "%__ProjectDir%" %__VSVersion% %__CrossArch% !__ExtraCmakeArgs!
     @if defined __echo @echo on
     popd
 :SkipConfigureCrossBuild
@@ -283,11 +284,10 @@ if /i "%__BuildArch%"=="arm64" (
     echo %__MsgPrefix%Invoking msbuild
 
     set __MsbuildLog=/flp:Verbosity=normal;LogFile="%__LogsDir%\Cross_%__BuildOS%__%__BuildArch%__%__BuildType%.log"
-	set __MsbuildWrn=/flp1:WarningsOnly;LogFile="%__LogsDir%\Cross_%__BuildOS%__%__BuildArch%__%__BuildType%.wrn"
-	set __MsbuildErr=/flp2:ErrorsOnly;LogFile="%__LogsDir%\Cross_%__BuildOS%__%__BuildArch%__%__BuildType%.err"
-
-    @call %~dp0run.cmd build -Project=%__CrossCompIntermediatesDir%\install.vcxproj -configuration=%__BuildType% -platform=%__CrossArch% -MsBuildLog=!__MsbuildLog! -MsBuildWrn=!__MsbuildWrn! -MsBuildErr=!__MsbuildErr! %__RunArgs% %__UnprocessedBuildArgs%
-    if %errorlevel% == 1 (
+    set __MsbuildWrn=/flp1:WarningsOnly;LogFile="%__LogsDir%\Cross_%__BuildOS%__%__BuildArch%__%__BuildType%.wrn"
+    set __MsbuildErr=/flp2:ErrorsOnly;LogFile="%__LogsDir%\Cross_%__BuildOS%__%__BuildArch%__%__BuildType%.err"
+    @call %__ProjectDir%\run.cmd build -Project=%__CrossCompIntermediatesDir%\install.vcxproj -configuration=%__BuildType% -platform=%__CrossArch% -MsBuildLog=!__MsbuildLog! -MsBuildWrn=!__MsbuildWrn! -MsBuildErr=!__MsbuildErr! %__RunArgs% %__UnprocessedBuildArgs%
+    if not !errorlevel! == 0 (
         echo %__MsgPrefix%Error: cross-arch components build failed. Refer to the build log files for details:
         echo     "%__LogsDir%\Cross_%__BuildOS%__%__BuildArch%__%__BuildType%.log"
         echo     "%__LogsDir%\Cross_%__BuildOS%__%__BuildArch%__%__BuildType%.wrn"
@@ -309,10 +309,6 @@ if %__BuildCoreLib% EQU 1 (
     rem Explicitly set Platform causes conflicts in CoreLib project files. Clear it to allow building from VS x64 Native Tools Command Prompt
     set Platform=
 
-    :: Set the environment for the managed build
-    echo %__MsgPrefix%Using environment: "%__VSToolsRoot%\VsDevCmd.bat"
-    call                                 "%__VSToolsRoot%\VsDevCmd.bat"
-
     set __MsbuildLog=/flp:Verbosity=normal;LogFile="%__LogsDir%\System.Private.CoreLib_%__BuildOS%__%__BuildArch%__%__BuildType%.log"
     set __MsbuildWrn=/flp1:WarningsOnly;LogFile="%__LogsDir%\System.Private.CoreLib_%__BuildOS%__%__BuildArch%__%__BuildType%.wrn"
     set __MsbuildErr=/flp2:ErrorsOnly;LogFile="%__LogsDir%\System.Private.CoreLib_%__BuildOS%__%__BuildArch%__%__BuildType%.err"
@@ -325,8 +321,8 @@ if %__BuildCoreLib% EQU 1 (
 		set __nugetBuildArgs=-buildNugetPackage=true
 	)
 
-    @call %~dp0run.cmd build -buildCoreLib -MsBuildLog=!__MsbuildLog! -MsBuildWrn=!__MsbuildWrn! -MsBuildErr=!__MsbuildErr! %__RunArgs% %__UnprocessedBuildArgs% !__nugetBuildArgs!
-    if %errorlevel% == 1 (
+    @call %__ProjectDir%\run.cmd build -Project=%__ProjectDir%\build.proj -MsBuildLog=!__MsbuildLog! -MsBuildWrn=!__MsbuildWrn! -MsBuildErr=!__MsbuildErr! !__nugetBuildArgs! %__RunArgs% %__UnprocessedBuildArgs% 
+    if not !errorlevel! == 0 (
         echo %__MsgPrefix%Error: System.Private.CoreLib build failed. Refer to the build log files for details:
         echo     "%__LogsDir%\System.Private.CoreLib_%__BuildOS%__%__BuildArch%__%__BuildType%.log"
         echo     "%__LogsDir%\System.Private.CoreLib_%__BuildOS%__%__BuildArch%__%__BuildType%.wrn"
@@ -340,7 +336,7 @@ if %__BuildNativeCoreLib% EQU 1 (
 	
     echo "%__CrossgenExe%" /Platform_Assemblies_Paths "%__BinDir%" /out "%__BinDir%\System.Private.CoreLib.ni.dll" "%__BinDir%\System.Private.CoreLib.dll"
     "%__CrossgenExe%" /Platform_Assemblies_Paths "%__BinDir%" /out "%__BinDir%\System.Private.CoreLib.ni.dll" "%__BinDir%\System.Private.CoreLib.dll" > "%__CrossGenCoreLibLog%" 2>&1
-    if NOT %errorlevel% == 0 (
+    if NOT !errorlevel! == 0 (
         echo %__MsgPrefix%Error: CrossGen System.Private.CoreLib build failed. Refer to the build log file for details:
         echo     %__CrossGenCoreLibLog%
         exit /b 1
@@ -351,7 +347,7 @@ if %__BuildNativeCoreLib% EQU 1 (
     set "__CrossGenCoreLibLog=%__LogsDir%\CrossgenMSCoreLib_%__BuildOS%__%__BuildArch%__%__BuildType%.log"
     set "__CrossgenExe=%__CrossComponentBinDir%\crossgen.exe"
     "%__CrossgenExe%" /Platform_Assemblies_Paths "%__BinDir%" /out "%__BinDir%\mscorlib.ni.dll" "%__BinDir%\mscorlib.dll" > "%__CrossGenCoreLibLog%" 2>&1
-    if NOT %errorlevel% == 0 (
+    if NOT !errorlevel! == 0 (
         echo %__MsgPrefix%Error: CrossGen mscorlib facade build failed. Refer to the build log file for details:
         echo     %__CrossGenCoreLibLog%
         exit /b 1
@@ -365,9 +361,9 @@ if %__BuildPackages% EQU 1 (
 	set __MsbuildErr=/flp2:ErrorsOnly;LogFile="%__LogsDir%\Nuget_%__BuildOS%__%__BuildArch%__%__BuildType%.err"
 
     REM The conditions as to what to build are captured in the builds file.
-    @call %~dp0run.cmd build -buildPackages -platform=%__BuildArch% -MsBuildLog=!__MsbuildLog! -MsBuildWrn=!__MsbuildWrn! -MsBuildErr=!__MsbuildErr! %__RunArgs% %__UnprocessedBuildArgs%
+    @call %__ProjectDir%\run.cmd build -Project=%__SourceDir%\.nuget\packages.builds -platform=%__BuildArch% -MsBuildLog=!__MsbuildLog! -MsBuildWrn=!__MsbuildWrn! -MsBuildErr=!__MsbuildErr! %__RunArgs% %__UnprocessedBuildArgs%
 
-    if %errorlevel% == 1 (
+    if not !errorlevel! == 0 (
         echo %__MsgPrefix%Error: Nuget package generation failed build failed. Refer to the build log files for details:
         echo     "%__LogsDir%\Nuget_%__BuildOS%__%__BuildArch%__%__BuildType%.log"
         echo     "%__LogsDir%\Nuget_%__BuildOS%__%__BuildArch%__%__BuildType%.wrn"
@@ -394,7 +390,7 @@ if %__BuildTests% EQU 1 (
     echo "%__ProjectDir%\build-test.cmd %__BuildArch% %__BuildType% %__UnprocessedBuildArgs%"
     @call %__ProjectDir%\build-test.cmd %__BuildArch% %__BuildType% %__UnprocessedBuildArgs%
 
-    if %errorlevel% == 1 (
+    if not !errorlevel! == 0 (
         REM buildtest.cmd has already emitted an error message and mentioned the build log file to examine.
         exit /b 1
     )
@@ -480,7 +476,7 @@ set __BuildType=%2
 set __NextCmd=call %__ThisScriptFull% %__BuildArch% %__BuildType% %__PassThroughArgs%
 echo %__MsgPrefix%Invoking: %__NextCmd%
 %__NextCmd%
-if %errorlevel% == 1 (
+if not !errorlevel! == 0 (
     echo %__MsgPrefix%    %__BuildArch% %__BuildType% %__PassThroughArgs% >> %__BuildResultFile%
     set __AllBuildSuccess=false
 )
