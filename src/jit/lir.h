@@ -30,12 +30,12 @@ public:
                          // a more expensive data structure when processing a set
                          // of LIR nodes. See for example `LIR::GetTreeRange`.
 
-            IsUnusedValue = 0x02, // Set on a node if it produces a value that is noy
+            IsUnusedValue = 0x02, // Set on a node if it produces a value that is not
                                   // subsequently used. Should never be set on nodes
                                   // that return `false` for `GenTree::IsValue`. Note
                                   // that this bit should not be assumed to be valid
                                   // at all points during compilation: it is currently
-                                  // only computed during taget-dependent lowering.
+                                  // only computed during target-dependent lowering.
         };
     };
 

@@ -8769,14 +8769,13 @@ BasicBlock* Compiler::fgSplitBlockAfterNode(BasicBlock* curr, GenTree* node)
     if (node != nullptr)
     {
         LIR::Range currBBRange = LIR::AsRange(curr);
-        LIR::Range newBlockRange = LIR::AsRange(newBlock);
 
         if (node != curr->bbLastNode)
         {
             LIR::Range nodesToMove = LIR::AsRange(node->gtNext, curr->bbLastNode);
 
             currBBRange.Remove(nodesToMove);
-            newBlockRange.InsertAtBeginning(nodesToMove);
+            LIR::AsRange(newBlock).InsertAtBeginning(nodesToMove);
         }
 
         // Update the IL offsets of the blocks to match the split.
