@@ -2290,6 +2290,8 @@ void Lowering::InsertPInvokeMethodProlog()
 
     JITDUMP("======= Inserting PInvoke method prolog\n");
 
+    LIR::Range firstBlockRange = LIR::AsRange(comp->fgFirstBB);
+
     const CORINFO_EE_INFO* pInfo = comp->eeGetEEInfo();
     const CORINFO_EE_INFO::InlinedCallFrameInfo& callFrameInfo = pInfo->inlinedCallFrameInfo;
 
@@ -2321,14 +2323,14 @@ void Lowering::InsertPInvokeMethodProlog()
     store->gtOp.gtOp1 = call;
     store->gtFlags |= GTF_VAR_DEF;
 
-    GenTree* insertionPoint = m_blockRange.FirstNonPhiOrCatchArgNode();
+    GenTree* insertionPoint = firstBlockRange.FirstNonPhiOrCatchArgNode();
     if (insertionPoint == nullptr)
     {
-        insertionPoint = m_blockRange.EndExclusive();
+        insertionPoint = firstBlockRange.EndExclusive();
     }
 
     comp->fgMorphTree(store);
-    m_blockRange.InsertAfter(LIR::SeqTree(comp, store), insertionPoint);
+    firstBlockRange.InsertAfter(LIR::SeqTree(comp, store), insertionPoint);
     insertionPoint = store;
 
     DISPTREE(store);
@@ -2343,7 +2345,7 @@ void Lowering::InsertPInvokeMethodProlog()
                                                     callFrameInfo.offsetOfCallSiteSP);
     storeSP->gtOp1 = PhysReg(REG_SPBASE);
 
-    m_blockRange.InsertAfter(LIR::SeqTree(comp, storeSP), insertionPoint);
+    firstBlockRange.InsertAfter(LIR::SeqTree(comp, storeSP), insertionPoint);
     insertionPoint = storeSP;
 
     DISPTREE(storeSP);
@@ -2358,7 +2360,7 @@ void Lowering::InsertPInvokeMethodProlog()
                                                     callFrameInfo.offsetOfCalleeSavedFP);
     storeFP->gtOp1 = PhysReg(REG_FPBASE);
 
-    m_blockRange.InsertAfter(LIR::SeqTree(comp, storeFP), insertionPoint);
+    firstBlockRange.InsertAfter(LIR::SeqTree(comp, storeFP), insertionPoint);
     insertionPoint = storeFP;
 
     DISPTREE(storeFP);
@@ -2370,7 +2372,7 @@ void Lowering::InsertPInvokeMethodProlog()
         // Push a frame - if we are NOT in an IL stub, this is done right before the call
         // The init routine sets InlinedCallFrame's m_pNext, so we just set the thead's top-of-stack
         GenTree* frameUpd = CreateFrameLinkUpdate(PushFrame);
-        m_blockRange.InsertAfter(LIR::SeqTree(comp, frameUpd), insertionPoint);
+        firstBlockRange.InsertAfter(LIR::SeqTree(comp, frameUpd), insertionPoint);
         DISPTREE(frameUpd);
     }
 }
@@ -2404,7 +2406,9 @@ void Lowering::InsertPInvokeMethodEpilog(BasicBlock *returnBB
     // Method doing PInvoke calls has exactly one return block unless it has "jmp" or tail calls.
     assert(((returnBB == comp->genReturnBB) && (returnBB->bbJumpKind == BBJ_RETURN)) || returnBB->endsWithTailCallOrJmp(comp));
 
-    GenTree* insertionPoint = LIR::AsRange(returnBB).EndExclusive();
+    LIR::Range returnBlockRange = LIR::AsRange(returnBB);
+
+    GenTree* insertionPoint = returnBlockRange.EndExclusive();
 
     // Note: PInvoke Method Epilog (PME) needs to be inserted just before GT_RETURN, GT_JMP or GT_CALL node in execution
     // order so that it is guaranteed that there will be no further PInvokes after that point in the method.
@@ -2431,13 +2435,13 @@ void Lowering::InsertPInvokeMethodEpilog(BasicBlock *returnBB
     // Thread.offsetOfGcState = 0/1 
     // That is [tcb + offsetOfGcState] = 1
     GenTree* storeGCState = SetGCState(1);
-    m_blockRange.InsertBefore(LIR::SeqTree(comp, storeGCState), insertionPoint);
+    returnBlockRange.InsertBefore(LIR::SeqTree(comp, storeGCState), insertionPoint);
 
     if (comp->opts.eeFlags & CORJIT_FLG_IL_STUB)
     {
         // Pop the frame, in non-stubs we do this around each PInvoke call
         GenTree* frameUpd = CreateFrameLinkUpdate(PopFrame);
-        m_blockRange.InsertBefore(LIR::SeqTree(comp, frameUpd), insertionPoint);
+        returnBlockRange.InsertBefore(LIR::SeqTree(comp, frameUpd), insertionPoint);
     }
 }
 
