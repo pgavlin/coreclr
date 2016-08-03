@@ -857,7 +857,9 @@ bool LIR::Range::TryGetUse(GenTree* node, Use* use)
     assert(ContainsNode(node));
 
     // Don't bother looking for uses of nodes that are not values.
-    if (node->IsValue())
+    // If the node is the last node, we won't find a use (and we would
+    // end up creating an illegal range if we tried).
+    if (node->IsValue() && (node != EndExclusive()))
     {
         for (GenTree* n : LIR::AsRange(node->gtNext, EndExclusive()))
         {
