@@ -50,21 +50,17 @@ public:
 #endif // _TARGET_64BIT_
 
 private:
-    // Friends
-    static Compiler::fgWalkResult LowerNodeHelper   (GenTreePtr* ppTree, Compiler::fgWalkData* data);
-    static Compiler::fgWalkResult TreeInfoInitHelper(GenTreePtr* ppTree, Compiler::fgWalkData* data);
-    
     // Member Functions
     void LowerBlock(BasicBlock* block);
-    void LowerNode(GenTree* node);
+    GenTree* LowerNode(GenTree* node);
     void CheckVSQuirkStackPaddingNeeded(GenTreeCall* call);
 
     // ------------------------------
     // Call Lowering
     // ------------------------------
-    void LowerCall                    (GenTree*     call);
-    void LowerJmpMethod               (GenTree*     jmp);
-    void LowerRet                     (GenTree*     ret);
+    void     LowerCall                (GenTree*     call);
+    void     LowerJmpMethod           (GenTree*     jmp);
+    void     LowerRet                 (GenTree*     ret);
     GenTree* LowerDelegateInvoke      (GenTreeCall* call);
     GenTree* LowerIndirectNonvirtCall (GenTreeCall* call);
     GenTree* LowerDirectCall          (GenTreeCall* call);
@@ -205,14 +201,14 @@ private:
 
     // Per tree node member functions
     void LowerStoreInd(GenTree* node);
-    void LowerAdd(GenTree* node);
+    GenTree* LowerAdd(GenTree* node);
     void LowerUnsignedDivOrMod(GenTree* node);
-    void LowerSignedDivOrMod(GenTree* node);
+    GenTree* LowerSignedDivOrMod(GenTree* node);
 
-    void TryCreateAddrMode(LIR::Use&& use, bool isIndir);
+    GenTree* TryCreateAddrMode(LIR::Use&& use, bool isIndir);
     void AddrModeCleanupHelper(GenTreeAddrMode* addrMode, GenTree* node);
 
-    void LowerSwitch(GenTree* node);
+    GenTree* LowerSwitch(GenTree* node);
     void LowerCast(GenTree* node);
 
 #if defined(_TARGET_XARCH_)
@@ -229,7 +225,7 @@ private:
     void LowerStoreLoc(GenTreeLclVarCommon* tree);
     void SetIndirAddrOpCounts(GenTree *indirTree);
     void LowerGCWriteBarrier(GenTree *tree);
-    void LowerArrElem(GenTree* node);
+    GenTree* LowerArrElem(GenTree* node);
     void LowerRotate(GenTree *tree);
 
     // Utility functions

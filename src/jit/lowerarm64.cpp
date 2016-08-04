@@ -1829,7 +1829,7 @@ void Lowering::LowerCmp(GenTreePtr tree)
  * i) GT_CAST(float/double, int type with overflow detection) 
  *
  */
-void Lowering::LowerCast(GenTree* tree) 
+void Lowering::LowerCast(GenTree* tree)
 {
     assert(tree->OperGet() == GT_CAST);
 
