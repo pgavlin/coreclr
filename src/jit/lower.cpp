@@ -3745,6 +3745,98 @@ void Lowering::DoPhase()
     DBEXEC(VERBOSE, DumpNodeInfoMap());
 }
 
+#ifdef DEBUG
+static bool IsPutArg(GenTree* node)
+{
+    return (node->OperGet() == GT_PUTARG_REG) || (node->OperGet() == GT_PUTARG_STK);
+}
+
+static void CheckCallArg(GenTree* arg)
+{
+    if (arg->OperIsStore() || arg->IsArgPlaceHolderNode() || arg->IsNothingNode() || arg->OperIsCopyBlkOp())
+    {
+        return;
+    }
+
+    switch (arg->OperGet())
+    {
+#if !defined(_TARGET_64BIT_)
+    case GT_LONG:
+        assert(IsPutArg(arg->gtGetOp1());
+        assert(IsPutArg(arg->gtGetOp2());
+        break;
+#endif
+
+    case GT_LIST:
+        for (GenTreeArgList* list = arg->AsArgList(); list != nullptr; list = list->Rest())
+        {
+            assert(IsPutArg(list->Current()));
+        }
+        break;
+
+    default:
+        assert(IsPutArg(arg));
+        break;
+    }
+}
+
+static void CheckCall(GenTreeCall* call)
+{
+    if (call->gtCallObjp != nullptr)
+    {
+        CheckCallArg(call->gtCallObjp);
+    }
+
+    GenTreeArgList* args = call->gtCallArgs;
+    for (; args; args = args->Rest())
+    {
+        CheckCallArg(args->Current());
+    }
+
+    for (args = call->gtCallLateArgs; args; args = args->Rest())
+    {
+        CheckCallArg(args->Current());
+    }
+}
+
+static void CheckNode(GenTree* node)
+{
+    switch (node->OperGet())
+    {
+    case GT_CALL:
+        CheckCall(node->AsCall());
+        break;
+
+#ifdef FEATURE_SIMD
+    case GT_SIMD:
+#ifdef _TARGET_64BIT_
+    case GT_LCL_VAR:
+    case GT_STORE_LCL_VAR:
+#endif // _TARGET_64BIT_
+        assert(node->TypeGet() != TYP_SIMD12);
+        break;
+#endif
+
+    default:
+        break;
+    }
+}
+
+static bool CheckBlock(Compiler* compiler, BasicBlock* block)
+{
+    assert(block->isEmpty() || block->IsLIR());
+
+    LIR::Range blockRange = LIR::AsRange(block);
+    for (GenTree* node : blockRange)
+    {
+        CheckNode(node);
+    }
+
+    assert(blockRange.CheckLIR(compiler));
+    return true;
+}
+#endif
+
 void Lowering::LowerBlock(BasicBlock* block)
 {
     assert(block == comp->compCurBB); // compCurBB must already be set.
@@ -3768,7 +3860,7 @@ void Lowering::LowerBlock(BasicBlock* block)
         node = LowerNode(node);
     }
 
-    assert(m_blockRange.CheckLIR(comp));
+    assert(CheckBlock(comp, block));
 }
 
 /** Verifies if both of these trees represent the same indirection.
