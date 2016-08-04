@@ -34,7 +34,7 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 /* Lowering of GT_CAST nodes */
 void Lowering::LowerCast(GenTree* tree)
 {
-    MYI_ARM("ARM Lowering for cast");
+    NYI_ARM("ARM Lowering for cast");
 }
 
 void Lowering::LowerRotate(GenTreePtr tree)

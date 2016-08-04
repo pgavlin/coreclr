@@ -258,7 +258,8 @@ GenTree* DecomposeLongs::DecomposeNode(LIR::Use& use)
 #ifdef DEBUG
     if (m_compiler->verbose)
     {
-        printf("  AFTER:\n");
+        // NOTE: st_lcl_var doesn't dump properly afterwards.
+        printf("Decomposing TYP_LONG tree.  AFTER:\n");
         m_compiler->gtDispTree(use.Def());
     }
 #endif
@@ -275,7 +276,8 @@ GenTree* DecomposeLongs::DecomposeNode(LIR::Use& use)
 // Arguments:
 //    use - the LIR::Use object for the def that needs to be decomposed.
 //    loResult - the decomposed low part
-//    hiResult - the decomposed high part
+//    hiResult - the decomposed high part. This must follow loResult in the linear order,
+//               as the new GT_LONG node will be inserted immediately after it.
 //
 // Return Value:
 //    The next node to process.
@@ -294,7 +296,7 @@ GenTree* DecomposeLongs::FinalizeDecomposition(LIR::Use& use, GenTree* loResult,
 
     use.ReplaceWith(m_compiler, gtLong);
 
-    return gtLong;
+    return gtLong->gtNext;
 }
 
 
@@ -434,6 +436,10 @@ GenTree* DecomposeLongs::DecomposeStoreLclVar(LIR::Use& use)
         hiStore->AsLclFld()->gtFieldSeq = FieldSeqStore::NotAField();
     }
 
+    // 'tree' is going to steal the loRhs node for itself, so we need to remove the
+    // GT_LONG node from the threading.
+    m_blockRange.Remove(rhs);
+
     tree->gtOp.gtOp1 = loRhs;
     tree->gtType = TYP_INT;
 
@@ -445,7 +451,7 @@ GenTree* DecomposeLongs::DecomposeStoreLclVar(LIR::Use& use)
 
     m_blockRange.InsertAfter(hiStore, tree);
 
-    return hiStore;
+    return hiStore->gtNext;
 }
 
 
@@ -796,6 +802,7 @@ GenTree* DecomposeLongs::DecomposeInd(LIR::Use& use)
     GenTreePtr indHigh = new (m_compiler, GT_IND) GenTreeIndir(GT_IND, TYP_INT, addrHigh, nullptr);
     
     // Insert the nodes into the block
+    m_blockRange.InsertAfter(addrBaseHigh, indLow);
     m_blockRange.InsertAfter(addrHigh, addrBaseHigh);
     m_blockRange.InsertAfter(indHigh, addrHigh);
 

@@ -222,7 +222,7 @@ GTNODE(PHI_ARG    , "phiArg"     ,0,GTK_LEAF|GTK_LOCAL)  // phi(phiarg, phiarg, 
 //  Nodes used by Lower to generate a closer CPU representation of other nodes
 //-----------------------------------------------------------------------------
 
-GTNODE(JMPTABLE    , "jumpTable"  , 0, GTK_LEAF|GTK_NOVALUE)   // Generates the jump table for switches
+GTNODE(JMPTABLE    , "jumpTable"  , 0, GTK_LEAF)               // Generates the jump table for switches
 GTNODE(SWITCH_TABLE, "tableSwitch", 0, GTK_BINOP|GTK_NOVALUE)  // Jump Table based switch construct
 
 //-----------------------------------------------------------------------------
