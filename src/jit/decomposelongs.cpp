@@ -141,6 +141,7 @@ GenTree* DecomposeLongs::DecomposeNode(LIR::Use& use)
     {
     case GT_PHI:
     case GT_PHI_ARG:
+        nextNode = tree->gtNext;
         break;
 
     case GT_LCL_VAR:
