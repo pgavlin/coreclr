@@ -3746,11 +3746,6 @@ void Lowering::DoPhase()
 }
 
 #ifdef DEBUG
-static bool IsPutArg(GenTree* node)
-{
-    return (node->OperGet() == GT_PUTARG_REG) || (node->OperGet() == GT_PUTARG_STK);
-}
-
 static void CheckCallArg(GenTree* arg)
 {
     if (arg->OperIsStore() || arg->IsArgPlaceHolderNode() || arg->IsNothingNode() || arg->OperIsCopyBlkOp())
@@ -3762,20 +3757,20 @@ static void CheckCallArg(GenTree* arg)
     {
 #if !defined(_TARGET_64BIT_)
     case GT_LONG:
-        assert(IsPutArg(arg->gtGetOp1()));
-        assert(IsPutArg(arg->gtGetOp2()));
+        assert(arg->gtGetOp1()->OperIsPutArg());
+        assert(arg->gtGetOp2()->OperIsPutArg());
         break;
 #endif
 
     case GT_LIST:
         for (GenTreeArgList* list = arg->AsArgList(); list != nullptr; list = list->Rest())
         {
-            assert(IsPutArg(list->Current()));
+            assert(list->Current()->OperIsPutArg());
         }
         break;
 
     default:
-        assert(IsPutArg(arg));
+        assert(arg->OperIsPutArg());
         break;
     }
 }

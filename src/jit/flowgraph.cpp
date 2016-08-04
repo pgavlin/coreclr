@@ -9764,16 +9764,25 @@ void                Compiler::fgCompactBlocks(BasicBlock* block, BasicBlock* bNe
         GenTree* nextBegin = nextRange.Begin();
         GenTree* nextFirstNonPhi = nextRange.FirstNonPhiNode();
 
-        GenTree* insertionPoint = blockFirstNonPhi != blockRange.End() ? blockFirstNonPhi : blockRange.EndExclusive();
+        GenTree* insertionPoint;
+        if (blockBegin != blockFirstNonPhi)
+        {
+            insertionPoint = blockFirstNonPhi != blockRange.End() ? blockFirstNonPhi->gtPrev : blockRange.EndExclusive();
+        }
+        else
+        {
+            insertionPoint = blockBegin;
+        }
 
         // Does the next block have any phis?
         if (nextBegin != nextFirstNonPhi)
         {
-            LIR::Range nextPhis = LIR::AsRange(nextBegin, nextFirstNonPhi != nullptr ? nextFirstNonPhi : nextRange.EndExclusive());
+            GenTree* lastPhi = nextFirstNonPhi != nextRange.End() ? nextFirstNonPhi->gtPrev : nextRange.EndExclusive();
+
+            LIR::Range nextPhis = LIR::AsRange(nextBegin, lastPhi);
             nextRange.Remove(nextPhis);
 
             blockRange.InsertAfter(nextPhis, insertionPoint);
-            insertionPoint = nextPhis.EndExclusive();
         }
 
         // Does the block have any other code?
@@ -9782,7 +9791,7 @@ void                Compiler::fgCompactBlocks(BasicBlock* block, BasicBlock* bNe
             LIR::Range nextNodes = LIR::AsRange(nextFirstNonPhi, nextRange.EndExclusive());
             nextRange.Remove(nextNodes);
 
-            blockRange.InsertAfter(nextNodes, insertionPoint);
+            blockRange.InsertAfter(nextNodes, blockRange.EndExclusive());
         }
 
         assert(blockRange.CheckLIR(this));
@@ -13406,7 +13415,7 @@ bool Compiler::fgOptimizeEmptyBlock(BasicBlock* block)
                 {
                     // Insert a NOP in the empty block to ensure we generate code
                     // for the catchret target in the right EH region.
-                    GenTree* nop = gtNewNothingNode();
+                    GenTree* nop = new (this, GT_NO_OP) GenTree(GT_NO_OP, TYP_VOID);
 
                     // TODO(pdg): allow empty blocks to be LIR blocks
                     if (compRationalIRForm)
@@ -13613,7 +13622,7 @@ bool Compiler::fgOptimizeSwitchBranches(BasicBlock* block)
             unsigned sideEffects;
             LIR::Range switchTreeRange = blockRange.GetTreeRange(switchTree, &isClosed, &sideEffects);
 
-            // The switch tree should form a contiguous, sidfe-effect free range by construction. See
+            // The switch tree should form a contiguous, side-effect free range by construction. See
             // Lowering::LowerSwitch for details.
             assert(isClosed);
             assert((sideEffects & GTF_ALL_EFFECT) == 0);

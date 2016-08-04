@@ -1071,6 +1071,16 @@ public:
         return gtOper == GT_PUTARG_STK;
     }
 
+    bool            OperIsPutArgReg() const
+    {
+        return gtOper == GT_PUTARG_REG;
+    }
+
+    bool            OperIsPutArg() const
+    {
+        return OperIsPutArgStk() || OperIsPutArgReg();
+    }
+
     bool            OperIsAddrMode() const
     {
         return OperIsAddrMode(OperGet());
