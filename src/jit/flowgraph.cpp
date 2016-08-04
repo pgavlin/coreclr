@@ -13619,6 +13619,7 @@ bool Compiler::fgOptimizeSwitchBranches(BasicBlock* block)
             assert((sideEffects & GTF_ALL_EFFECT) == 0);
 
             blockRange.Remove(switchTreeRange);
+            LIR::DecRefCnts(this, block, switchTreeRange);
         }
         else
         {
@@ -13858,6 +13859,9 @@ bool Compiler::fgOptimizeUncondBranchToSimpleCond(BasicBlock* block, BasicBlock*
 
     // Duplicate the target block at the end of this block
     
+    // TODO(pdg): It seems like the operations below are dropping code on the floor...
+    //            Shouldn't all of the statements in the target block be copied?
+
     GenTree* cloned = gtCloneExpr(stmt->gtStmtExpr);
     noway_assert(cloned);
     GenTree *jmpStmt = gtNewStmt(cloned);
@@ -13946,9 +13950,6 @@ bool Compiler::fgOptimizeBranchToNext(BasicBlock* block, BasicBlock* bNext, Basi
         noway_assert(block->bbJumpKind == BBJ_COND);
         noway_assert(block->bbTreeList);
 
-        GenTreeStmt* cond = block->lastTopLevelStmt();
-        noway_assert(cond->gtStmtExpr->gtOper == GT_JTRUE);
-
 #ifdef DEBUG
         if  (verbose)
         {
@@ -13957,21 +13958,36 @@ bool Compiler::fgOptimizeBranchToNext(BasicBlock* block, BasicBlock* bNext, Basi
         }
 #endif // DEBUG
 
-        /* check for SIDE_EFFECTS */
-
-        if (cond->gtStmtExpr->gtFlags & GTF_SIDE_EFFECT)
+        if (block->IsLIR())
         {
-            if (compRationalIRForm)
+            LIR::Range blockRange = LIR::AsRange(block);
+            GenTree* jmp = blockRange.EndExclusive();
+            assert(jmp->OperGet() == GT_JTRUE);
+
+            bool isClosed;
+            unsigned sideEffects;
+            LIR::Range jmpRange = blockRange.GetTreeRange(jmp, &isClosed, &sideEffects);
+
+            if (isClosed && ((sideEffects & GTF_ALL_EFFECT) == 0))
             {
-                // Extracting side-effects won't work in rationalized form.
-                // Instead just transform the JTRUE into a NEG which has the effect of
-                // evaluating the side-effecting tree and perform a benign operation on it.
-                // TODO-CQ: [TFS:1121057] We should be able to simply remove the jump node,
-                // and change gtStmtExpr to its op1.
-                cond->gtStmtExpr->SetOper(GT_NEG);
-                cond->gtStmtExpr->gtType = TYP_I_IMPL;
+                // If the jump and its operands form a contiguous, side-effect-free range,
+                // remove them.
+                blockRange.Remove(jmpRange);
+                LIR::DecRefCnts(this, block, jmpRange);
             }
             else
+            {
+                // Otherwise, just remove the jump node itself.
+                blockRange.Remove(jmp);
+            }
+        }
+        else
+        {
+            GenTreeStmt* cond = block->lastTopLevelStmt();
+            noway_assert(cond->gtStmtExpr->gtOper == GT_JTRUE);
+
+            /* check for SIDE_EFFECTS */
+            if (cond->gtStmtExpr->gtFlags & GTF_SIDE_EFFECT)
             {
                 /* Extract the side effects from the conditional */
                 GenTreePtr  sideEffList = NULL;
@@ -14013,14 +14029,14 @@ bool Compiler::fgOptimizeBranchToNext(BasicBlock* block, BasicBlock* bNext, Basi
                         /* Re-link the nodes for this statement */
                         fgSetStmtSeq(cond);
                     }
-                 }
+                }
             }
-        }
-        else
-        {
-           compCurBB = block;
-           /* conditional has NO side effect - remove it */
-           fgRemoveStmt(block, cond);
+            else
+            {
+               compCurBB = block;
+               /* conditional has NO side effect - remove it */
+               fgRemoveStmt(block, cond);
+            }
         }
 
         /* Conditional is gone - simply fall into the next block */
