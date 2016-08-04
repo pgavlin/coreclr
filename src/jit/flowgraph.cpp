@@ -14105,6 +14105,13 @@ bool                Compiler::fgOptimizeBranch(BasicBlock* bJump)
     if (bDestNext->hasTryIndex() && !BasicBlock::sameTryRegion(bJump, bDestNext))
         return false;
 
+    // TODO(pdg): cost information for LIR
+    if (bJump->IsLIR() || bDest->IsLIR())
+    {
+        NYI("fgOptimizeBranch for LIR");
+        return false;
+    }
+
     GenTreeStmt* stmt;
     unsigned   estDupCostSz = 0;
     for (stmt = bDest->firstStmt(); stmt; stmt = stmt->gtNextStmt)
