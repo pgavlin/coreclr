@@ -1379,13 +1379,14 @@ void Rationalizer::DoPhase()
 {
     DBEXEC(TRUE, SanityCheck());
 
-    comp->compCurBB = NULL;
+    comp->compCurBB = nullptr;
     comp->fgOrder = Compiler::FGOrderLinear;
 
     BasicBlock* firstBlock = comp->fgFirstBB;
 
     for (BasicBlock* block = comp->fgFirstBB; block != nullptr; block = block->bbNext)
     {
+        comp->compCurBB = block;
         m_block = block;
 
         // Establish the first and last nodes for the block. This is necessary in order for the LIR

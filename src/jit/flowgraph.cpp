@@ -10265,57 +10265,83 @@ void                Compiler::fgRemoveJTrue(BasicBlock *block)
 
     /* Remove the block jump condition */
 
-    GenTreeStmt* test = block->lastTopLevelStmt();
-
-    GenTree* tree = test->gtStmtExpr;
-
-    noway_assert(tree->gtOper == GT_JTRUE);
-
-    GenTree* sideEffList = NULL;
-
-    if (tree->gtFlags & GTF_SIDE_EFFECT)
+    if (block->IsLIR())
     {
-        if (compRationalIRForm)
-        {
-            // if we are in rational form don't try to extract the side effects
-            // because gtExtractSideEffList will create new comma nodes 
-            // (which we would have to rationalize) and fgMorphBlockStmt can't 
-            // handle embedded statements.  
+        LIR::Range blockRange = LIR::AsRange(block);
 
-            // Instead just transform the JTRUE into a NEG which has the effect of
-            // evaluating the side-effecting tree and perform a benign operation on it.
-            tree->SetOper(GT_NEG);
-            tree->gtType = TYP_I_IMPL;
+        GenTree* test = blockRange.EndExclusive();
+        assert(test->OperGet() == GT_JTRUE);
+
+        bool isClosed;
+        unsigned sideEffects;
+        LIR::Range testRange = blockRange.GetTreeRange(test, &isClosed, &sideEffects);
+
+        if (isClosed && ((sideEffects & GTF_ALL_EFFECT) == 0))
+        {
+            // If the jump and its operands form a contiguous, side-effect-free range,
+            // remove them.
+            blockRange.Remove(testRange);
+            LIR::DecRefCnts(this, block, testRange);
         }
         else
         {
-            gtExtractSideEffList(tree, &sideEffList);
-
-            if (sideEffList)
-            {
-                noway_assert(sideEffList->gtFlags & GTF_SIDE_EFFECT);
-#ifdef DEBUG
-                if (verbose)
-                {
-                    printf("Extracted side effects list from condition...\n");
-                    gtDispTree(sideEffList); printf("\n");
-                }
-#endif
-            }
+            // Otherwise, just remove the jump node itself.
+            blockRange.Remove(test);
         }
-    }
-
-    // Delete the cond test or replace it with the side effect tree
-    if (sideEffList == NULL)
-    {
-        if (!compRationalIRForm || (tree->gtFlags & GTF_SIDE_EFFECT) == 0)
-            fgRemoveStmt(block, test);
     }
     else
     {
-        test->gtStmtExpr = sideEffList;
+        GenTreeStmt* test = block->lastTopLevelStmt();
+        GenTree* tree = test->gtStmtExpr;
 
-        fgMorphBlockStmt(block, test DEBUGARG("fgRemoveJTrue"));
+        noway_assert(tree->gtOper == GT_JTRUE);
+
+        GenTree* sideEffList = NULL;
+
+        if (tree->gtFlags & GTF_SIDE_EFFECT)
+        {
+            if (compRationalIRForm)
+            {
+                // if we are in rational form don't try to extract the side effects
+                // because gtExtractSideEffList will create new comma nodes 
+                // (which we would have to rationalize) and fgMorphBlockStmt can't 
+                // handle embedded statements.  
+
+                // Instead just transform the JTRUE into a NEG which has the effect of
+                // evaluating the side-effecting tree and perform a benign operation on it.
+                tree->SetOper(GT_NEG);
+                tree->gtType = TYP_I_IMPL;
+            }
+            else
+            {
+                gtExtractSideEffList(tree, &sideEffList);
+
+                if (sideEffList)
+                {
+                    noway_assert(sideEffList->gtFlags & GTF_SIDE_EFFECT);
+#ifdef DEBUG
+                    if (verbose)
+                    {
+                        printf("Extracted side effects list from condition...\n");
+                        gtDispTree(sideEffList); printf("\n");
+                    }
+#endif
+                }
+            }
+        }
+
+        // Delete the cond test or replace it with the side effect tree
+        if (sideEffList == NULL)
+        {
+            if (!compRationalIRForm || (tree->gtFlags & GTF_SIDE_EFFECT) == 0)
+                fgRemoveStmt(block, test);
+        }
+        else
+        {
+            test->gtStmtExpr = sideEffList;
+
+            fgMorphBlockStmt(block, test DEBUGARG("fgRemoveJTrue"));
+        }
     }
 }
 
@@ -16013,12 +16039,21 @@ REPEAT:;
 #endif // DEBUG
                         /* Reverse the jump condition */
 
-                        GenTreePtr test = block->lastTopLevelStmt();
+                        GenTree* test;
+                        if (block->IsLIR())
+                        {
+                            test = block->bbLastNode;
+                        }
+                        else
+                        {
+                            test = block->lastTopLevelStmt()->gtStmt.gtStmtExpr;
+                        }
 
-                        test = test->gtStmt.gtStmtExpr;
                         noway_assert(test->gtOper == GT_JTRUE);
 
-                        test->gtOp.gtOp1 = gtReverseCond(test->gtOp.gtOp1);
+                        GenTree* cond = gtReverseCond(test->gtOp.gtOp1);
+                        assert(cond == test->gtOp.gtOp1); // Ensure `gtReverseCond` did not create a new node.
+                        test->gtOp.gtOp1 = cond;
 
                         // Optimize the Conditional JUMP to go to the new target
                         block->bbJumpDest = bNext->bbJumpDest;
