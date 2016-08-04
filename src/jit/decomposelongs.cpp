@@ -74,7 +74,7 @@ void DecomposeLongs::DecomposeBlock(BasicBlock* block)
 
     GenTree* node = m_blockRange.FirstNonPhiNode();
     GenTree* end = m_blockRange.End();
-    while (node != end);
+    while (node != end)
     {
         LIR::Use use;
         if (!m_blockRange.TryGetUse(node, &use))
