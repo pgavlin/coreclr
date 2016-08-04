@@ -13406,10 +13406,19 @@ bool Compiler::fgOptimizeEmptyBlock(BasicBlock* block)
                 {
                     // Insert a NOP in the empty block to ensure we generate code
                     // for the catchret target in the right EH region.
-                    GenTreePtr nopStmt =
-                        fgInsertStmtAtEnd(block, new (this, GT_NO_OP) GenTree(GT_NO_OP, TYP_VOID));
-                    fgSetStmtSeq(nopStmt);
-                    gtSetStmtInfo(nopStmt);
+                    GenTree* nop = gtNewNothingNode();
+
+                    // TODO(pdg): allow empty blocks to be LIR blocks
+                    if (compRationalIRForm)
+                    {
+                        LIR::AsRange(block).InsertAtEnd(nop);
+                    }
+                    else
+                    {
+                        GenTreePtr nopStmt = fgInsertStmtAtEnd(block, nop);
+                        fgSetStmtSeq(nopStmt);
+                        gtSetStmtInfo(nopStmt);
+                    }
 
 #ifdef DEBUG
                     if  (verbose)
@@ -13555,21 +13564,25 @@ bool Compiler::fgOptimizeSwitchBranches(BasicBlock* block)
     }
     while (++jmpTab, --jmpCnt);
 
-    GenTreeStmt* switchStmt = block->lastTopLevelStmt();
-    GenTreePtr   switchTree = switchStmt->gtStmtExpr;
+    GenTreeStmt* switchStmt = nullptr;
+    LIR::Range blockRange;
 
-    // If this is a Lowered switch, it must have no embedded statements, because we pulled
-    // out any embedded statements when we cloned the switch value.
-    if (switchTree->gtOper == GT_SWITCH_TABLE)
+    GenTree* switchTree;
+    if (block->IsLIR())
     {
-        noway_assert(fgOrder == FGOrderLinear);
-        assert(switchStmt->AsStmt()->gtStmtIsTopLevel() &&
-               (switchStmt->gtNext == nullptr));
+        blockRange = LIR::AsRange(block);
+        switchTree = blockRange.EndExclusive();
+
+        assert(switchTree->OperGet() == GT_SWITCH_TABLE);
     }
     else
     {
-        noway_assert(switchTree->gtOper == GT_SWITCH);
+        switchStmt = block->lastTopLevelStmt();
+        switchTree = switchStmt->gtStmtExpr;
+
+        assert(switchTree->OperGet() == GT_SWITCH);
     }
+
     noway_assert(switchTree->gtType == TYP_VOID);
 
     
@@ -13594,55 +13607,70 @@ bool Compiler::fgOptimizeSwitchBranches(BasicBlock* block)
         }
 #endif // DEBUG
 
-        /* check for SIDE_EFFECTS */
-
-        if (switchTree->gtFlags & GTF_SIDE_EFFECT)
+        if (block->IsLIR())
         {
-            /* Extract the side effects from the conditional */
-            GenTreePtr  sideEffList = NULL;
+            bool isClosed;
+            unsigned sideEffects;
+            LIR::Range switchTreeRange = blockRange.GetTreeRange(switchTree, &isClosed, &sideEffects);
 
-            gtExtractSideEffList(switchTree, &sideEffList);
+            // The switch tree should form a contiguous, sidfe-effect free range by construction. See
+            // Lowering::LowerSwitch for details.
+            assert(isClosed);
+            assert((sideEffects & GTF_ALL_EFFECT) == 0);
 
-            if (sideEffList == NULL)
-                goto NO_SWITCH_SIDE_EFFECT;
-
-            noway_assert(sideEffList->gtFlags & GTF_SIDE_EFFECT);
-
-#ifdef DEBUG
-            if  (verbose)
-            {
-                printf("\nSwitch expression has side effects! Extracting side effects...\n");
-                gtDispTree(switchTree); printf("\n");
-                gtDispTree(sideEffList); printf("\n");
-            }
-#endif // DEBUG
-
-            /* Replace the conditional statement with the list of side effects */
-            noway_assert(sideEffList->gtOper != GT_STMT);
-            noway_assert(sideEffList->gtOper != GT_SWITCH);
-
-            switchStmt->gtStmtExpr = sideEffList;
-
-            if (fgStmtListThreaded)
-            {
-                /* Update the lclvar ref counts */
-                compCurBB = block;
-                fgUpdateRefCntForExtract(switchTree, sideEffList);
-
-                /* Update ordering, costs, FP levels, etc. */
-                gtSetStmtInfo(switchStmt);
-
-                /* Re-link the nodes for this statement */
-                fgSetStmtSeq(switchStmt);
-            }
+            blockRange.Remove(switchTreeRange);
         }
         else
         {
+            /* check for SIDE_EFFECTS */
+            if (switchTree->gtFlags & GTF_SIDE_EFFECT)
+            {
+                /* Extract the side effects from the conditional */
+                GenTreePtr  sideEffList = NULL;
 
-        NO_SWITCH_SIDE_EFFECT:
+                gtExtractSideEffList(switchTree, &sideEffList);
 
-            /* conditional has NO side effect - remove it */
-            fgRemoveStmt(block, switchStmt);
+                if (sideEffList == NULL)
+                    goto NO_SWITCH_SIDE_EFFECT;
+
+                noway_assert(sideEffList->gtFlags & GTF_SIDE_EFFECT);
+
+#ifdef DEBUG
+                if  (verbose)
+                {
+                    printf("\nSwitch expression has side effects! Extracting side effects...\n");
+                    gtDispTree(switchTree); printf("\n");
+                    gtDispTree(sideEffList); printf("\n");
+                }
+#endif // DEBUG
+
+                /* Replace the conditional statement with the list of side effects */
+                noway_assert(sideEffList->gtOper != GT_STMT);
+                noway_assert(sideEffList->gtOper != GT_SWITCH);
+
+                switchStmt->gtStmtExpr = sideEffList;
+
+                if (fgStmtListThreaded)
+                {
+                    /* Update the lclvar ref counts */
+                    compCurBB = block;
+                    fgUpdateRefCntForExtract(switchTree, sideEffList);
+
+                    /* Update ordering, costs, FP levels, etc. */
+                    gtSetStmtInfo(switchStmt);
+
+                    /* Re-link the nodes for this statement */
+                    fgSetStmtSeq(switchStmt);
+                }
+            }
+            else
+            {
+
+            NO_SWITCH_SIDE_EFFECT:
+
+                /* conditional has NO side effect - remove it */
+                fgRemoveStmt(block, switchStmt);
+            }
         }
 
         // Change the switch jump into a BBJ_ALWAYS
@@ -13691,11 +13719,17 @@ bool Compiler::fgOptimizeSwitchBranches(BasicBlock* block)
         switchTree->gtOp.gtOp1  = condNode;
         switchTree->gtOp.gtOp1->gtFlags |= (GTF_RELOP_JMP_USED | GTF_DONT_CSE);
 
-        // Re-link the nodes for this statement.
-        // We know that this is safe for the Lowered form, because we will have eliminated any embedded trees
-        // when we cloned the switch condition (it is also asserted above).
+        if (block->IsLIR())
+        {
+            blockRange.InsertAfter(zeroConstNode, switchVal);
+            blockRange.InsertAfter(condNode, zeroConstNode);
+        }
+        else
+        {
+            // Re-link the nodes for this statement.
+            fgSetStmtSeq(switchStmt);
+        }
 
-        fgSetStmtSeq(switchStmt);
         block->bbJumpDest = block->bbJumpSwt->bbsDstTab[0];
         block->bbJumpKind = BBJ_COND;
 
