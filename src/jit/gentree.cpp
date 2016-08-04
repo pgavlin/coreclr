@@ -14040,6 +14040,7 @@ bool GenTree::isContained() const
     case GT_LCLHEAP:
     case GT_CKFINITE:
     case GT_JMP:
+    case GT_IL_OFFSET:
 #ifdef FEATURE_SIMD
     case GT_SIMD_CHK:
 #endif // FEATURE_SIMD
