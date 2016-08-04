@@ -3782,13 +3782,12 @@ static void CheckCall(GenTreeCall* call)
         CheckCallArg(call->gtCallObjp);
     }
 
-    GenTreeArgList* args = call->gtCallArgs;
-    for (; args; args = args->Rest())
+    for (GenTreeArgList* args = call->gtCallArgs; args != nullptr; args = args->Rest())
     {
         CheckCallArg(args->Current());
     }
 
-    for (args = call->gtCallLateArgs; args; args = args->Rest())
+    for (GenTreeArgList* args = call->gtCallLateArgs; args != nullptr; args = args->Rest())
     {
         CheckCallArg(args->Current());
     }
