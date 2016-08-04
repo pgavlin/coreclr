@@ -50,7 +50,13 @@ public:
 #endif // _TARGET_64BIT_
 
 private:
-    // Member Functions
+#ifdef DEBUG
+    static void CheckCallArg(GenTree* arg);
+    static void CheckCall(GenTreeCall* call);
+    static void CheckNode(GenTree* node);
+    static bool CheckBlock(Compiler* compiler, BasicBlock* block);
+#endif // DEBUG
+
     void LowerBlock(BasicBlock* block);
     GenTree* LowerNode(GenTree* node);
     void CheckVSQuirkStackPaddingNeeded(GenTreeCall* call);
