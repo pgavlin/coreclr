@@ -9751,123 +9751,162 @@ void                Compiler::fgCompactBlocks(BasicBlock* block, BasicBlock* bNe
     // TODO-CQ: This may be the wrong thing to do.  If we're compacting blocks, it's because a
     // control-flow choice was constant-folded away.  So probably phi's need to go away,
     // as well, in favor of one of the incoming branches.  Or at least be modified.
-    GenTreePtr blkNonPhi1   = block->FirstNonPhiDef();
-    GenTreePtr bNextNonPhi1 = bNext->FirstNonPhiDef();
-    GenTreePtr blkFirst     = block->firstStmt();
-    GenTreePtr bNextFirst   = bNext->firstStmt();
 
-    // Does the second have any phis?
-    if (bNextFirst != NULL && bNextFirst != bNextNonPhi1)
+    assert((block->IsLIR() == bNext->IsLIR()) || (block->IsLIR() && bNext->isEmpty()) || (block->isEmpty() && bNext->IsLIR()));
+    if (block->IsLIR() || bNext->IsLIR())
     {
-        GenTreePtr bNextLast = bNextFirst->gtPrev;
-        assert(bNextLast->gtNext == NULL);
+        LIR::Range blockRange = LIR::AsRange(block);
+        LIR::Range nextRange = LIR::AsRange(bNext);
 
-        // Does "blk" have phis?
-        if (blkNonPhi1 != blkFirst)
+        GenTree* blockBegin = blockRange.Begin();
+        GenTree* blockFirstNonPhi = blockRange.FirstNonPhiNode();
+
+        GenTree* nextBegin = nextRange.Begin();
+        GenTree* nextFirstNonPhi = nextRange.FirstNonPhiNode();
+
+        GenTree* insertionPoint = blockFirstNonPhi != blockRange.End() ? blockFirstNonPhi : blockRange.EndExclusive();
+
+        // Does the next block have any phis?
+        if (nextBegin != nextFirstNonPhi)
         {
-            // Yes, has phis.
-            // Insert after the last phi of "block."
-            // First, bNextPhis after last phi of block.
-            GenTreePtr blkLastPhi;
-            if (blkNonPhi1 != NULL)
-            {
-                blkLastPhi = blkNonPhi1->gtPrev;
-            }
-            else
-            {
-                blkLastPhi = blkFirst->gtPrev;
-            }
+            LIR::Range nextPhis = LIR::AsRange(nextBegin, nextFirstNonPhi != nullptr ? nextFirstNonPhi : nextRange.EndExclusive());
+            nextRange.Remove(nextPhis);
 
-            blkLastPhi->gtNext = bNextFirst;
-            bNextFirst->gtPrev = blkLastPhi;
-
-            // Now, rest of "block" after last phi of "bNext".
-            GenTreePtr bNextLastPhi = NULL;
-            if (bNextNonPhi1 != NULL)
-            {
-                bNextLastPhi = bNextNonPhi1->gtPrev;
-            }
-            else
-            {
-                bNextLastPhi = bNextFirst->gtPrev;
-            }
-
-            bNextLastPhi->gtNext = blkNonPhi1;
-            if (blkNonPhi1 != NULL)
-            {
-                blkNonPhi1->gtPrev = bNextLastPhi;
-            }
-            else
-            {
-                // block has no non phis, so make the last statement be the last added phi.
-                blkFirst->gtPrev = bNextLastPhi;
-            }
-
-            // Now update the bbTreeList of "bNext".
-            bNext->bbTreeList = bNextNonPhi1;
-            if (bNextNonPhi1 != NULL)
-            {
-                bNextNonPhi1->gtPrev = bNextLast;
-            }
+            blockRange.InsertAfter(nextPhis, insertionPoint);
+            insertionPoint = nextPhis.EndExclusive();
         }
-        else
+
+        // Does the block have any other code?
+        if (nextFirstNonPhi != nextRange.End())
         {
-            if (blkFirst != NULL) // If "block" has no statements, fusion will work fine...
+            LIR::Range nextNodes = LIR::AsRange(nextFirstNonPhi, nextRange.EndExclusive());
+            nextRange.Remove(nextNodes);
+
+            blockRange.InsertAfter(nextNodes, insertionPoint);
+        }
+
+        assert(blockRange.CheckLIR(this));
+    }
+    else
+    {
+        GenTreePtr blkNonPhi1   = block->FirstNonPhiDef();
+        GenTreePtr bNextNonPhi1 = bNext->FirstNonPhiDef();
+        GenTreePtr blkFirst     = block->firstStmt();
+        GenTreePtr bNextFirst   = bNext->firstStmt();
+
+        // Does the second have any phis?
+        if (bNextFirst != NULL && bNextFirst != bNextNonPhi1)
+        {
+            GenTreePtr bNextLast = bNextFirst->gtPrev;
+            assert(bNextLast->gtNext == NULL);
+
+            // Does "blk" have phis?
+            if (blkNonPhi1 != blkFirst)
             {
-                // First, bNextPhis at start of block.
-                GenTreePtr blkLast = blkFirst->gtPrev;
-                block->bbTreeList = bNextFirst;
-                // Now, rest of "block" (if it exists) after last phi of "bNext".
+                // Yes, has phis.
+                // Insert after the last phi of "block."
+                // First, bNextPhis after last phi of block.
+                GenTreePtr blkLastPhi;
+                if (blkNonPhi1 != NULL)
+                {
+                    blkLastPhi = blkNonPhi1->gtPrev;
+                }
+                else
+                {
+                    blkLastPhi = blkFirst->gtPrev;
+                }
+
+                blkLastPhi->gtNext = bNextFirst;
+                bNextFirst->gtPrev = blkLastPhi;
+
+                // Now, rest of "block" after last phi of "bNext".
                 GenTreePtr bNextLastPhi = NULL;
                 if (bNextNonPhi1 != NULL)
                 {
-                    // There is a first non phi, so the last phi is before it.
                     bNextLastPhi = bNextNonPhi1->gtPrev;
                 }
                 else
                 {
-                    // All the statements are phi defns, so the last one is the prev of the first.
                     bNextLastPhi = bNextFirst->gtPrev;
                 }
-                bNextFirst->gtPrev = blkLast;
-                bNextLastPhi->gtNext = blkFirst;
-                blkFirst->gtPrev = bNextLastPhi;
-                // Now update the bbTreeList of "bNext"
+
+                bNextLastPhi->gtNext = blkNonPhi1;
+                if (blkNonPhi1 != NULL)
+                {
+                    blkNonPhi1->gtPrev = bNextLastPhi;
+                }
+                else
+                {
+                    // block has no non phis, so make the last statement be the last added phi.
+                    blkFirst->gtPrev = bNextLastPhi;
+                }
+
+                // Now update the bbTreeList of "bNext".
                 bNext->bbTreeList = bNextNonPhi1;
                 if (bNextNonPhi1 != NULL)
                 {
                     bNextNonPhi1->gtPrev = bNextLast;
                 }
             }
+            else
+            {
+                if (blkFirst != NULL) // If "block" has no statements, fusion will work fine...
+                {
+                    // First, bNextPhis at start of block.
+                    GenTreePtr blkLast = blkFirst->gtPrev;
+                    block->bbTreeList = bNextFirst;
+                    // Now, rest of "block" (if it exists) after last phi of "bNext".
+                    GenTreePtr bNextLastPhi = NULL;
+                    if (bNextNonPhi1 != NULL)
+                    {
+                        // There is a first non phi, so the last phi is before it.
+                        bNextLastPhi = bNextNonPhi1->gtPrev;
+                    }
+                    else
+                    {
+                        // All the statements are phi defns, so the last one is the prev of the first.
+                        bNextLastPhi = bNextFirst->gtPrev;
+                    }
+                    bNextFirst->gtPrev = blkLast;
+                    bNextLastPhi->gtNext = blkFirst;
+                    blkFirst->gtPrev = bNextLastPhi;
+                    // Now update the bbTreeList of "bNext"
+                    bNext->bbTreeList = bNextNonPhi1;
+                    if (bNextNonPhi1 != NULL)
+                    {
+                        bNextNonPhi1->gtPrev = bNextLast;
+                    }
+                }
+            }
         }
-    }
 
-    // Now proceed with the updated bbTreeLists.
-    GenTreePtr stmtList1 = block->firstStmt();
-    GenTreePtr stmtList2 = bNext->firstStmt();
+        // Now proceed with the updated bbTreeLists.
+        GenTreePtr stmtList1 = block->firstStmt();
+        GenTreePtr stmtList2 = bNext->firstStmt();
 
-    /* the block may have an empty list */
+        /* the block may have an empty list */
 
-    if (stmtList1)
-    {
-        GenTreePtr stmtLast1 = block->lastStmt();
-
-        /* The second block may be a GOTO statement or something with an empty bbTreeList */
-        if (stmtList2)
+        if (stmtList1)
         {
-            GenTreePtr stmtLast2 = bNext->lastStmt();
+            GenTreePtr stmtLast1 = block->lastStmt();
 
-            /* append list2 to list 1 */
+            /* The second block may be a GOTO statement or something with an empty bbTreeList */
+            if (stmtList2)
+            {
+                GenTreePtr stmtLast2 = bNext->lastStmt();
 
-            stmtLast1->gtNext = stmtList2;
-                                stmtList2->gtPrev = stmtLast1;
-            stmtList1->gtPrev = stmtLast2;
+                /* append list2 to list 1 */
+
+                stmtLast1->gtNext = stmtList2;
+                                    stmtList2->gtPrev = stmtLast1;
+                stmtList1->gtPrev = stmtLast2;
+            }
         }
-    }
-    else
-    {
-        /* block was formerly empty and now has bNext's statements */
-        block->bbTreeList = stmtList2;
+        else
+        {
+            /* block was formerly empty and now has bNext's statements */
+            block->bbTreeList = stmtList2;
+        }
     }
 
     // Note we could update the local variable weights here by
