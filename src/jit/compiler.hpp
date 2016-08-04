@@ -4719,9 +4719,9 @@ inline bool         BasicBlock::endsWithJmpMethod(Compiler *comp)
 {
     if (comp->compJmpOpUsed && (bbJumpKind == BBJ_RETURN) && (bbFlags & BBF_HAS_JMP))
     {
-        GenTreePtr last = comp->fgGetLastTopLevelStmt(this);
-        assert(last != nullptr);
-        return last->gtStmt.gtStmtExpr->gtOper == GT_JMP;
+        GenTree* lastNode = IsLIR() ? bbLastNode : comp->fgGetLastTopLevelStmt(this)->gtStmt.gtStmtExpr;
+        assert(lastNode != nullptr);
+        return lastNode->OperGet() == GT_JMP;
     }
 
     return false;
@@ -4782,12 +4782,10 @@ inline bool BasicBlock::endsWithTailCall(Compiler* comp, bool fastTailCallsOnly,
 
         if (result)
         {
-            GenTreePtr last = comp->fgGetLastTopLevelStmt(this);
-            assert(last != nullptr);
-            last = last->gtStmt.gtStmtExpr;
-            if (last->OperGet() == GT_CALL)
+            GenTree* lastNode = IsLIR() ? bbLastNode : comp->fgGetLastTopLevelStmt(this)->gtStmt.gtStmtExpr;
+            if (lastNode->OperGet() == GT_CALL)
             {
-                GenTreeCall* call = last->AsCall();
+                GenTreeCall* call = lastNode->AsCall();
                 if (tailCallsConvertibleToLoopOnly)
                 {
                     result = call->IsTailCallConvertibleToLoop();
