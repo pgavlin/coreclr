@@ -119,13 +119,13 @@ GenTree* DecomposeLongs::DecomposeNode(LIR::Use& use)
             unsigned loVarNum = varDsc->lvFieldLclStart;
             tree->AsLclVarCommon()->SetLclNum(loVarNum);
             m_compiler->lvaIncRefCnts(tree);
-            return use.Def()->gtNext;
+            return tree->gtNext;
         }
     }
 
     if (tree->TypeGet() != TYP_LONG)
     {
-        return use.Def()->gtNext;
+        return tree->gtNext;
     }
 
 #ifdef DEBUG
