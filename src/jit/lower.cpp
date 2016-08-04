@@ -3762,8 +3762,8 @@ static void CheckCallArg(GenTree* arg)
     {
 #if !defined(_TARGET_64BIT_)
     case GT_LONG:
-        assert(IsPutArg(arg->gtGetOp1());
-        assert(IsPutArg(arg->gtGetOp2());
+        assert(IsPutArg(arg->gtGetOp1()));
+        assert(IsPutArg(arg->gtGetOp2()));
         break;
 #endif
 
