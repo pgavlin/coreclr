@@ -71,8 +71,10 @@ void DecomposeLongs::DecomposeBlock(BasicBlock* block)
 
     m_block = block;
     m_blockRange = LIR::AsRange(block);
-    GenTree* nextNode;
-    for (GenTree* node = m_blockRange.FirstNonPhiNode(), *end = m_blockRange.End(); node != end; node = nextNode)
+
+    GenTree* node = m_blockRange.FirstNonPhiNode();
+    GenTree* end = m_blockRange.End();
+    while (node != end);
     {
         LIR::Use use;
         if (!m_blockRange.TryGetUse(node, &use))
@@ -80,11 +82,7 @@ void DecomposeLongs::DecomposeBlock(BasicBlock* block)
             use = LIR::Use::GetDummyUse(m_blockRange, node);
         }
 
-        nextNode = DecomposeNode(use);
-        if (nextNode == nullptr)
-        {
-            nextNode = node->gtNext;
-        }
+        node = DecomposeNode(use);
     }
 
     assert(m_blockRange.CheckLIR(m_compiler));
@@ -98,13 +96,11 @@ void DecomposeLongs::DecomposeBlock(BasicBlock* block)
 //    use - the LIR::Use object for the def that needs to be decomposed.
 //
 // Return Value:
-//    The next node to process, or nullptr if the naturally next node
-//    should be used (namely, use.Def()->gtNext).
+//    The next node to process.
 //
 GenTree* DecomposeLongs::DecomposeNode(LIR::Use& use)
 {
     GenTree* tree = use.Def();
-    GenTree* nextNode = nullptr;
 
     // Handle the case where we are implicitly using the lower half of a long lclVar.
     if ((tree->TypeGet() == TYP_INT) && tree->OperIsLocal())
@@ -123,13 +119,13 @@ GenTree* DecomposeLongs::DecomposeNode(LIR::Use& use)
             unsigned loVarNum = varDsc->lvFieldLclStart;
             tree->AsLclVarCommon()->SetLclNum(loVarNum);
             m_compiler->lvaIncRefCnts(tree);
-            return nullptr;
+            return use.Def()->gtNext;
         }
     }
 
     if (tree->TypeGet() != TYP_LONG)
     {
-        return nullptr;
+        return use.Def()->gtNext;
     }
 
 #ifdef DEBUG
@@ -140,6 +136,7 @@ GenTree* DecomposeLongs::DecomposeNode(LIR::Use& use)
     }
 #endif // DEBUG
 
+    GenTree* nextNode = nullptr;
     switch (tree->OperGet())
     {
     case GT_PHI:
@@ -387,8 +384,7 @@ GenTree* DecomposeLongs::DecomposeLclFld(LIR::Use& use)
 //    use - the LIR::Use object for the def that needs to be decomposed.
 //
 // Return Value:
-//    The next node to process, or nullptr if the naturally next node
-//    should be used (namely, use.Def()->gtNext).
+//    The next node to process.
 //
 GenTree* DecomposeLongs::DecomposeStoreLclVar(LIR::Use& use)
 {
@@ -401,7 +397,7 @@ GenTree* DecomposeLongs::DecomposeStoreLclVar(LIR::Use& use)
     {
         // GT_CALLs are not decomposed, so will not be converted to GT_LONG
         // GT_STORE_LCL_VAR = GT_CALL are handled in genMultiRegCallStoreToLocal
-        return nullptr;
+        return tree->gtNext;
     }
 
     noway_assert(rhs->OperGet() == GT_LONG);
@@ -536,8 +532,7 @@ GenTree* DecomposeLongs::DecomposeCnsLng(LIR::Use& use)
 //    use - the LIR::Use object for the def that needs to be decomposed.
 //
 // Return Value:
-//    The next node to process, or nullptr if the naturally next node
-//    should be used (namely, use.Def()->gtNext).
+//    The next node to process.
 //
 GenTree* DecomposeLongs::DecomposeCall(LIR::Use& use)
 {
@@ -546,7 +541,7 @@ GenTree* DecomposeLongs::DecomposeCall(LIR::Use& use)
 
     // We only need to force var = call() if the call's result is used.
     if (use.IsDummyUse())
-        return nullptr;
+        return use.Def()->gtNext;
 
     GenTree* user = use.User();
     if (user->OperGet() == GT_STORE_LCL_VAR)
@@ -556,13 +551,13 @@ GenTree* DecomposeLongs::DecomposeCall(LIR::Use& use)
         unsigned varNum = user->AsLclVarCommon()->gtLclNum;
         if (m_compiler->lvaTable[varNum].lvIsMultiRegRet)
         {
-            return nullptr;
+            return use.Def()->gtNext;
         }
         else if (!m_compiler->lvaTable[varNum].lvPromoted)
         {
             // If var wasn't promoted, we can just set lvIsMultiRegRet.
             m_compiler->lvaTable[varNum].lvIsMultiRegRet = true;
-            return nullptr;
+            return use.Def()->gtNext;
         }
     }
 
