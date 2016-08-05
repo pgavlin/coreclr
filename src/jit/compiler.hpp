@@ -2848,13 +2848,19 @@ bool                Compiler::fgIsThrowHlpBlk(BasicBlock * block)
     {
         // TODO(pdg): it would be nice if there was simply a bit on the block we could check.
         LIR::Range blockRange = LIR::AsRange(block);
+        call = blockRange.EndExclusive();
+
+#ifdef DEBUG
         for (LIR::Range::ReverseIterator node = blockRange.rbegin(), end = blockRange.rend(); node != end; ++node)
         {
             if (node->OperGet() == GT_CALL)
             {
-                call = *node;
+                assert(*node == call);
+                assert(node == blockRange.rbegin());
+                break;
             }
         }
+#endif
     }
     else
     {
