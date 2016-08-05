@@ -9764,14 +9764,10 @@ void                Compiler::fgCompactBlocks(BasicBlock* block, BasicBlock* bNe
         GenTree* nextBegin = nextRange.Begin();
         GenTree* nextFirstNonPhi = nextRange.FirstNonPhiNode();
 
-        GenTree* insertionPoint;
+        GenTree* insertionPoint = nullptr;
         if (blockBegin != blockFirstNonPhi)
         {
             insertionPoint = blockFirstNonPhi != blockRange.End() ? blockFirstNonPhi->gtPrev : blockRange.EndExclusive();
-        }
-        else
-        {
-            insertionPoint = blockBegin;
         }
 
         // Does the next block have any phis?
@@ -9782,7 +9778,14 @@ void                Compiler::fgCompactBlocks(BasicBlock* block, BasicBlock* bNe
             LIR::Range nextPhis = LIR::AsRange(nextBegin, lastPhi);
             nextRange.Remove(nextPhis);
 
-            blockRange.InsertAfter(nextPhis, insertionPoint);
+            if (insertionPoint == nullptr)
+            {
+                blockRange.InsertAtBeginning(nextPhis);
+            }
+            else
+            {
+                blockRange.InsertAfter(nextPhis, insertionPoint);
+            }
         }
 
         // Does the block have any other code?
