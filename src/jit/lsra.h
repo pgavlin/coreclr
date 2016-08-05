@@ -383,7 +383,7 @@ public:
     // Insert a copy in the case where a tree node value must be moved to a different
     // register at the point of use, or it is reloaded to a different register
     // than the one it was spilled from
-    void            insertCopyOrReload(GenTreePtr tree, unsigned multiRegIdx, RefPosition* refPosition);
+    void            insertCopyOrReload(BasicBlock* block, GenTreePtr tree, unsigned multiRegIdx, RefPosition* refPosition);
 
 #if FEATURE_PARTIAL_SIMD_CALLEE_SAVE
     // Insert code to save and restore the upper half of a vector that lives
@@ -710,7 +710,7 @@ private:
     void            buildInternalRegisterUsesForNode(GenTree *tree, LsraLocation currentLoc,
                                                      RefPosition* defs[], int total);
 
-    void            resolveLocalRef(GenTreePtr treeNode, RefPosition * currentRefPosition);
+    void            resolveLocalRef(BasicBlock* block, GenTreePtr treeNode, RefPosition * currentRefPosition);
 
     void            insertMove(BasicBlock * block, GenTreePtr insertionPoint, unsigned lclNum,
                                regNumber inReg, regNumber outReg);

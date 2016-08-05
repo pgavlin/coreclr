@@ -2843,7 +2843,22 @@ bool                Compiler::fgIsThrowHlpBlk(BasicBlock * block)
     if (!(block->bbFlags & BBF_INTERNAL) || block->bbJumpKind != BBJ_THROW)
         return false;
 
-    GenTreePtr  call = block->bbTreeList->gtStmt.gtStmtExpr;
+    GenTree* call = nullptr;
+    if (block->IsLIR())
+    {
+        // TODO(pdg): it would be nice if there was simply a bit on the block we could check.
+        for (GenTree* node : LIR::AsRange(block))
+        {
+            if (node->OperGet() == GT_CALL)
+            {
+                call = node;
+            }
+        }
+    }
+    else
+    {
+        call = block->bbTreeList->gtStmt.gtStmtExpr;
+    }
 
     if (!call || (call->gtOper != GT_CALL))
         return false;

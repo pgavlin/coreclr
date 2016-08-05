@@ -10209,23 +10209,41 @@ void                Compiler::fgUnreachableBlock(BasicBlock* block)
     /* Make the block publicly available */
     compCurBB = block;
 
-    // TODO-Cleanup: I'm not sure why this happens -- if the block is unreachable, why does it have phis?
-    // Anyway, remove any phis.
-    GenTreePtr firstNonPhi = block->FirstNonPhiDef();
-    if (block->bbTreeList != firstNonPhi)
+    if (block->IsLIR())
     {
-        if (firstNonPhi != NULL)
-        {
-            firstNonPhi->gtPrev = block->lastStmt();
-        }
-        block->bbTreeList = firstNonPhi;
-    }
+        LIR::Range blockRange = LIR::AsRange(block);
 
-    for (GenTreeStmt* stmt = block->firstStmt(); stmt; stmt = stmt->gtNextStmt)
-    {
-        fgRemoveStmt(block, stmt);
+        // Skip phis when decrementing ref counts.
+        GenTree* firstNonPhiNode = blockRange.FirstNonPhiNode();
+        if (firstNonPhiNode != blockRange.End())
+        {
+            LIR::DecRefCnts(this, block, LIR::AsRange(firstNonPhiNode, blockRange.EndExclusive()));
+        }
+
+        block->bbTreeList = nullptr;
+        block->bbLastNode = nullptr;
     }
-    noway_assert(block->bbTreeList == 0);
+    else
+    {
+        // TODO-Cleanup: I'm not sure why this happens -- if the block is unreachable, why does it have phis?
+        // Anyway, remove any phis.
+
+        GenTreePtr firstNonPhi = block->FirstNonPhiDef();
+        if (block->bbTreeList != firstNonPhi)
+        {
+            if (firstNonPhi != NULL)
+            {
+                firstNonPhi->gtPrev = block->lastStmt();
+            }
+            block->bbTreeList = firstNonPhi;
+        }
+
+        for (GenTreeStmt* stmt = block->firstStmt(); stmt; stmt = stmt->gtNextStmt)
+        {
+            fgRemoveStmt(block, stmt);
+        }
+        noway_assert(block->bbTreeList == 0);
+    }
 
     /* Next update the loop table and bbWeights */
     optUpdateLoopsBeforeRemoveBlock(block);

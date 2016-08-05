@@ -789,8 +789,6 @@ void Rationalizer::RewriteNodeAsCall(GenTree** use, Compiler::fgWalkData* data,
     assert(data->parentStack->Top() == tree);
     (void)data->parentStack->Pop();
     data->parentStack->Push(call);
-
-    DBEXEC(TRUE, ValidateStatement(root, tmpState->block));
 }
 
 // RewriteIntrinsicAsUserCall : Rewrite an intrinsic operator as a GT_CALL to the original method.
@@ -1395,12 +1393,11 @@ void Rationalizer::DoPhase()
         if (firstStatement == nullptr)
         {
             // No statements in this block; skip it.
+            assert(block->bbLastNode == nullptr);
             continue;
         }
 
         GenTreeStmt* lastStatement = block->lastStmt();
-        block->bbTreeList = firstStatement->gtStmtList;
-        block->bbLastNode = lastStatement->gtStmtExpr;
 
         // Rewrite intrinsics that are not supported by the target back into user calls.
         // This needs to be done before the transition to LIR because it relies on the use
@@ -1413,7 +1410,9 @@ void Rationalizer::DoPhase()
         for (GenTreeStmt* statement = firstStatement; statement != nullptr; statement = statement->getNextStmt())
         {
             assert(statement->gtStmtList != nullptr);
+            assert(statement->gtStmtList->gtPrev == nullptr);
             assert(statement->gtStmtExpr != nullptr);
+            assert(statement->gtStmtExpr->gtNext == nullptr);
 
             SplitData splitData;
             splitData.root = statement;
@@ -1428,8 +1427,6 @@ void Rationalizer::DoPhase()
                         Compiler::IsIntrinsicImplementedByUserCall(node->gtIntrinsic.gtIntrinsicId))
                     {
                         RewriteIntrinsicAsUserCall(use, walkData);
-
-                        walkData->compiler->fgFixupIfCallArg(walkData->parentStack, node, *use);
                     }
                     else if (node->OperIsLocal())
                     {
@@ -1450,6 +1447,9 @@ void Rationalizer::DoPhase()
             firstNodeInStatement->gtPrev = lastNodeInPreviousStatement;
             lastNodeInPreviousStatement = statement->gtStmtExpr;
         }
+
+        block->bbTreeList = firstStatement->gtStmtList;
+        block->bbLastNode = lastStatement->gtStmtExpr;
 
         // Rewrite HIR nodes into LIR nodes.
         m_range = LIR::AsRange(block);
