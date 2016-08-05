@@ -146,8 +146,7 @@ GenTree* Lowering::LowerNode(GenTree* node)
         return LowerSignedDivOrMod(node);
 
     case GT_SWITCH:
-        LowerSwitch(node);
-        break;
+        return LowerSwitch(node);
 
     case GT_CALL:
         LowerCall(node);
@@ -3745,6 +3744,124 @@ void Lowering::DoPhase()
     DBEXEC(VERBOSE, DumpNodeInfoMap());
 }
 
+#ifdef DEBUG
+
+//------------------------------------------------------------------------
+// Lowering::CheckCallArg: check that a call argument is in an expected
+//                         form after lowering.
+//
+// Arguments:
+//   arg - the argument to check.
+//
+void Lowering::CheckCallArg(GenTree* arg)
+{
+    if (arg->OperIsStore() || arg->IsArgPlaceHolderNode() || arg->IsNothingNode() || arg->OperIsCopyBlkOp())
+    {
+        return;
+    }
+
+    switch (arg->OperGet())
+    {
+#if !defined(_TARGET_64BIT_)
+    case GT_LONG:
+        assert(arg->gtGetOp1()->OperIsPutArg());
+        assert(arg->gtGetOp2()->OperIsPutArg());
+        break;
+#endif
+
+    case GT_LIST:
+        for (GenTreeArgList* list = arg->AsArgList(); list != nullptr; list = list->Rest())
+        {
+            assert(list->Current()->OperIsPutArg());
+        }
+        break;
+
+    default:
+        assert(arg->OperIsPutArg());
+        break;
+    }
+}
+
+//------------------------------------------------------------------------
+// Lowering::CheckCall: check that a call is in an expected form after
+//                      lowering. Currently this amounts to checking its
+//                      arguments, but could be expanded to verify more
+//                      properties in the future.
+//
+// Arguments:
+//   call - the call to check.
+//
+void Lowering::CheckCall(GenTreeCall* call)
+{
+    if (call->gtCallObjp != nullptr)
+    {
+        CheckCallArg(call->gtCallObjp);
+    }
+
+    for (GenTreeArgList* args = call->gtCallArgs; args != nullptr; args = args->Rest())
+    {
+        CheckCallArg(args->Current());
+    }
+
+    for (GenTreeArgList* args = call->gtCallLateArgs; args != nullptr; args = args->Rest())
+    {
+        CheckCallArg(args->Current());
+    }
+}
+
+//------------------------------------------------------------------------
+// Lowering::CheckNode: check that an LIR node is in an expected form
+//                      after lowering.
+//
+// Arguments:
+//   node - the node to check.
+//
+void Lowering::CheckNode(GenTree* node)
+{
+    switch (node->OperGet())
+    {
+    case GT_CALL:
+        CheckCall(node->AsCall());
+        break;
+
+#ifdef FEATURE_SIMD
+    case GT_SIMD:
+#ifdef _TARGET_64BIT_
+    case GT_LCL_VAR:
+    case GT_STORE_LCL_VAR:
+#endif // _TARGET_64BIT_
+        assert(node->TypeGet() != TYP_SIMD12);
+        break;
+#endif
+
+    default:
+        break;
+    }
+}
+
+//------------------------------------------------------------------------
+// Lowering::CheckBlock: check that the contents of an LIR block are in an
+//                       expected form after lowering.
+//
+// Arguments:
+//   compiler - the compiler context.
+//   block    - the block to check.
+//
+bool Lowering::CheckBlock(Compiler* compiler, BasicBlock* block)
+{
+    assert(block->isEmpty() || block->IsLIR());
+
+    LIR::Range blockRange = LIR::AsRange(block);
+    for (GenTree* node : blockRange)
+    {
+        CheckNode(node);
+    }
+
+    assert(blockRange.CheckLIR(compiler));
+    return true;
+}
+#endif
+
 void Lowering::LowerBlock(BasicBlock* block)
 {
     assert(block == comp->compCurBB); // compCurBB must already be set.
@@ -3768,7 +3885,7 @@ void Lowering::LowerBlock(BasicBlock* block)
         node = LowerNode(node);
     }
 
-    assert(m_blockRange.CheckLIR(comp));
+    assert(CheckBlock(comp, block));
 }
 
 /** Verifies if both of these trees represent the same indirection.

@@ -9751,123 +9751,174 @@ void                Compiler::fgCompactBlocks(BasicBlock* block, BasicBlock* bNe
     // TODO-CQ: This may be the wrong thing to do.  If we're compacting blocks, it's because a
     // control-flow choice was constant-folded away.  So probably phi's need to go away,
     // as well, in favor of one of the incoming branches.  Or at least be modified.
-    GenTreePtr blkNonPhi1   = block->FirstNonPhiDef();
-    GenTreePtr bNextNonPhi1 = bNext->FirstNonPhiDef();
-    GenTreePtr blkFirst     = block->firstStmt();
-    GenTreePtr bNextFirst   = bNext->firstStmt();
 
-    // Does the second have any phis?
-    if (bNextFirst != NULL && bNextFirst != bNextNonPhi1)
+    assert((block->IsLIR() == bNext->IsLIR()) || (block->IsLIR() && bNext->isEmpty()) || (block->isEmpty() && bNext->IsLIR()));
+    if (block->IsLIR() || bNext->IsLIR())
     {
-        GenTreePtr bNextLast = bNextFirst->gtPrev;
-        assert(bNextLast->gtNext == NULL);
+        LIR::Range blockRange = LIR::AsRange(block);
+        LIR::Range nextRange = LIR::AsRange(bNext);
 
-        // Does "blk" have phis?
-        if (blkNonPhi1 != blkFirst)
+        GenTree* blockBegin = blockRange.Begin();
+        GenTree* blockFirstNonPhi = blockRange.FirstNonPhiNode();
+
+        GenTree* nextBegin = nextRange.Begin();
+        GenTree* nextFirstNonPhi = nextRange.FirstNonPhiNode();
+
+        GenTree* insertionPoint = nullptr;
+        if (blockBegin != blockFirstNonPhi)
         {
-            // Yes, has phis.
-            // Insert after the last phi of "block."
-            // First, bNextPhis after last phi of block.
-            GenTreePtr blkLastPhi;
-            if (blkNonPhi1 != NULL)
+            insertionPoint = blockFirstNonPhi != blockRange.End() ? blockFirstNonPhi->gtPrev : blockRange.EndExclusive();
+        }
+
+        // Does the next block have any phis?
+        if (nextBegin != nextFirstNonPhi)
+        {
+            GenTree* lastPhi = nextFirstNonPhi != nextRange.End() ? nextFirstNonPhi->gtPrev : nextRange.EndExclusive();
+
+            LIR::Range nextPhis = LIR::AsRange(nextBegin, lastPhi);
+            nextRange.Remove(nextPhis);
+
+            if (insertionPoint == nullptr)
             {
-                blkLastPhi = blkNonPhi1->gtPrev;
+                blockRange.InsertAtBeginning(nextPhis);
             }
             else
             {
-                blkLastPhi = blkFirst->gtPrev;
-            }
-
-            blkLastPhi->gtNext = bNextFirst;
-            bNextFirst->gtPrev = blkLastPhi;
-
-            // Now, rest of "block" after last phi of "bNext".
-            GenTreePtr bNextLastPhi = NULL;
-            if (bNextNonPhi1 != NULL)
-            {
-                bNextLastPhi = bNextNonPhi1->gtPrev;
-            }
-            else
-            {
-                bNextLastPhi = bNextFirst->gtPrev;
-            }
-
-            bNextLastPhi->gtNext = blkNonPhi1;
-            if (blkNonPhi1 != NULL)
-            {
-                blkNonPhi1->gtPrev = bNextLastPhi;
-            }
-            else
-            {
-                // block has no non phis, so make the last statement be the last added phi.
-                blkFirst->gtPrev = bNextLastPhi;
-            }
-
-            // Now update the bbTreeList of "bNext".
-            bNext->bbTreeList = bNextNonPhi1;
-            if (bNextNonPhi1 != NULL)
-            {
-                bNextNonPhi1->gtPrev = bNextLast;
+                blockRange.InsertAfter(nextPhis, insertionPoint);
             }
         }
-        else
+
+        // Does the block have any other code?
+        if (nextFirstNonPhi != nextRange.End())
         {
-            if (blkFirst != NULL) // If "block" has no statements, fusion will work fine...
+            LIR::Range nextNodes = LIR::AsRange(nextFirstNonPhi, nextRange.EndExclusive());
+            nextRange.Remove(nextNodes);
+
+            blockRange.InsertAfter(nextNodes, blockRange.EndExclusive());
+        }
+
+        assert(blockRange.CheckLIR(this));
+    }
+    else
+    {
+        GenTreePtr blkNonPhi1   = block->FirstNonPhiDef();
+        GenTreePtr bNextNonPhi1 = bNext->FirstNonPhiDef();
+        GenTreePtr blkFirst     = block->firstStmt();
+        GenTreePtr bNextFirst   = bNext->firstStmt();
+
+        // Does the second have any phis?
+        if (bNextFirst != NULL && bNextFirst != bNextNonPhi1)
+        {
+            GenTreePtr bNextLast = bNextFirst->gtPrev;
+            assert(bNextLast->gtNext == NULL);
+
+            // Does "blk" have phis?
+            if (blkNonPhi1 != blkFirst)
             {
-                // First, bNextPhis at start of block.
-                GenTreePtr blkLast = blkFirst->gtPrev;
-                block->bbTreeList = bNextFirst;
-                // Now, rest of "block" (if it exists) after last phi of "bNext".
+                // Yes, has phis.
+                // Insert after the last phi of "block."
+                // First, bNextPhis after last phi of block.
+                GenTreePtr blkLastPhi;
+                if (blkNonPhi1 != NULL)
+                {
+                    blkLastPhi = blkNonPhi1->gtPrev;
+                }
+                else
+                {
+                    blkLastPhi = blkFirst->gtPrev;
+                }
+
+                blkLastPhi->gtNext = bNextFirst;
+                bNextFirst->gtPrev = blkLastPhi;
+
+                // Now, rest of "block" after last phi of "bNext".
                 GenTreePtr bNextLastPhi = NULL;
                 if (bNextNonPhi1 != NULL)
                 {
-                    // There is a first non phi, so the last phi is before it.
                     bNextLastPhi = bNextNonPhi1->gtPrev;
                 }
                 else
                 {
-                    // All the statements are phi defns, so the last one is the prev of the first.
                     bNextLastPhi = bNextFirst->gtPrev;
                 }
-                bNextFirst->gtPrev = blkLast;
-                bNextLastPhi->gtNext = blkFirst;
-                blkFirst->gtPrev = bNextLastPhi;
-                // Now update the bbTreeList of "bNext"
+
+                bNextLastPhi->gtNext = blkNonPhi1;
+                if (blkNonPhi1 != NULL)
+                {
+                    blkNonPhi1->gtPrev = bNextLastPhi;
+                }
+                else
+                {
+                    // block has no non phis, so make the last statement be the last added phi.
+                    blkFirst->gtPrev = bNextLastPhi;
+                }
+
+                // Now update the bbTreeList of "bNext".
                 bNext->bbTreeList = bNextNonPhi1;
                 if (bNextNonPhi1 != NULL)
                 {
                     bNextNonPhi1->gtPrev = bNextLast;
                 }
             }
+            else
+            {
+                if (blkFirst != NULL) // If "block" has no statements, fusion will work fine...
+                {
+                    // First, bNextPhis at start of block.
+                    GenTreePtr blkLast = blkFirst->gtPrev;
+                    block->bbTreeList = bNextFirst;
+                    // Now, rest of "block" (if it exists) after last phi of "bNext".
+                    GenTreePtr bNextLastPhi = NULL;
+                    if (bNextNonPhi1 != NULL)
+                    {
+                        // There is a first non phi, so the last phi is before it.
+                        bNextLastPhi = bNextNonPhi1->gtPrev;
+                    }
+                    else
+                    {
+                        // All the statements are phi defns, so the last one is the prev of the first.
+                        bNextLastPhi = bNextFirst->gtPrev;
+                    }
+                    bNextFirst->gtPrev = blkLast;
+                    bNextLastPhi->gtNext = blkFirst;
+                    blkFirst->gtPrev = bNextLastPhi;
+                    // Now update the bbTreeList of "bNext"
+                    bNext->bbTreeList = bNextNonPhi1;
+                    if (bNextNonPhi1 != NULL)
+                    {
+                        bNextNonPhi1->gtPrev = bNextLast;
+                    }
+                }
+            }
         }
-    }
 
-    // Now proceed with the updated bbTreeLists.
-    GenTreePtr stmtList1 = block->firstStmt();
-    GenTreePtr stmtList2 = bNext->firstStmt();
+        // Now proceed with the updated bbTreeLists.
+        GenTreePtr stmtList1 = block->firstStmt();
+        GenTreePtr stmtList2 = bNext->firstStmt();
 
-    /* the block may have an empty list */
+        /* the block may have an empty list */
 
-    if (stmtList1)
-    {
-        GenTreePtr stmtLast1 = block->lastStmt();
-
-        /* The second block may be a GOTO statement or something with an empty bbTreeList */
-        if (stmtList2)
+        if (stmtList1)
         {
-            GenTreePtr stmtLast2 = bNext->lastStmt();
+            GenTreePtr stmtLast1 = block->lastStmt();
 
-            /* append list2 to list 1 */
+            /* The second block may be a GOTO statement or something with an empty bbTreeList */
+            if (stmtList2)
+            {
+                GenTreePtr stmtLast2 = bNext->lastStmt();
 
-            stmtLast1->gtNext = stmtList2;
-                                stmtList2->gtPrev = stmtLast1;
-            stmtList1->gtPrev = stmtLast2;
+                /* append list2 to list 1 */
+
+                stmtLast1->gtNext = stmtList2;
+                                    stmtList2->gtPrev = stmtLast1;
+                stmtList1->gtPrev = stmtLast2;
+            }
         }
-    }
-    else
-    {
-        /* block was formerly empty and now has bNext's statements */
-        block->bbTreeList = stmtList2;
+        else
+        {
+            /* block was formerly empty and now has bNext's statements */
+            block->bbTreeList = stmtList2;
+        }
     }
 
     // Note we could update the local variable weights here by
@@ -13367,10 +13418,19 @@ bool Compiler::fgOptimizeEmptyBlock(BasicBlock* block)
                 {
                     // Insert a NOP in the empty block to ensure we generate code
                     // for the catchret target in the right EH region.
-                    GenTreePtr nopStmt =
-                        fgInsertStmtAtEnd(block, new (this, GT_NO_OP) GenTree(GT_NO_OP, TYP_VOID));
-                    fgSetStmtSeq(nopStmt);
-                    gtSetStmtInfo(nopStmt);
+                    GenTree* nop = new (this, GT_NO_OP) GenTree(GT_NO_OP, TYP_VOID);
+
+                    // TODO(pdg): allow empty blocks to be LIR blocks
+                    if (compRationalIRForm)
+                    {
+                        LIR::AsRange(block).InsertAtEnd(nop);
+                    }
+                    else
+                    {
+                        GenTreePtr nopStmt = fgInsertStmtAtEnd(block, nop);
+                        fgSetStmtSeq(nopStmt);
+                        gtSetStmtInfo(nopStmt);
+                    }
 
 #ifdef DEBUG
                     if  (verbose)
@@ -13516,21 +13576,25 @@ bool Compiler::fgOptimizeSwitchBranches(BasicBlock* block)
     }
     while (++jmpTab, --jmpCnt);
 
-    GenTreeStmt* switchStmt = block->lastTopLevelStmt();
-    GenTreePtr   switchTree = switchStmt->gtStmtExpr;
+    GenTreeStmt* switchStmt = nullptr;
+    LIR::Range blockRange;
 
-    // If this is a Lowered switch, it must have no embedded statements, because we pulled
-    // out any embedded statements when we cloned the switch value.
-    if (switchTree->gtOper == GT_SWITCH_TABLE)
+    GenTree* switchTree;
+    if (block->IsLIR())
     {
-        noway_assert(fgOrder == FGOrderLinear);
-        assert(switchStmt->AsStmt()->gtStmtIsTopLevel() &&
-               (switchStmt->gtNext == nullptr));
+        blockRange = LIR::AsRange(block);
+        switchTree = blockRange.EndExclusive();
+
+        assert(switchTree->OperGet() == GT_SWITCH_TABLE);
     }
     else
     {
-        noway_assert(switchTree->gtOper == GT_SWITCH);
+        switchStmt = block->lastTopLevelStmt();
+        switchTree = switchStmt->gtStmtExpr;
+
+        assert(switchTree->OperGet() == GT_SWITCH);
     }
+
     noway_assert(switchTree->gtType == TYP_VOID);
 
     
@@ -13555,55 +13619,71 @@ bool Compiler::fgOptimizeSwitchBranches(BasicBlock* block)
         }
 #endif // DEBUG
 
-        /* check for SIDE_EFFECTS */
-
-        if (switchTree->gtFlags & GTF_SIDE_EFFECT)
+        if (block->IsLIR())
         {
-            /* Extract the side effects from the conditional */
-            GenTreePtr  sideEffList = NULL;
+            bool isClosed;
+            unsigned sideEffects;
+            LIR::Range switchTreeRange = blockRange.GetTreeRange(switchTree, &isClosed, &sideEffects);
 
-            gtExtractSideEffList(switchTree, &sideEffList);
+            // The switch tree should form a contiguous, side-effect free range by construction. See
+            // Lowering::LowerSwitch for details.
+            assert(isClosed);
+            assert((sideEffects & GTF_ALL_EFFECT) == 0);
 
-            if (sideEffList == NULL)
-                goto NO_SWITCH_SIDE_EFFECT;
-
-            noway_assert(sideEffList->gtFlags & GTF_SIDE_EFFECT);
-
-#ifdef DEBUG
-            if  (verbose)
-            {
-                printf("\nSwitch expression has side effects! Extracting side effects...\n");
-                gtDispTree(switchTree); printf("\n");
-                gtDispTree(sideEffList); printf("\n");
-            }
-#endif // DEBUG
-
-            /* Replace the conditional statement with the list of side effects */
-            noway_assert(sideEffList->gtOper != GT_STMT);
-            noway_assert(sideEffList->gtOper != GT_SWITCH);
-
-            switchStmt->gtStmtExpr = sideEffList;
-
-            if (fgStmtListThreaded)
-            {
-                /* Update the lclvar ref counts */
-                compCurBB = block;
-                fgUpdateRefCntForExtract(switchTree, sideEffList);
-
-                /* Update ordering, costs, FP levels, etc. */
-                gtSetStmtInfo(switchStmt);
-
-                /* Re-link the nodes for this statement */
-                fgSetStmtSeq(switchStmt);
-            }
+            blockRange.Remove(switchTreeRange);
+            LIR::DecRefCnts(this, block, switchTreeRange);
         }
         else
         {
+            /* check for SIDE_EFFECTS */
+            if (switchTree->gtFlags & GTF_SIDE_EFFECT)
+            {
+                /* Extract the side effects from the conditional */
+                GenTreePtr  sideEffList = NULL;
 
-        NO_SWITCH_SIDE_EFFECT:
+                gtExtractSideEffList(switchTree, &sideEffList);
 
-            /* conditional has NO side effect - remove it */
-            fgRemoveStmt(block, switchStmt);
+                if (sideEffList == NULL)
+                    goto NO_SWITCH_SIDE_EFFECT;
+
+                noway_assert(sideEffList->gtFlags & GTF_SIDE_EFFECT);
+
+#ifdef DEBUG
+                if  (verbose)
+                {
+                    printf("\nSwitch expression has side effects! Extracting side effects...\n");
+                    gtDispTree(switchTree); printf("\n");
+                    gtDispTree(sideEffList); printf("\n");
+                }
+#endif // DEBUG
+
+                /* Replace the conditional statement with the list of side effects */
+                noway_assert(sideEffList->gtOper != GT_STMT);
+                noway_assert(sideEffList->gtOper != GT_SWITCH);
+
+                switchStmt->gtStmtExpr = sideEffList;
+
+                if (fgStmtListThreaded)
+                {
+                    /* Update the lclvar ref counts */
+                    compCurBB = block;
+                    fgUpdateRefCntForExtract(switchTree, sideEffList);
+
+                    /* Update ordering, costs, FP levels, etc. */
+                    gtSetStmtInfo(switchStmt);
+
+                    /* Re-link the nodes for this statement */
+                    fgSetStmtSeq(switchStmt);
+                }
+            }
+            else
+            {
+
+            NO_SWITCH_SIDE_EFFECT:
+
+                /* conditional has NO side effect - remove it */
+                fgRemoveStmt(block, switchStmt);
+            }
         }
 
         // Change the switch jump into a BBJ_ALWAYS
@@ -13652,11 +13732,17 @@ bool Compiler::fgOptimizeSwitchBranches(BasicBlock* block)
         switchTree->gtOp.gtOp1  = condNode;
         switchTree->gtOp.gtOp1->gtFlags |= (GTF_RELOP_JMP_USED | GTF_DONT_CSE);
 
-        // Re-link the nodes for this statement.
-        // We know that this is safe for the Lowered form, because we will have eliminated any embedded trees
-        // when we cloned the switch condition (it is also asserted above).
+        if (block->IsLIR())
+        {
+            blockRange.InsertAfter(zeroConstNode, switchVal);
+            blockRange.InsertAfter(condNode, zeroConstNode);
+        }
+        else
+        {
+            // Re-link the nodes for this statement.
+            fgSetStmtSeq(switchStmt);
+        }
 
-        fgSetStmtSeq(switchStmt);
         block->bbJumpDest = block->bbJumpSwt->bbsDstTab[0];
         block->bbJumpKind = BBJ_COND;
 
@@ -13785,6 +13871,9 @@ bool Compiler::fgOptimizeUncondBranchToSimpleCond(BasicBlock* block, BasicBlock*
 
     // Duplicate the target block at the end of this block
     
+    // TODO(pdg): It seems like the operations below are dropping code on the floor...
+    //            Shouldn't all of the statements in the target block be copied?
+
     GenTree* cloned = gtCloneExpr(stmt->gtStmtExpr);
     noway_assert(cloned);
     GenTree *jmpStmt = gtNewStmt(cloned);
@@ -13873,9 +13962,6 @@ bool Compiler::fgOptimizeBranchToNext(BasicBlock* block, BasicBlock* bNext, Basi
         noway_assert(block->bbJumpKind == BBJ_COND);
         noway_assert(block->bbTreeList);
 
-        GenTreeStmt* cond = block->lastTopLevelStmt();
-        noway_assert(cond->gtStmtExpr->gtOper == GT_JTRUE);
-
 #ifdef DEBUG
         if  (verbose)
         {
@@ -13884,21 +13970,36 @@ bool Compiler::fgOptimizeBranchToNext(BasicBlock* block, BasicBlock* bNext, Basi
         }
 #endif // DEBUG
 
-        /* check for SIDE_EFFECTS */
-
-        if (cond->gtStmtExpr->gtFlags & GTF_SIDE_EFFECT)
+        if (block->IsLIR())
         {
-            if (compRationalIRForm)
+            LIR::Range blockRange = LIR::AsRange(block);
+            GenTree* jmp = blockRange.EndExclusive();
+            assert(jmp->OperGet() == GT_JTRUE);
+
+            bool isClosed;
+            unsigned sideEffects;
+            LIR::Range jmpRange = blockRange.GetTreeRange(jmp, &isClosed, &sideEffects);
+
+            if (isClosed && ((sideEffects & GTF_ALL_EFFECT) == 0))
             {
-                // Extracting side-effects won't work in rationalized form.
-                // Instead just transform the JTRUE into a NEG which has the effect of
-                // evaluating the side-effecting tree and perform a benign operation on it.
-                // TODO-CQ: [TFS:1121057] We should be able to simply remove the jump node,
-                // and change gtStmtExpr to its op1.
-                cond->gtStmtExpr->SetOper(GT_NEG);
-                cond->gtStmtExpr->gtType = TYP_I_IMPL;
+                // If the jump and its operands form a contiguous, side-effect-free range,
+                // remove them.
+                blockRange.Remove(jmpRange);
+                LIR::DecRefCnts(this, block, jmpRange);
             }
             else
+            {
+                // Otherwise, just remove the jump node itself.
+                blockRange.Remove(jmp);
+            }
+        }
+        else
+        {
+            GenTreeStmt* cond = block->lastTopLevelStmt();
+            noway_assert(cond->gtStmtExpr->gtOper == GT_JTRUE);
+
+            /* check for SIDE_EFFECTS */
+            if (cond->gtStmtExpr->gtFlags & GTF_SIDE_EFFECT)
             {
                 /* Extract the side effects from the conditional */
                 GenTreePtr  sideEffList = NULL;
@@ -13940,14 +14041,14 @@ bool Compiler::fgOptimizeBranchToNext(BasicBlock* block, BasicBlock* bNext, Basi
                         /* Re-link the nodes for this statement */
                         fgSetStmtSeq(cond);
                     }
-                 }
+                }
             }
-        }
-        else
-        {
-           compCurBB = block;
-           /* conditional has NO side effect - remove it */
-           fgRemoveStmt(block, cond);
+            else
+            {
+               compCurBB = block;
+               /* conditional has NO side effect - remove it */
+               fgRemoveStmt(block, cond);
+            }
         }
 
         /* Conditional is gone - simply fall into the next block */
@@ -14015,6 +14116,13 @@ bool                Compiler::fgOptimizeBranch(BasicBlock* bJump)
     BasicBlock* bDestNext = bDest->bbNext;
     if (bDestNext->hasTryIndex() && !BasicBlock::sameTryRegion(bJump, bDestNext))
         return false;
+
+    // TODO(pdg): cost information for LIR
+    if (bJump->IsLIR() || bDest->IsLIR())
+    {
+        NYI("fgOptimizeBranch for LIR");
+        return false;
+    }
 
     GenTreeStmt* stmt;
     unsigned   estDupCostSz = 0;
