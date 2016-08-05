@@ -2847,11 +2847,12 @@ bool                Compiler::fgIsThrowHlpBlk(BasicBlock * block)
     if (block->IsLIR())
     {
         // TODO(pdg): it would be nice if there was simply a bit on the block we could check.
-        for (GenTree* node : LIR::AsRange(block))
+        LIR::Range blockRange = LIR::AsRange(block);
+        for (LIR::Range::ReverseIterator node = blockRange.rbegin(), end = blockRange.rend(); node != end; ++node)
         {
             if (node->OperGet() == GT_CALL)
             {
-                call = node;
+                call = *node;
             }
         }
     }
