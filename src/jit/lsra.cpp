@@ -7329,8 +7329,10 @@ LinearScan::allocateRegisters()
 // in which case it will require no resolution.
 //
 void
-LinearScan::resolveLocalRef(GenTreePtr treeNode, RefPosition * currentRefPosition)
+LinearScan::resolveLocalRef(BasicBlock* block, GenTreePtr treeNode, RefPosition * currentRefPosition)
 {
+    assert((block == nullptr) == (treeNode == nullptr));
+
     // Is this a tracked local?  Or just a register allocated for loading
     // a non-tracked one?
     Interval * interval = currentRefPosition->getInterval();
@@ -7472,6 +7474,7 @@ LinearScan::resolveLocalRef(GenTreePtr treeNode, RefPosition * currentRefPositio
             // currently lives.  For moveReg, the homeReg is the new register (as assigned above).
             // But for copyReg, the homeReg remains unchanged.
 
+            assert(treeNode != nullptr);
             treeNode->gtRegNum = interval->physReg;
 
             if (currentRefPosition->copyReg)
@@ -7486,7 +7489,7 @@ LinearScan::resolveLocalRef(GenTreePtr treeNode, RefPosition * currentRefPositio
             if (!currentRefPosition->isFixedRegRef || currentRefPosition->moveReg)
             {
                 // This is the second case, where we need to generate a copy
-                insertCopyOrReload(treeNode, currentRefPosition->getMultiRegIdx(), currentRefPosition); 
+                insertCopyOrReload(block, treeNode, currentRefPosition->getMultiRegIdx(), currentRefPosition); 
             }
         }
         else
@@ -7608,11 +7611,15 @@ LinearScan::writeRegisters(RefPosition *currentRefPosition, GenTree *tree)
 // when considering a node's operands.
 //
 void
-LinearScan::insertCopyOrReload(GenTreePtr tree, unsigned multiRegIdx, RefPosition* refPosition)
-{  
-    GenTreePtr* parentChildPointer = nullptr;
-    GenTreePtr parent = tree->gtGetParent(&parentChildPointer);
-    noway_assert(parent != nullptr && parentChildPointer != nullptr);
+LinearScan::insertCopyOrReload(BasicBlock* block, GenTreePtr tree, unsigned multiRegIdx, RefPosition* refPosition)
+{
+    LIR::Range blockRange = LIR::AsRange(block);
+
+    LIR::Use treeUse;
+    bool foundUse = blockRange.TryGetUse(tree, &treeUse);
+    assert(foundUse);
+
+    GenTree* parent = treeUse.User();
 
     genTreeOps  oper;
     if (refPosition->reload)
@@ -7676,12 +7683,10 @@ LinearScan::insertCopyOrReload(GenTreePtr tree, unsigned multiRegIdx, RefPositio
             newNode->gtFlags |= GTF_VAR_DEATH;
         }
 
-        // Replace tree in the parent node.
-        *parentChildPointer = newNode;
-
-        // we insert this directly after the spilled node.  it does not reload at that point but
-        // just updates registers
-        tree->InsertAfterSelf(newNode);
+        // Insert the copy/reload after the spilled node and replace the use of the original node with a use
+        // of the copy/reload.
+        blockRange.InsertAfter(newNode, tree);
+        treeUse.ReplaceWith(compiler, newNode);
     }
 }
 
@@ -7991,7 +7996,7 @@ LinearScan::resolveRegisters()
     {
         Interval * interval = currentRefPosition->getInterval();
         assert(interval != nullptr && interval->isLocalVar);
-        resolveLocalRef(nullptr, currentRefPosition);
+        resolveLocalRef(nullptr, nullptr, currentRefPosition);
         regNumber reg     = REG_STK;
         int varIndex = interval->getVarIndex(compiler);
 
@@ -8047,7 +8052,7 @@ LinearScan::resolveRegisters()
             assert(currentRefPosition->isIntervalRef());
             // Don't mark dummy defs as reload
             currentRefPosition->reload = false;
-            resolveLocalRef(NULL, currentRefPosition);
+            resolveLocalRef(nullptr, nullptr, currentRefPosition);
             regNumber reg;
             if (currentRefPosition->registerAssignment != RBM_NONE)
             {
@@ -8219,7 +8224,7 @@ LinearScan::resolveRegisters()
 
                 if (treeNode->IsLocal() && currentRefPosition->getInterval()->isLocalVar) 
                 {
-                    resolveLocalRef(treeNode, currentRefPosition);
+                    resolveLocalRef(block, treeNode, currentRefPosition);
                 }
 
                 // Mark spill locations on temps
@@ -8262,7 +8267,7 @@ LinearScan::resolveRegisters()
                         {
                             if (nextRefPosition->assignedReg() != REG_NA)
                             {
-                                insertCopyOrReload(treeNode, currentRefPosition->getMultiRegIdx(), nextRefPosition);
+                                insertCopyOrReload(block, treeNode, currentRefPosition->getMultiRegIdx(), nextRefPosition);
                             }
                             else
                             {

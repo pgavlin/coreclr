@@ -2843,7 +2843,29 @@ bool                Compiler::fgIsThrowHlpBlk(BasicBlock * block)
     if (!(block->bbFlags & BBF_INTERNAL) || block->bbJumpKind != BBJ_THROW)
         return false;
 
-    GenTreePtr  call = block->bbTreeList->gtStmt.gtStmtExpr;
+    GenTree* call = nullptr;
+    if (block->IsLIR())
+    {
+        // TODO(pdg): it would be nice if there was simply a bit on the block we could check.
+        LIR::Range blockRange = LIR::AsRange(block);
+        call = blockRange.EndExclusive();
+
+#ifdef DEBUG
+        for (LIR::Range::ReverseIterator node = blockRange.rbegin(), end = blockRange.rend(); node != end; ++node)
+        {
+            if (node->OperGet() == GT_CALL)
+            {
+                assert(*node == call);
+                assert(node == blockRange.rbegin());
+                break;
+            }
+        }
+#endif
+    }
+    else
+    {
+        call = block->bbTreeList->gtStmt.gtStmtExpr;
+    }
 
     if (!call || (call->gtOper != GT_CALL))
         return false;
@@ -4719,9 +4741,9 @@ inline bool         BasicBlock::endsWithJmpMethod(Compiler *comp)
 {
     if (comp->compJmpOpUsed && (bbJumpKind == BBJ_RETURN) && (bbFlags & BBF_HAS_JMP))
     {
-        GenTreePtr last = comp->fgGetLastTopLevelStmt(this);
-        assert(last != nullptr);
-        return last->gtStmt.gtStmtExpr->gtOper == GT_JMP;
+        GenTree* lastNode = IsLIR() ? bbLastNode : comp->fgGetLastTopLevelStmt(this)->gtStmt.gtStmtExpr;
+        assert(lastNode != nullptr);
+        return lastNode->OperGet() == GT_JMP;
     }
 
     return false;
@@ -4782,12 +4804,10 @@ inline bool BasicBlock::endsWithTailCall(Compiler* comp, bool fastTailCallsOnly,
 
         if (result)
         {
-            GenTreePtr last = comp->fgGetLastTopLevelStmt(this);
-            assert(last != nullptr);
-            last = last->gtStmt.gtStmtExpr;
-            if (last->OperGet() == GT_CALL)
+            GenTree* lastNode = IsLIR() ? bbLastNode : comp->fgGetLastTopLevelStmt(this)->gtStmt.gtStmtExpr;
+            if (lastNode->OperGet() == GT_CALL)
             {
-                GenTreeCall* call = last->AsCall();
+                GenTreeCall* call = lastNode->AsCall();
                 if (tailCallsConvertibleToLoopOnly)
                 {
                     result = call->IsTailCallConvertibleToLoop();
