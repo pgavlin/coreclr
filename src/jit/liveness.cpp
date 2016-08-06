@@ -2343,9 +2343,11 @@ bool Compiler::fgTryRemoveDeadLIRStore(LIR::Range& blockRange, GenTree* node, Ge
     assert(node->OperIsLocalStore() || node->OperIsLocalAddr());
 
     GenTree* store = nullptr;
+    GenTree* value = nullptr;
     if (node->OperIsLocalStore())
     {
         store = node;
+        value = store->gtGetOp1();
     }
     else if (node->OperIsLocalAddr())
     {
@@ -2357,43 +2359,46 @@ bool Compiler::fgTryRemoveDeadLIRStore(LIR::Range& blockRange, GenTree* node, Ge
         }
 
         store = addrUse.User();
+        value = store->gtGetOp2();
     }
 
     bool isClosed = false;
     unsigned sideEffects = 0;
     LIR::Range operandsRange = blockRange.GetRangeOfOperandTrees(store, &isClosed, &sideEffects);
-    if (!isClosed || ((sideEffects & GTF_ALL_EFFECT) != 0))
+    if (!isClosed ||
+        ((sideEffects & GTF_SIDE_EFFECT) != 0) ||
+        (((sideEffects & GTF_ORDER_SIDEEFF) != 0) && (value->OperGet() == GT_CATCH_ARG)))
     {
         // If the range of the operands contains unrelated code or if it contains any side effects,
-        // we will not remove it.
-        //
-        // TODO: we could remove the store and replace it with an unused value node.
-        *next = node->gtPrev;
-        return false;
-    }
+        // do not remove it. Instead, just remove the store.
 
-    // Compute the next node to process. Note that we must be careful not to set the next node to
-    // process to a node that we are about to remove.
-    if (node->OperIsLocalStore())
-    {
-        assert(node == store);
-        *next = (operandsRange.End() == store) ? operandsRange.Begin()->gtPrev : node->gtPrev;
+        *next = node->gtPrev;
     }
     else
     {
-        assert(operandsRange.ContainsNode(node));
-        *next = operandsRange.Begin()->gtPrev;
+        // Okay, the operands to the store form a contiguous range that has no side effects. Remove the
+        // range containing the operands and decrement the local var ref counts appropriately.
+
+        // Compute the next node to process. Note that we must be careful not to set the next node to
+        // process to a node that we are about to remove.
+        if (node->OperIsLocalStore())
+        {
+            assert(node == store);
+            *next = (operandsRange.End() == store) ? operandsRange.Begin()->gtPrev : node->gtPrev;
+        }
+        else
+        {
+            assert(operandsRange.ContainsNode(node));
+            *next = operandsRange.Begin()->gtPrev;
+        }
+
+        blockRange.Remove(operandsRange);
+
+        // TODO(pdg): this scan should really be folded into LIR::Range::Remove().
+        LIR::DecRefCnts(this, compCurBB, operandsRange);
     }
 
-    // Okay, the operands to the store form a contiguous range that has no side effects. Remove the
-    // range containing the operands and then remove the store. Once these have been removed, walk
-    // them and decrement local var ref counts appropriately.
-    blockRange.Remove(operandsRange);
     blockRange.Remove(store);
-
-    // TODO(pdg): this scan should really be folded into LIR::Range::Remove().
-    LIR::DecRefCnts(this, compCurBB, operandsRange);
-
     if (store->IsLocal())
     {
         lvaDecRefCnts(store);
