@@ -124,7 +124,7 @@ private:
     bool IsCallTargetInRange(void *addr);
 
     void TreeNodeInfoInit(GenTree* stmt);
-    void TreeNodeInfoInit(GenTreePtr* tree, GenTree* parent);
+
 #if defined(_TARGET_XARCH_)
     void TreeNodeInfoInitSimple(GenTree* tree);
 
