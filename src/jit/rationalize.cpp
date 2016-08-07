@@ -611,9 +611,6 @@ void Rationalizer::RewriteCopyBlk(LIR::Use& use)
     GenTree* list = cpBlk->gtGetOp1();
     if (oper == GT_STORE_LCL_VAR)
     {
-        // get rid of the list node
-        m_range.Remove(list);
-
         newNode = simdDst;
         newNode->SetOper(oper);
 
@@ -637,6 +634,8 @@ void Rationalizer::RewriteCopyBlk(LIR::Use& use)
         storeInd->gtFlags |= (simdSrc->gtFlags & GTF_ALL_EFFECT);
         storeInd->gtOp1 = simdDst;
         storeInd->gtOp2 = simdSrc;
+
+        m_range.InsertBefore(newNode, cpBlk);
     } 
 
     use.ReplaceWith(comp, newNode);
@@ -1235,11 +1234,11 @@ Compiler::fgWalkResult Rationalizer::RewriteNode(GenTree** useEdge, ArrayStack<G
 #ifdef _TARGET_XARCH_
     case GT_CLS_VAR:
         {
-            node->SetOper(GT_CLS_VAR_ADDR);
-            node->gtType = TYP_BYREF;
-
             GenTree* ind = comp->gtNewOperNode(GT_IND, node->TypeGet(), node);
             ind->CopyCosts(node);
+
+            node->SetOper(GT_CLS_VAR_ADDR);
+            node->gtType = TYP_BYREF;
 
             m_range.InsertAfter(ind, node);
             use.ReplaceWith(comp, ind);

@@ -8280,7 +8280,7 @@ void GenTreeUseEdgeIterator::MoveToNextSIMDUseEdge()
                 break;
         }
 
-        if (m_edge != nullptr)
+        if (m_edge != nullptr && *m_edge != nullptr)
         {
             m_state++;
         }
