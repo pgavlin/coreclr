@@ -576,6 +576,7 @@ void LIR::Range::InsertBefore(GenTree* node, GenTree* insertionPoint)
         assert(LastNode() == nullptr);
 
         FirstNode() = node;
+        LastNode() = node;
         return;
     }
 
@@ -617,6 +618,7 @@ void LIR::Range::InsertAfter(GenTree* node, GenTree* insertionPoint)
         assert(LastNode() == nullptr);
 
         FirstNode() = node;
+        LastNode() = node;
         return;
     }
 
