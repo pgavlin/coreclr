@@ -3545,6 +3545,11 @@ GenTree* Lowering::LowerArrElem(GenTree* node)
 
     GenTreePtr leaNode = new(comp, GT_LEA) GenTreeAddrMode(arrElem->TypeGet(), leaBase, leaIndexNode, scale, offset);
     leaNode->gtFlags |= GTF_REVERSE_OPS;
+
+    // Set the costs for all of the new nodes. Depends on the new nodes all participating in the
+    // dataflow tree rooted at `leaNode`.
+    comp->gtPrepareCost(leaNode);
+
     m_blockRange.InsertBefore(leaNode, insertionPoint);
 
     LIR::Use arrElemUse;

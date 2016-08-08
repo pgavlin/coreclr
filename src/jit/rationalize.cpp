@@ -353,6 +353,21 @@ genTreeOps addrForm(genTreeOps loadForm)
     }
 }
 
+// return op that is the load equivalent of the given addr opcode
+genTreeOps loadForm(genTreeOps addrForm)
+{
+    switch (addrForm)
+    {
+    case GT_LCL_VAR_ADDR:
+        return GT_LCL_VAR;
+    case GT_LCL_FLD_ADDR:
+        return GT_LCL_FLD;
+    default:
+        noway_assert(!"not a local address opcode\n");
+        unreached();
+    }
+}
+
 // copy the flags determined by mask from src to dst
 void copyFlags(GenTree *dst, GenTree *src, unsigned mask)
 {
@@ -442,24 +457,25 @@ void Rationalizer::RewriteInitBlk(LIR::Use& use)
 
     // Is the dstAddr is addr of a SIMD type lclVar?
     GenTree* dstAddr = initBlk->Dest();
-    if (dstAddr->OperGet() != GT_ADDR)
+    if (!comp->isAddrOfSIMDType(dstAddr) || !dstAddr->OperIsLocalAddr())
     {
         return;
     }
 
-    GenTree* dst = dstAddr->gtGetOp1();        
-    var_types baseType = comp->getBaseTypeOfSIMDLocal(dst);
-    if (baseType == TYP_UNKNOWN)
+    unsigned lclNum = dstAddr->AsLclVarCommon()->gtLclNum;
+    if (!comp->lvaTable[lclNum].lvSIMDType)
     {
         return;
     }
-    CORINFO_CLASS_HANDLE typeHnd = comp->lvaTable[dst->AsLclVarCommon()->gtLclNum].lvVerTypeInfo.GetClassHandle();
+
+    var_types baseType = comp->lvaTable[lclNum].lvBaseType;
+    CORINFO_CLASS_HANDLE typeHnd = comp->lvaTable[lclNum].lvVerTypeInfo.GetClassHandle();
     unsigned simdLocalSize = comp->getSIMDTypeSizeInBytes(typeHnd);
 
     JITDUMP("Rewriting SIMD InitBlk\n");
     DISPTREE(initBlk);
 
-    assert((dst->gtFlags & GTF_VAR_USEASG) == 0);
+    assert((dstAddr->gtFlags & GTF_VAR_USEASG) == 0);
 
     // There are currently only three sizes supported: 8 bytes, 16 bytes or the vector register length.
     GenTreeIntConCommon* sizeNode = initBlk->Size()->AsIntConCommon();
@@ -470,19 +486,19 @@ void Rationalizer::RewriteInitBlk(LIR::Use& use)
     GenTree* initVal = initBlk->InitVal();
     GenTreeSIMD* simdNode = new (comp, GT_SIMD) GenTreeSIMD(simdType, initVal, SIMDIntrinsicInit, baseType, (unsigned)sizeNode->IconValue());
 
-    dst->SetOper(GT_STORE_LCL_VAR);
-    GenTreeLclVar* store = dst->AsLclVar();
+    dstAddr->SetOper(GT_STORE_LCL_VAR);
+    GenTreeLclVar* store = dstAddr->AsLclVar();
     store->gtType = simdType;
     store->gtOp.gtOp1 = simdNode;
-    store->gtFlags |= (simdNode->gtFlags & GTF_ALL_EFFECT);
+    store->gtFlags |= ((simdNode->gtFlags & GTF_ALL_EFFECT) | GTF_ASG);
+    m_range.Remove(store);
 
     // Insert the new nodes into the block
     m_range.InsertAfter(simdNode, initVal);
     m_range.InsertAfter(store, simdNode);
     use.ReplaceWith(comp, store);
 
-    // Remove the old GT_ADDR, size, and GT_INITBLK nodes.
-    m_range.Remove(dstAddr);
+    // Remove the old size and GT_INITBLK nodes.
     m_range.Remove(sizeNode);
     m_range.Remove(initBlk);
 
@@ -529,10 +545,13 @@ void Rationalizer::RewriteCopyBlk(LIR::Use& use)
     GenTreePtr dstAddr = cpBlk->Dest();
     GenTree* srcAddr = cpBlk->Source();
 
+    const bool srcIsSIMDAddr = comp->isAddrOfSIMDType(srcAddr);
+    const bool dstIsSIMDAddr = comp->isAddrOfSIMDType(dstAddr);
+
     // Do not transform if neither src or dst is known to be a SIMD type.
     // If src tree type is something we cannot reason but if dst is known to be of a SIMD type
     // we will treat src tree as a SIMD type and vice versa.
-    if (!(comp->isAddrOfSIMDType(srcAddr) || comp->isAddrOfSIMDType(dstAddr)))
+    if (!srcIsSIMDAddr && !dstIsSIMDAddr)
     {
         return;
     }
@@ -554,12 +573,9 @@ void Rationalizer::RewriteCopyBlk(LIR::Use& use)
     // If yes then we can turn it to a stlcl.var, otherwise turn into stind.
     GenTree* simdDst = nullptr;
     genTreeOps oper = GT_NONE;
-    if (dstAddr->OperGet() == GT_ADDR && comp->isSIMDTypeLocal(dstAddr->gtGetOp1()))
+    if (dstIsSIMDAddr && dstAddr->OperIsLocalAddr())
     {
-        // Get rid of parent node in GT_ADDR(GT_LCL_VAR)
-        m_range.Remove(dstAddr);
-
-        simdDst = dstAddr->gtGetOp1();
+        simdDst = dstAddr;
         simdDst->gtType = simdType;
         oper = GT_STORE_LCL_VAR;
 
@@ -574,12 +590,19 @@ void Rationalizer::RewriteCopyBlk(LIR::Use& use)
         oper = GT_STOREIND;
     }
 
-    // Src: Get rid of parent node of GT_ADDR(..) if its child happens to be of a SIMD type.
     GenTree* simdSrc = nullptr;
-    if (srcAddr->OperGet() == GT_ADDR && varTypeIsSIMD(srcAddr->gtGetOp1()))
+    if ((srcAddr->OperGet() == GT_ADDR) && varTypeIsSIMD(srcAddr->gtGetOp1()))
     {
+        // Get rid of parent node of GT_ADDR(..) if its child happens to be of a SIMD type.
         m_range.Remove(srcAddr);
         simdSrc = srcAddr->gtGetOp1();
+    }
+    else if (srcIsSIMDAddr && srcAddr->OperIsLocalAddr())
+    {
+        // If the source has been rewritten into a local addr node, rewrite it back into a
+        // local var node.
+        simdSrc = srcAddr;
+        simdSrc->SetOper(loadForm(srcAddr->OperGet()));
     }
     else
     {
@@ -608,35 +631,33 @@ void Rationalizer::RewriteCopyBlk(LIR::Use& use)
     assert(simdSrc != nullptr);
 
     GenTree* newNode = nullptr;
-    GenTree* list = cpBlk->gtGetOp1();
     if (oper == GT_STORE_LCL_VAR)
     {
-        // get rid of the list node
-        m_range.Remove(list);
-
         newNode = simdDst;
         newNode->SetOper(oper);
 
         GenTreeLclVar* store = newNode->AsLclVar();
         store->gtOp1 = simdSrc;         
         store->gtType = simdType;
-        store->gtFlags |= (simdSrc->gtFlags & GTF_ALL_EFFECT);
+        store->gtFlags |= ((simdSrc->gtFlags & GTF_ALL_EFFECT) | GTF_ASG);
 
         m_range.Remove(simdDst);
-        m_range.InsertAfter(simdDst, simdSrc);
+        m_range.InsertAfter(store, simdSrc);
     }
     else
     {
         assert(oper == GT_STOREIND);
 
-        newNode = list;
+        newNode = cpBlk->gtGetOp1();
         newNode->SetOper(oper);
 
         GenTreeStoreInd* storeInd = newNode->AsStoreInd();
         storeInd->gtType = simdType;
-        storeInd->gtFlags |= (simdSrc->gtFlags & GTF_ALL_EFFECT);
+        storeInd->gtFlags |= ((simdSrc->gtFlags & GTF_ALL_EFFECT) | GTF_ASG);
         storeInd->gtOp1 = simdDst;
         storeInd->gtOp2 = simdSrc;
+
+        m_range.InsertBefore(storeInd, cpBlk);
     } 
 
     use.ReplaceWith(comp, newNode);
@@ -684,14 +705,13 @@ void Rationalizer::RewriteObj(LIR::Use& use)
     // If the operand of obj is a GT_ADDR(GT_LCL_VAR) and LclVar is known to be a SIMD type,
     // replace obj by GT_LCL_VAR.
     GenTree* srcAddr = obj->gtGetOp1();
-    if (srcAddr->OperGet() == GT_ADDR && comp->isSIMDTypeLocal(srcAddr->gtGetOp1()))
+    if (srcAddr->OperIsLocalAddr() && comp->isAddrOfSIMDType(srcAddr))
     {
-        m_range.Remove(srcAddr);
         m_range.Remove(obj);
 
-        GenTree* src = srcAddr->gtGetOp1();
-        src->gtType = simdType;
-        use.ReplaceWith(comp, src);
+        srcAddr->SetOper(loadForm(srcAddr->OperGet()));
+        srcAddr->gtType = simdType;
+        use.ReplaceWith(comp, srcAddr);
     }
     else 
     {
@@ -993,6 +1013,10 @@ void Rationalizer::RewriteAssignmentIntoStoreLcl(GenTreeOp* assignment)
     GenTree* location = assignment->gtGetOp1();
     GenTree* value = assignment->gtGetOp2();
 
+    // TODO(pdg): because this function does not have access to an LIR::Range,
+    // it cannot remove the location node. If the location has been threaded into
+    // a range, it will need to be removed by the caller.
+
     RewriteAssignmentIntoStoreLclCore(assignment, location, value, location->OperGet());
 }
 
@@ -1235,16 +1259,25 @@ Compiler::fgWalkResult Rationalizer::RewriteNode(GenTree** useEdge, ArrayStack<G
 #ifdef _TARGET_XARCH_
     case GT_CLS_VAR:
         {
-            node->SetOper(GT_CLS_VAR_ADDR);
-            node->gtType = TYP_BYREF;
+            // Class vars that are the target of an assignment will get rewritten into
+            // GT_STOREIND(GT_CLS_VAR_ADDR, val) by RewriteAssignment. This check is
+            // not strictly necessary--the GT_IND(GT_CLS_VAR_ADDR) pattern that would
+            // otherwise be generated would also be picked up by RewriteAssignment--but
+            // skipping the rewrite here saves an allocation and a bit of extra work.
+            const bool isLHSOfAssignment = (use.User()->OperGet() == GT_ASG) && (use.User()->gtGetOp1() == node);
+            if (!isLHSOfAssignment)
+            {
+                GenTree* ind = comp->gtNewOperNode(GT_IND, node->TypeGet(), node);
+                ind->CopyCosts(node);
 
-            GenTree* ind = comp->gtNewOperNode(GT_IND, node->TypeGet(), node);
-            ind->CopyCosts(node);
+                node->SetOper(GT_CLS_VAR_ADDR);
+                node->gtType = TYP_BYREF;
 
-            m_range.InsertAfter(ind, node);
-            use.ReplaceWith(comp, ind);
+                m_range.InsertAfter(ind, node);
+                use.ReplaceWith(comp, ind);
 
-            // TODO: JIT dump
+                // TODO: JIT dump
+            }
         }
         break;
 #endif // _TARGET_XARCH_
@@ -1290,7 +1323,7 @@ Compiler::fgWalkResult Rationalizer::RewriteNode(GenTree** useEdge, ArrayStack<G
             else
             {
                 // If the address is not a local var, assert that the user of this IND is an ADDR node.
-                assert(use.User()->OperGet() == GT_ADDR);
+                assert((use.User()->OperGet() == GT_ADDR) || use.User()->OperIsLocalAddr());
             }
 #endif
         }

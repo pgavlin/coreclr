@@ -13769,6 +13769,14 @@ bool Compiler::fgOptimizeSwitchBranches(BasicBlock* block)
         GenTree* switchVal = switchTree->gtOp.gtOp1;
         noway_assert(genActualTypeIsIntOrI(switchVal->TypeGet()));
 
+        // If we are in LIR, remove the jump table from the block.
+        if (block->IsLIR())
+        {
+            GenTree* jumpTable = switchTree->gtOp.gtOp2;
+            assert(jumpTable->OperGet() == GT_JMPTABLE);
+            blockRange.Remove(jumpTable);
+        }
+
         // Change the GT_SWITCH(switchVal) into GT_JTRUE(GT_EQ(switchVal==0)).
         // Also mark the node as GTF_DONT_CSE as further down JIT is not capable of handling it.
         // For example CSE could determine that the expression rooted at GT_EQ is a candidate cse and
