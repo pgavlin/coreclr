@@ -2085,9 +2085,9 @@ GenTreePtr    Compiler::fgMakeTmpArgNode(unsigned tmpVarNum
         arg = gtNewOperNode(GT_ADDR, TYP_BYREF, arg);
         addrNode = arg;
 
-        // Get a new Obj node temp to use it as a call argument
+        // Get a new Obj node temp to use it as a call argument.
+        // gtNewObjNode will set the GTF_EXCEPT flag if this is not a local stack object.
         arg = gtNewObjNode(lvaGetStruct(tmpVarNum), arg);
-        arg->gtFlags |= GTF_EXCEPT;
 
 #endif  // not (_TARGET_AMD64_ or _TARGET_ARM64_)
 
@@ -2604,12 +2604,10 @@ GenTreeCall* Compiler::fgMorphArgs(GenTreeCall* callNode)
     unsigned        intArgRegNum  = 0;
     unsigned        fltArgRegNum  = 0;
 
+#ifdef _TARGET_ARM_
     regMaskTP       argSkippedRegMask    = RBM_NONE;
-
-#if defined(_TARGET_ARM_) || defined(_TARGET_AMD64_)
-    // Note this in ONLY used by _TARGET_ARM_
     regMaskTP       fltArgSkippedRegMask = RBM_NONE;
-#endif
+#endif //  _TARGET_ARM_
 
 #if defined(_TARGET_X86_)
     unsigned        maxRegArgs    = MAX_REG_ARG;  // X86: non-const, must be calculated
@@ -2953,23 +2951,19 @@ GenTreeCall* Compiler::fgMorphArgs(GenTreeCall* callNode)
         // this can't be a struct.
         assert(argx->gtType != TYP_STRUCT);
 
-        // FIXME: Issue #4025 Why do we need floating type for 'this' argument
         /* Increment the argument register count and argument index */
         if (!varTypeIsFloating(argx->gtType) || opts.compUseSoftFP)
         {
             intArgRegNum++;
-#if defined(_TARGET_AMD64_) && !defined(UNIX_AMD64_ABI)
-            fltArgSkippedRegMask |= genMapArgNumToRegMask(fltArgRegNum, TYP_FLOAT);
+#ifdef WINDOWS_AMD64_ABI
+            // Whenever we pass an integer register argument
+            // we skip the corresponding floating point register argument  
             fltArgRegNum++;
-#endif
+#endif // WINDOWS_AMD64_ABI
         }
         else
         {
-            fltArgRegNum++;
-#if defined(_TARGET_AMD64_) && !defined(UNIX_AMD64_ABI)
-            argSkippedRegMask |= genMapArgNumToRegMask(intArgRegNum, TYP_I_IMPL);
-            intArgRegNum++;
-#endif
+            noway_assert(!"the 'this' pointer can not be a floating point type");
         }
         argIndex++;
         argSlots++;
@@ -3203,7 +3197,7 @@ GenTreeCall* Compiler::fgMorphArgs(GenTreeCall* callNode)
         {
             passUsingFloatRegs = varTypeIsFloating(argx);
         }
-#else // !UNIX_AMD64_ABI
+#else // WINDOWS_AMD64_ABI
         passUsingFloatRegs = varTypeIsFloating(argx);
 #endif // !UNIX_AMD64_ABI
 #elif defined(_TARGET_X86_)
@@ -3980,10 +3974,11 @@ GenTreeCall* Compiler::fgMorphArgs(GenTreeCall* callNode)
                     {
                         fltArgRegNum += size;
 
-#if defined(_TARGET_AMD64_) && !defined(UNIX_AMD64_ABI)
-                        argSkippedRegMask |= genMapArgNumToRegMask(intArgRegNum, TYP_I_IMPL);
+#ifdef WINDOWS_AMD64_ABI
+                        // Whenever we pass an integer register argument
+                        // we skip the corresponding floating point register argument  
                         intArgRegNum = min(intArgRegNum + size, MAX_REG_ARG);
-#endif // _TARGET_AMD64_
+#endif // WINDOWS_AMD64_ABI
 #ifdef _TARGET_ARM_
                         if (fltArgRegNum > MAX_FLOAT_REG_ARG)
                         {
@@ -4011,7 +4006,6 @@ GenTreeCall* Compiler::fgMorphArgs(GenTreeCall* callNode)
                         }
 
 #if defined(_TARGET_AMD64_) && !defined(UNIX_AMD64_ABI)
-                        fltArgSkippedRegMask |= genMapArgNumToRegMask(fltArgRegNum, TYP_DOUBLE);
                         fltArgRegNum = min(fltArgRegNum + size, MAX_FLOAT_REG_ARG);
 #endif // _TARGET_AMD64_
 #ifdef _TARGET_ARM_
@@ -4118,7 +4112,10 @@ GenTreeCall* Compiler::fgMorphArgs(GenTreeCall* callNode)
     {
         call->fgArgInfo->ArgsComplete();
 #ifdef LEGACY_BACKEND
-        call->gtCallRegUsedMask = genIntAllRegArgMask(intArgRegNum) & ~argSkippedRegMask;
+        call->gtCallRegUsedMask = genIntAllRegArgMask(intArgRegNum);
+#if defined(_TARGET_ARM_)
+        call->gtCallRegUsedMask &= ~argSkippedRegMask;
+#endif
         if (fltArgRegNum > 0)
         {
 #if defined(_TARGET_ARM_)
@@ -4409,8 +4406,6 @@ void Compiler::fgMorphSystemVStructArgs(GenTreeCall* call, bool hasStructArgumen
 
                         // Create an Obj of the temp to use it as a call argument.
                         arg = new (this, GT_OBJ) GenTreeObj(originalType, arg, lvaGetStruct(lclCommon->gtLclNum));
-                        arg->gtFlags |= GTF_EXCEPT;
-                        flagsSummary |= GTF_EXCEPT;
                     }
                 }
             }
@@ -4494,7 +4489,7 @@ void Compiler::fgMorphMultiregStructArgs(GenTreeCall* call)
 #ifdef _TARGET_AMD64_
 #if defined(UNIX_AMD64_ABI)
     NYI_AMD64("fgMorphMultiregStructArgs (UNIX ABI)");
-#else // !UNIX_AMD64_ABI
+#else // WINDOWS_AMD64_ABI
     assert(!"Logic error: no MultiregStructArgs for Windows X64 ABI");
 #endif // !UNIX_AMD64_ABI
 #endif
@@ -6129,6 +6124,9 @@ GenTreePtr          Compiler::fgMorphField(GenTreePtr tree, MorphAddrContext* ma
             // An indirection will cause a GPF if the address is null.
             nullchk->gtFlags |= GTF_EXCEPT;
 
+            compCurBB->bbFlags |= BBF_HAS_NULLCHECK;
+            optMethodFlags |= OMF_HAS_NULLCHECK;
+
             if (asg)
             {
                 // Create the "comma" node.
@@ -6515,6 +6513,8 @@ void Compiler::fgMorphCallInlineHelper(GenTreeCall* call, InlineResult* result)
        // printf("startVars=%d.\n", startVars);
     }
 #endif
+
+    impInlineRoot()->m_inlineStrategy->NoteAttempt(result);
 
     //
     // Invoke the compiler to inline the call.
@@ -8035,6 +8035,31 @@ NO_TAIL_CALL:
         return result;
     }
 
+    if (call->IsNoReturn())
+    {
+        //
+        // If we know that the call does not return then we can set fgRemoveRestOfBlock
+        // to remove all subsequent statements and change the call's basic block to BBJ_THROW.
+        // As a result the compiler won't need to preserve live registers across the call.
+        //
+        // This isn't need for tail calls as there shouldn't be any code after the call anyway.
+        // Besides, the tail call code is part of the epilog and converting the block to 
+        // BBJ_THROW would result in the tail call being dropped as the epilog is generated
+        // only for BBJ_RETURN blocks.
+        //
+        // Currently this doesn't work for non-void callees. Some of the code that handles 
+        // fgRemoveRestOfBlock expects the tree to have GTF_EXCEPT flag set but call nodes
+        // do not have this flag by default. We could add the flag here but the proper solution
+        // would be to replace the return expression with a local var node during inlining
+        // so the rest of the call tree stays in a separate statement. That statement can then
+        // be removed by fgRemoveRestOfBlock without needing to add GTF_EXCEPT anywhere.
+        //
+
+        if (!call->IsTailCall() && call->TypeGet() == TYP_VOID)
+        {
+            fgRemoveRestOfBlock = true;
+        }
+    }
 
     return call;
 }
@@ -8386,17 +8411,19 @@ ONE_SIMPLE_ASG:
             }
         }
 
-        /* Indirect the dest node */
+        // Indirect the dest node.
 
         dest = gtNewOperNode(GT_IND, type, dest);
 
-        /* As long as we don't have more information about the destination we
-           have to assume it could live anywhere (not just in the GC heap). Mark
-           the GT_IND node so that we use the correct write barrier helper in case
-           the field is a GC ref.
-        */
+        // If we have no information about the destination, we have to assume it could
+        // live anywhere (not just in the GC heap).
+        // Mark the GT_IND node so that we use the correct write barrier helper in case
+        // the field is a GC ref.
 
-        dest->gtFlags |= (GTF_EXCEPT | GTF_GLOB_REF | GTF_IND_TGTANYWHERE);
+        if (!fgIsIndirOfAddrOfLocal(dest))
+        {
+            dest->gtFlags |= (GTF_EXCEPT | GTF_GLOB_REF | GTF_IND_TGTANYWHERE);
+        }
 
 _DoneDest:;
 
@@ -8444,10 +8471,19 @@ _DoneDest:;
                 }
             }
 
-            /* Indirect the src node */
+            // Indirect the src node.
 
             src  = gtNewOperNode(GT_IND, type, src);
-            src->gtFlags     |= (GTF_EXCEPT | GTF_GLOB_REF | GTF_IND_TGTANYWHERE);
+
+            // If we have no information about the src, we have to assume it could
+            // live anywhere (not just in the GC heap).
+            // Mark the GT_IND node so that we use the correct write barrier helper in case
+            // the field is a GC ref.
+
+            if (!fgIsIndirOfAddrOfLocal(src))
+            {
+                src->gtFlags |= (GTF_EXCEPT | GTF_GLOB_REF | GTF_IND_TGTANYWHERE);
+            }
 
 _DoneSrc:;
 
@@ -11763,6 +11799,16 @@ CM_ADD_OP:
         fgAddCodeRef(compCurBB, bbThrowIndex(compCurBB), SCK_ARITH_EXCPN, fgPtrArgCntCur);
         break;
 
+    case GT_OBJ:
+        // If we have GT_OBJ(GT_ADDR(X)) and X has GTF_GLOB_REF, we must set GTF_GLOB_REF on
+        // the GT_OBJ. Note that the GTF_GLOB_REF will have been cleared on ADDR(X) where X
+        // is a local or clsVar, even if it has been address-exposed.
+        if (op1->OperGet() == GT_ADDR)
+        {
+            tree->gtFlags |= (op1->gtGetOp1()->gtFlags & GTF_GLOB_REF);
+        }
+        break;
+
     case GT_IND:
 
         // Can not remove a GT_IND if it is currently a CSE candidate.
@@ -12115,6 +12161,9 @@ CM_ADD_OP:
             // Originally, I gave all the comma nodes type "byref".  But the ADDR(IND(x)) == x transform
             // might give op1 a type different from byref (like, say, native int).  So now go back and give
             // all the comma nodes the type of op1.
+            // TODO: the comma flag update below is conservative and can be improved.
+            // For example, if we made the ADDR(IND(x)) == x transformation, we may be able to
+            // get rid of some of the the IND flags on the COMMA nodes (e.g., GTF_GLOB_REF).
             commaNode = tree;
             while (commaNode->gtOper == GT_COMMA)
             {
@@ -12974,7 +13023,6 @@ ASG_OP:
     }
     return tree;
 }
-
 
 // code to generate a magic number and shift amount for the magic number division 
 // optimization.  This code is previously from UTC where it notes it was taken from

@@ -5418,7 +5418,7 @@ void CodeGen::genCallInstruction(GenTreePtr node)
                     inst_RV_RV(ins_Move_Extend(putArgRegNode->TypeGet(), putArgRegNode->InReg()), argReg, putArgRegNode->gtRegNum);
                 }
 
-                argReg = REG_NEXT(argReg);
+                argReg = genRegArgNext(argReg);
             }
         }
         else
@@ -5832,13 +5832,11 @@ void CodeGen::genJmpMethod(GenTreePtr jmp)
                 if (varDsc->lvIsHfa())
                 {
                     NYI_ARM64("CodeGen::genJmpMethod with multireg HFA arg");
-                    // use genRegArgNextFloat
                 }
-                else
-                {
-                    // Restore the second register.
-                    argRegNext = genRegArgNext(argReg);
-                }
+
+                // Restore the second register.
+                argRegNext = genRegArgNext(argReg);
+
                 loadType = compiler->getJitGCType(varDsc->lvGcLayout[1]);
                 loadSize = emitActualTypeSize(loadType);
                 getEmitter()->emitIns_R_S(ins_Load(loadType), loadSize, argRegNext, varNum, TARGET_POINTER_SIZE);

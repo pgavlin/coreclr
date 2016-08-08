@@ -5390,12 +5390,14 @@ bool                GenTree::OperMayThrow()
 
         break;
 
+    case GT_OBJ:
+        return !Compiler::fgIsIndirOfAddrOfLocal(this);
+
     case GT_ARR_BOUNDS_CHECK:
     case GT_ARR_ELEM:
     case GT_ARR_INDEX:
     case GT_CATCH_ARG:
     case GT_ARR_LENGTH:
-    case GT_OBJ:
     case GT_LCLHEAP:
     case GT_CKFINITE:
     case GT_NULLCHECK:
@@ -6109,7 +6111,14 @@ GenTreeObj* Compiler::gtNewObjNode(CORINFO_CLASS_HANDLE structHnd, GenTree* addr
 {
     var_types nodeType   = impNormStructType(structHnd);
     assert(varTypeIsStruct(nodeType));
-    return new (this, GT_OBJ) GenTreeObj(nodeType, addr, structHnd);
+    GenTreeObj *objNode = new (this, GT_OBJ) GenTreeObj(nodeType, addr, structHnd);
+    // An Obj is not a global reference, if it is known to be a local struct.
+    GenTreeLclVarCommon* lclNode = addr->IsLocalAddrExpr();
+    if ((lclNode != nullptr) && !lvaIsImplicitByRefLocal(lclNode->gtLclNum))
+    {
+        objNode->gtFlags &= ~GTF_GLOB_REF;
+    }
+    return objNode;
 }
 
 // Creates a new CpObj node.
@@ -13750,15 +13759,29 @@ bool GenTree::DefinesLocalAddr(Compiler* comp, unsigned width, GenTreeLclVarComm
             *pLclVarTree = addrArgLcl;
             if (pIsEntire != NULL)
             {
-                unsigned lclNum = addrArgLcl->GetLclNum();
-                unsigned varWidth = comp->lvaLclExactSize(lclNum);
-                if (comp->lvaTable[lclNum].lvNormalizeOnStore())
+                unsigned lclOffset = 0;
+                if (addrArg->OperIsLocalField())
                 {
-                    // It's normalize on store, so use the full storage width -- writing to low bytes won't
-                    // necessarily yield a normalized value.
-                    varWidth = genTypeStSz(var_types(comp->lvaTable[lclNum].lvType)) * sizeof(int);
+                    lclOffset = addrArg->gtLclFld.gtLclOffs;
                 }
-                *pIsEntire = (varWidth == width);
+
+                if (lclOffset != 0)
+                {
+                    // We aren't updating the bytes at [0..lclOffset-1] so *pIsEntire should be set to false
+                    *pIsEntire = false;
+                }
+                else
+                {
+                    unsigned lclNum = addrArgLcl->GetLclNum();
+                    unsigned varWidth = comp->lvaLclExactSize(lclNum);
+                    if (comp->lvaTable[lclNum].lvNormalizeOnStore())
+                    {
+                        // It's normalize on store, so use the full storage width -- writing to low bytes won't
+                        // necessarily yield a normalized value.
+                        varWidth = genTypeStSz(var_types(comp->lvaTable[lclNum].lvType)) * sizeof(int);
+                    }
+                    *pIsEntire = (varWidth == width);
+                }
             }
             return true;
         }
@@ -14964,7 +14987,9 @@ bool FieldSeqNode::IsPseudoField()
 #ifdef FEATURE_SIMD
 GenTreeSIMD* Compiler::gtNewSIMDNode(var_types type, GenTreePtr op1, SIMDIntrinsicID simdIntrinsicID, var_types baseType, unsigned size)
 {   
-    assert(op1 != nullptr);
+	// TODO-CQ: An operand may be a GT_OBJ(GT_ADDR(GT_LCL_VAR))), in which case it should be
+	// marked lvUsedInSIMDIntrinsic.
+	assert(op1 != nullptr);
     if (op1->OperGet() == GT_LCL_VAR)
     {
         unsigned lclNum = op1->AsLclVarCommon()->GetLclNum();
@@ -14977,6 +15002,8 @@ GenTreeSIMD* Compiler::gtNewSIMDNode(var_types type, GenTreePtr op1, SIMDIntrins
 
 GenTreeSIMD* Compiler::gtNewSIMDNode(var_types type, GenTreePtr op1, GenTreePtr op2, SIMDIntrinsicID simdIntrinsicID, var_types baseType, unsigned size)
 {
+    // TODO-CQ: An operand may be a GT_OBJ(GT_ADDR(GT_LCL_VAR))), in which case it should be
+    // marked lvUsedInSIMDIntrinsic.
     assert(op1 != nullptr);
     if (op1->OperIsLocal())
     {

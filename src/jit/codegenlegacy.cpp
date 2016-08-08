@@ -3472,7 +3472,7 @@ regMaskTP           CodeGen::WriteBarrier(GenTreePtr tgt,
 
     return resultRegMask; 
     }
-#endif // _TARGET_ARM_
+#endif // defined(DEBUG) || !(defined(_TARGET_X86_) && NOGC_WRITE_BARRIERS)
 
 #else  // !FEATURE_WRITE_BARRIER
 
@@ -18078,14 +18078,7 @@ void CodeGen::SetupLateArgs(GenTreePtr call)
                     assert(genRegMask(regNum2) & RBM_CALLEE_TRASH);
                     regSet.rsSpillReg(regNum2);
                 }
-                if (isValidIntArgReg(regNum2))
-                {
-                    regNum2 = genRegArgNext(regNum2);
-                }
-                else
-                {
-                    regNum2 = genRegArgNextFloat(regNum2);
-                }
+                regNum2 = genRegArgNext(regNum2);
                 assert(i + 1 == curArgTabEntry->numRegs || regNum2 != MAX_REG_ARG);
             }
 
@@ -18328,7 +18321,8 @@ void CodeGen::SetupLateArgs(GenTreePtr call)
             {
                 // First pass the stack portion of the struct (if any)
                 //
-                for (unsigned i = firstStackSlot; i < slots; i++)
+				int argOffsetOfFirstStackSlot = argOffset;
+				for (unsigned i = firstStackSlot; i < slots; i++)
                 {
                     emitAttr fieldSize;
                     if      (gcLayout[i] == TYPE_GC_NONE)
@@ -18356,7 +18350,7 @@ void CodeGen::SetupLateArgs(GenTreePtr call)
                                                           /*pCurRegNum*/&maxRegArg,
                                                           argOffset, 
                                                           /*fieldOffsetOfFirstStackSlot*/ firstStackSlot * TARGET_POINTER_SIZE,
-                                                          /*argOffsetOfFirstStackSlot*/ 0, // is always zero in this "spanning" case.
+                                                          argOffsetOfFirstStackSlot,
                                                           &deadFieldVarRegs,
                                                           &regTmp);
                         if (filledExtraSlot) 

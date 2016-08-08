@@ -3134,37 +3134,43 @@ void CEEInfo::ComputeRuntimeLookupForSharedGenericToken(DictionaryEntryKind entr
 #if defined(_TARGET_ARM_)
         ThrowHR(E_NOTIMPL); /* TODO - NYI */
 #endif
+        pResultLookup->lookupKind.runtimeLookupArgs = NULL;
+
         switch (entryKind)
         {
+        case DeclaringTypeHandleSlot:
+            _ASSERTE(pTemplateMD != NULL);
+            pResultLookup->lookupKind.runtimeLookupArgs = pTemplateMD->GetMethodTable();
+            pResultLookup->lookupKind.runtimeLookupFlags = READYTORUN_FIXUP_DeclaringTypeHandle;
+            break;
+
         case TypeHandleSlot:
-        {
             pResultLookup->lookupKind.runtimeLookupFlags = READYTORUN_FIXUP_TypeHandle;
             break;
-        }
 
         case MethodDescSlot:
         case MethodEntrySlot:
+        case ConstrainedMethodEntrySlot:
         case DispatchStubAddrSlot:
         {
             if (pTemplateMD != (MethodDesc*)pResolvedToken->hMethod)
                 ThrowHR(E_NOTIMPL);
-            if (((MethodDesc*)pResolvedToken->hMethod)->GetMethodTable_NoLogging() != (MethodTable*)pResolvedToken->hClass)
-                ThrowHR(E_NOTIMPL);
 
             if (entryKind == MethodDescSlot)
                 pResultLookup->lookupKind.runtimeLookupFlags = READYTORUN_FIXUP_MethodHandle;
-            else if (entryKind == MethodEntrySlot)
+            else if (entryKind == MethodEntrySlot || entryKind == ConstrainedMethodEntrySlot)
                 pResultLookup->lookupKind.runtimeLookupFlags = READYTORUN_FIXUP_MethodEntry;
             else
                 pResultLookup->lookupKind.runtimeLookupFlags = READYTORUN_FIXUP_VirtualEntry;
 
+            pResultLookup->lookupKind.runtimeLookupArgs = pConstrainedResolvedToken;
+
             break;
         }
 
-        case DeclaringTypeHandleSlot:
         case FieldDescSlot:
-        case ConstrainedMethodEntrySlot:
-            ThrowHR(E_NOTIMPL);
+            pResultLookup->lookupKind.runtimeLookupFlags = READYTORUN_FIXUP_FieldHandle;
+            break;
 
         default:
             _ASSERTE(!"Unknown dictionary entry kind!");
@@ -5281,12 +5287,6 @@ void CEEInfo::getCallInfo(
 
             // For reference types, the constrained type does not affect method resolution
             DictionaryEntryKind entryKind = (!constrainedType.IsNull() && constrainedType.IsValueType()) ? ConstrainedMethodEntrySlot : MethodEntrySlot;
-
-            if (IsReadyToRunCompilation() && pConstrainedResolvedToken != NULL)
-            {
-                // READYTORUN: FUTURE: Constrained generic calls
-                ThrowHR(E_NOTIMPL);
-            }
 
             ComputeRuntimeLookupForSharedGenericToken(entryKind,
                                                       pResolvedToken,

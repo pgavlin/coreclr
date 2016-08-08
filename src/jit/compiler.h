@@ -5551,6 +5551,7 @@ public:
 #define OMF_HAS_NEWOBJ      0x00000002  // Method contains 'new' of an object type.
 #define OMF_HAS_ARRAYREF    0x00000004  // Method contains array element loads or stores.
 #define OMF_HAS_VTABLEREF   0x00000008  // Method contains method table reference.
+#define OMF_HAS_NULLCHECK   0x00000010  // Method contains null check.
 
     unsigned   optMethodFlags;
 
@@ -5562,7 +5563,8 @@ public:
     {
         OPK_INVALID,
         OPK_ARRAYLEN,
-        OPK_OBJ_GETTYPE
+        OPK_OBJ_GETTYPE,
+        OPK_NULLCHECK
     };
 
     bool       gtIsVtableRef(GenTreePtr tree);
@@ -5574,6 +5576,8 @@ public:
     bool       optDoEarlyPropForBlock(BasicBlock* block);
     bool       optDoEarlyPropForFunc();
     void       optEarlyProp();
+    void       optFoldNullCheck(GenTreePtr tree);
+    bool       optCanMoveNullCheckPastTree(GenTreePtr tree, bool isInsideTry);
 
 #if ASSERTION_PROP
     /**************************************************************************
@@ -5601,6 +5605,7 @@ public:
                             O1K_CONSTANT_LOOP_BND,
                             O1K_EXACT_TYPE,
                             O1K_SUBTYPE,
+                            O1K_VALUE_NUMBER,
                             O1K_COUNT };
 
     enum optOp2Kind       { O2K_INVALID,
@@ -6839,7 +6844,7 @@ public :
 #endif // _TARGET_ARM_
 
     // If "tree" is a indirection (GT_IND, or GT_OBJ) whose arg is an ADDR, whose arg is a LCL_VAR, return that LCL_VAR node, else NULL.
-    GenTreePtr          fgIsIndirOfAddrOfLocal(GenTreePtr tree);
+    static GenTreePtr   fgIsIndirOfAddrOfLocal(GenTreePtr tree);
 
     // This is indexed by GT_OBJ nodes that are address of promoted struct variables, which
     // have been annotated with the GTF_VAR_DEATH flag.  If such a node is *not* mapped in this

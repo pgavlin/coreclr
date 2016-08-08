@@ -4581,49 +4581,31 @@ DECODE_OPCODE:
         case CEE_STARG:
         case CEE_STARG_S:
             {
-                if (makeInlineObservations)
-                {
-                    // The inliner keeps the args as trees and clones
-                    // them.  Storing the arguments breaks that
-                    // simplification.  To allow this, flag the argument
-                    // as written to and spill it before inlining.  That
-                    // way the STARG in the inlinee is trivial.
-                    //
-                    // Arguably this should be NoteFatal, but the legacy behavior is
-                    // to ignore this for the prejit root.
-                    compInlineResult->Note(InlineObservation::CALLEE_STORES_TO_ARGUMENT);
+                noway_assert(sz == sizeof(BYTE) || sz == sizeof(WORD));
 
-                    // Fail fast, if inlining
-                    if (isInlining)
-                    {
-                        assert(compInlineResult->IsFailure());
-                        JITDUMP("INLINER: Inline expansion aborted; opcode at offset [%02u]"
-                                " writes to an argument\n", codeAddr-codeBegp-1);
-                        return;
-                    }
+                if (codeAddr > codeEndp - sz)
+                {
+                    goto TOO_FAR;
                 }
 
-                // In non-inline cases, note written-to locals.
-                if (!isInlining)
-                {
-                    noway_assert(sz == sizeof(BYTE) || sz == sizeof(WORD));
+                varNum = (sz == sizeof(BYTE)) ? getU1LittleEndian(codeAddr)
+                                                : getU2LittleEndian(codeAddr);
+                varNum = compMapILargNum(varNum); // account for possible hidden param
 
-                    if (codeAddr > codeEndp - sz)
-                    {
-                        goto TOO_FAR;
-                    }
-
-                    varNum = (sz == sizeof(BYTE)) ? getU1LittleEndian(codeAddr)
-                                                  : getU2LittleEndian(codeAddr);
-                    varNum = compMapILargNum(varNum); // account for possible hidden param
-
-                    // This check is only intended to prevent an AV.  Bad varNum values will later
-                    // be handled properly by the verifier.
-                    if (varNum < lvaTableCnt)
-                    {
-                        lvaTable[varNum].lvArgWrite = 1;
-                    }
-                }
+				// This check is only intended to prevent an AV.  Bad varNum values will later
+				// be handled properly by the verifier.
+				if (varNum < lvaTableCnt)
+				{
+					if (isInlining)
+					{
+						impInlineInfo->inlArgInfo[varNum].argHasStargOp = true;
+					}
+					else
+					{
+						// In non-inline cases, note written-to locals.
+						lvaTable[varNum].lvArgWrite = 1;
+					}
+				}
             }
             break;
 
@@ -4873,6 +4855,7 @@ TOO_FAR:
                 
                 if (compInlineResult->IsFailure())
                 {
+                    impInlineRoot()->m_inlineStrategy->NoteUnprofitable();
                     JITDUMP("\n\nInline expansion aborted, inline not profitable\n");
                     return;
                 }
@@ -5769,14 +5752,48 @@ void          Compiler::fgFindBasicBlocks()
 
     if (compIsForInlining())
     {
+        bool hasReturnBlocks = false;
+        bool hasMoreThanOneReturnBlock = false;
+
+        for (BasicBlock* block = fgFirstBB; block != nullptr; block = block->bbNext)
+        {
+            if (block->bbJumpKind == BBJ_RETURN)
+            {
+                if (hasReturnBlocks)
+                {
+                    hasMoreThanOneReturnBlock = true;
+                    break;
+                }
+
+                hasReturnBlocks = true;
+            }
+        }
+
+        if (!hasReturnBlocks && !compInlineResult->UsesLegacyPolicy())
+        {
+            //
+            // Mark the call node as "no return". The inliner might ignore CALLEE_DOES_NOT_RETURN and
+            // fail inline for a different reasons. In that case we still want to make the "no return"
+            // information available to the caller as it can impact caller's code quality.
+            //
+
+            impInlineInfo->iciCall->gtCallMoreFlags |= GTF_CALL_M_DOES_NOT_RETURN;
+        }
+
+        compInlineResult->NoteBool(InlineObservation::CALLEE_DOES_NOT_RETURN, !hasReturnBlocks);
+
+        if (compInlineResult->IsFailure())
+        {
+            return;
+        }
+
         noway_assert(info.compXcptnsCount == 0);
         compHndBBtab           = impInlineInfo->InlinerCompiler->compHndBBtab;
         compHndBBtabAllocCount = impInlineInfo->InlinerCompiler->compHndBBtabAllocCount; // we probably only use the table, not add to it.
         compHndBBtabCount      = impInlineInfo->InlinerCompiler->compHndBBtabCount;
         info.compXcptnsCount   = impInlineInfo->InlinerCompiler->info.compXcptnsCount;
 
-        if (info.compRetNativeType != TYP_VOID       &&
-            fgMoreThanOneReturnBlock())
+        if (info.compRetNativeType != TYP_VOID && hasMoreThanOneReturnBlock)
         {
             // The lifetime of this var might expand multiple BBs. So it is a long lifetime compiler temp.
             lvaInlineeReturnSpillTemp = lvaGrabTemp(false DEBUGARG("Inline candidate multiple BBJ_RETURN spill temp"));
@@ -20922,7 +20939,7 @@ void                Compiler::fgDebugCheckFlags(GenTreePtr tree)
     if (chkFlags & ~treeFlags)
     {
         // Print the tree so we can see it in the log.
-        printf("Missing flags on tree [%X]: ", tree);
+        printf("Missing flags on tree [%06d]: ", dspTreeID(tree));
         GenTree::gtDispFlags(chkFlags & ~treeFlags, GTF_DEBUG_NONE);
         printf("\n");
         gtDispTree(tree);
@@ -20930,7 +20947,7 @@ void                Compiler::fgDebugCheckFlags(GenTreePtr tree)
         noway_assert(!"Missing flags on tree");
 
         // Print the tree again so we can see it right after we hook up the debugger.
-        printf("Missing flags on tree [%X]: ", tree);
+        printf("Missing flags on tree [%06d]: ", dspTreeID(tree));
         GenTree::gtDispFlags(chkFlags & ~treeFlags, GTF_DEBUG_NONE);
         printf("\n");
         gtDispTree(tree);
@@ -22699,11 +22716,14 @@ GenTreePtr      Compiler::fgInlinePrependStatements(InlineInfo* inlineInfo)
 
                 if (argSingleUseNode &&
                     !(argSingleUseNode->gtFlags & GTF_VAR_CLONED) &&
-                    !inlArgInfo[argNum].argHasLdargaOp)
+                    !inlArgInfo[argNum].argHasLdargaOp &&
+                    !inlArgInfo[argNum].argHasStargOp)
                 {
-                    /* Change the temp in-place to the actual argument */
-
-                    argSingleUseNode->CopyFrom(inlArgInfo[argNum].argNode, this);
+                    // Change the temp in-place to the actual argument.
+                    // We currently do not support this for struct arguments, so it must not be a GT_OBJ.
+                    GenTree* argNode = inlArgInfo[argNum].argNode;
+                    assert(argNode->gtOper != GT_OBJ);
+                    argSingleUseNode->CopyFrom(argNode, this);
                     continue;
                 }
                 else

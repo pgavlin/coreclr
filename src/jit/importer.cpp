@@ -1511,7 +1511,7 @@ GenTreePtr      Compiler::impNormStructVal(GenTreePtr    structVal,
 
     // Normalize it by wraping it in an OBJ
 
-    GenTreePtr structAddr  = impGetStructAddr(structVal, structHnd, curLevel, !forceNormalization); // get the addr of struct
+    GenTreePtr structAddr = impGetStructAddr(structVal, structHnd, curLevel, !forceNormalization); // get the addr of struct
     GenTreePtr structObj = new (this, GT_OBJ) GenTreeObj(structType, structAddr, structHnd);
 
     if (structAddr->gtOper == GT_ADDR)
@@ -1525,9 +1525,10 @@ GenTreePtr      Compiler::impNormStructVal(GenTreePtr    structVal,
     {
         // A OBJ on a ADDR(LCL_VAR) can never raise an exception
         // so we don't set GTF_EXCEPT here.
-        //
-        // TODO-CQ: Clear the GTF_GLOB_REF flag on structObj as well
-        //          but this needs additional work when inlining.
+        if (!lvaIsImplicitByRefLocal(structVal->AsLclVarCommon()->gtLclNum))
+        {
+            structObj->gtFlags &= ~GTF_GLOB_REF;
+        }
     }
     else  
     {
@@ -9405,6 +9406,15 @@ PUSH_I4CON:
                 Verify(lclNum < info.compILargsCount, "bad arg num");
             }
 
+            if (compIsForInlining())
+            {
+                op1 = impInlineFetchArg(lclNum, impInlineInfo->inlArgInfo, impInlineInfo->lclVarInfo);
+                noway_assert(op1->gtOper == GT_LCL_VAR);
+                lclNum = op1->AsLclVar()->gtLclNum;
+
+                goto VAR_ST_VALID;
+            }
+
             lclNum = compMapILargNum(lclNum);     // account for possible hidden param
             assertImp(lclNum < numArgs);
 
@@ -9470,6 +9480,8 @@ PUSH_I4CON:
                 assert(!tiVerificationNeeded); // We should have thrown the VerificationException before.
                 BADCODE("Bad IL");
             }
+
+		VAR_ST_VALID:
 
             /* if it is a struct assignment, make certain we don't overflow the buffer */ 
             assert(lclTyp != TYP_STRUCT || lvaLclSize(lclNum) >= info.compCompHnd->getClassSize(clsHnd));
@@ -15919,14 +15931,48 @@ void Compiler::impMakeDiscretionaryInlineObservations(InlineInfo*   pInlineInfo,
     // shouldn't be relying on the result of this method.
     assert(inlineResult->GetObservation() == InlineObservation::CALLEE_IS_DISCRETIONARY_INLINE);
 
-    // Note if this method is an instance constructor
-    if ((info.compFlags & CORINFO_FLG_CONSTRUCTOR) != 0 &&
-        (info.compFlags & CORINFO_FLG_STATIC)      == 0)
+    // Note if the caller contains NEWOBJ or NEWARR.
+    Compiler* rootCompiler = impInlineRoot();
+
+    if ((rootCompiler->optMethodFlags & OMF_HAS_NEWARRAY) != 0)
     {
-        inlineResult->Note(InlineObservation::CALLEE_IS_INSTANCE_CTOR);
+        inlineResult->Note(InlineObservation::CALLER_HAS_NEWARRAY);
     }
 
-    // Note if this method's class is a promotable struct
+    if ((rootCompiler->optMethodFlags & OMF_HAS_NEWOBJ) != 0)
+    {
+        inlineResult->Note(InlineObservation::CALLER_HAS_NEWOBJ);
+    }
+
+    bool calleeIsStatic = (info.compFlags & CORINFO_FLG_STATIC) != 0;
+    bool isSpecialMethod = (info.compFlags & CORINFO_FLG_CONSTRUCTOR) != 0;
+
+    if (isSpecialMethod)
+    {
+        if (calleeIsStatic)
+        {
+            inlineResult->Note(InlineObservation::CALLEE_IS_CLASS_CTOR);
+        }
+        else
+        {
+            inlineResult->Note(InlineObservation::CALLEE_IS_INSTANCE_CTOR);
+        }
+    }
+    else if (!calleeIsStatic)
+    {
+        // Callee is an instance method.
+        //
+        // Check if the callee has the same 'this' as the root.
+        if (pInlineInfo != nullptr)
+        {
+            GenTreePtr thisArg = pInlineInfo->iciCall->gtCall.gtCallObjp;
+            assert(thisArg);
+            bool isSameThis = impIsThis(thisArg);
+            inlineResult->NoteBool(InlineObservation::CALLSITE_IS_SAME_THIS, isSameThis);
+        }
+    }
+
+    // Note if the callee's class is a promotable struct
     if ((info.compClassAttr & CORINFO_FLG_VALUECLASS) != 0)        
     {        
         lvaStructPromotionInfo structPromotionInfo;
@@ -16341,6 +16387,8 @@ void Compiler::impInlineRecordArgInfo(InlineInfo *  pInlineInfo,
             printf(" has side effects"); 
         if  (inlCurArgInfo->argHasLdargaOp)
             printf(" has ldarga effect");
+        if (inlCurArgInfo->argHasStargOp)
+            printf(" has starg effect");
         if  (inlCurArgInfo->argIsByRefToStructLocal)
             printf(" is byref to a struct local");
 
@@ -16748,7 +16796,7 @@ GenTreePtr  Compiler::impInlineFetchArg(unsigned lclNum, InlArgInfo *inlArgInfo,
     GenTreePtr op1 = NULL;
 
             // constant or address of local
-    if (inlArgInfo[lclNum].argIsInvariant && !inlArgInfo[lclNum].argHasLdargaOp)
+    if (inlArgInfo[lclNum].argIsInvariant && !inlArgInfo[lclNum].argHasLdargaOp && !inlArgInfo[lclNum].argHasStargOp)
     {
         /* Clone the constant. Note that we cannot directly use argNode
         in the trees even if inlArgInfo[lclNum].argIsUsed==false as this
@@ -16760,7 +16808,7 @@ GenTreePtr  Compiler::impInlineFetchArg(unsigned lclNum, InlArgInfo *inlArgInfo,
         PREFIX_ASSUME(op1 != NULL);
         inlArgInfo[lclNum].argTmpNum = (unsigned)-1;      // illegal temp
     }
-    else if (inlArgInfo[lclNum].argIsLclVar && !inlArgInfo[lclNum].argHasLdargaOp)
+    else if (inlArgInfo[lclNum].argIsLclVar && !inlArgInfo[lclNum].argHasLdargaOp && !inlArgInfo[lclNum].argHasStargOp)
     {
         /* Argument is a local variable (of the caller)
          * Can we re-use the passed argument node? */
@@ -16780,7 +16828,7 @@ GenTreePtr  Compiler::impInlineFetchArg(unsigned lclNum, InlArgInfo *inlArgInfo,
             op1 = gtNewLclvNode(op1->gtLclVarCommon.gtLclNum, lclTyp, op1->gtLclVar.gtLclILoffs);
         }
     }
-    else if (inlArgInfo[lclNum].argIsByRefToStructLocal)
+    else if (inlArgInfo[lclNum].argIsByRefToStructLocal && !inlArgInfo[lclNum].argHasStargOp)
     {
         /* Argument is a by-ref address to a struct, a normed struct, or its field. 
            In these cases, don't spill the byref to a local, simply clone the tree and use it.
@@ -16853,15 +16901,17 @@ GenTreePtr  Compiler::impInlineFetchArg(unsigned lclNum, InlArgInfo *inlArgInfo,
             inlArgInfo[lclNum].argHasTmp = true;
             inlArgInfo[lclNum].argTmpNum = tmpNum;
             
-            /* If we require strict exception order then, arguments must
-            be evaulated in sequence before the body of the inlined
-            method. So we need to evaluate them to a temp.
-            Also, if arguments have global references, we need to
-            evaluate them to a temp before the inlined body as the
-            inlined body may be modifying the global ref.
-            */
+            // If we require strict exception order, then arguments must
+            // be evaluated in sequence before the body of the inlined method.
+            // So we need to evaluate them to a temp.
+            // Also, if arguments have global references, we need to
+            // evaluate them to a temp before the inlined body as the
+            // inlined body may be modifying the global ref.
+            // TODO-1stClassStructs: We currently do not reuse an existing lclVar
+            // if it is a struct, because it requires some additional handling.
             
-            if ((!inlArgInfo[lclNum].argHasSideEff) &&
+            if (!varTypeIsStruct(lclTyp) &&
+                (!inlArgInfo[lclNum].argHasSideEff) &&
                 (!inlArgInfo[lclNum].argHasGlobRef))
             {
                 /* Get a *LARGE* LCL_VAR node */
@@ -16970,7 +17020,10 @@ void          Compiler::impMarkInlineCandidate(GenTreePtr callNode,
                                                CORINFO_CONTEXT_HANDLE exactContextHnd, 
                                                CORINFO_CALL_INFO* callInfo)
 {
-    if  (!opts.OptEnabled(CLFLG_INLINING))
+    // Let the strategy know there's another call
+    impInlineRoot()->m_inlineStrategy->NoteCall();
+
+    if (!opts.OptEnabled(CLFLG_INLINING))
     {                 
         /* XXX Mon 8/18/2008
          * This assert is misleading.  The caller does not ensure that we have CLFLG_INLINING set before

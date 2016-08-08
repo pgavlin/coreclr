@@ -946,6 +946,7 @@ var_types  Compiler::getReturnTypeForStruct(CORINFO_CLASS_HANDLE clsHnd,
 
 #endif // FEATURE_UNIX_AMD64_STRUCT_PASSING
     
+#ifdef _TARGET_64BIT_
     // Note this handles an odd case when FEATURE_MULTIREG_RET is disabled and HFAs are enabled
     //
     // getPrimitiveTypeForStruct will return TYP_UNKNOWN for a struct that is an HFA of two floats
@@ -962,6 +963,7 @@ var_types  Compiler::getReturnTypeForStruct(CORINFO_CLASS_HANDLE clsHnd,
     {
         useType = TYP_I_IMPL;
     }
+#endif
 
     // Did we change this struct type into a simple "primitive" type?
     //
@@ -3984,6 +3986,12 @@ void                 Compiler::compCompile(void * * methodCodePtr,
                                            ULONG  * methodCodeSize,
                                            CORJIT_FLAGS * compileFlags)
 {
+    if (compIsForInlining())
+    {
+        // Notify root instance that an inline attempt is about to import IL
+        impInlineRoot()->m_inlineStrategy->NoteImport();
+    }
+
     hashBv::Init(this);
 
     VarSetOps::AssignAllowUninitRhs(this, compCurLife, VarSetOps::UninitVal());
@@ -7092,6 +7100,9 @@ void JitTimer::PrintCsvHeader()
         {
             fprintf(fp, "\"%s\",", PhaseNames[i]);
         }
+
+        InlineStrategy::DumpCsvHeader(fp);
+
         fprintf(fp, "\"Total Cycles\",");
         fprintf(fp, "\"CPS\"\n");
         fclose(fp);
@@ -7136,6 +7147,9 @@ void JitTimer::PrintCsvMethodStats(Compiler* comp)
             totCycles += m_info.m_cyclesByPhase[i];
         fprintf(fp, "%I64u,", m_info.m_cyclesByPhase[i]);
     }
+
+    comp->m_inlineStrategy->DumpCsvData(fp);
+
     fprintf(fp, "%I64u,", m_info.m_totalCycles);
     fprintf(fp, "%f\n", CycleTimer::CyclesPerSecond());
     fclose(fp);
@@ -8771,14 +8785,6 @@ int cTreeFlagsIR(Compiler *comp, GenTree *tree)
             chars += printf("[SPILLED_OP2]");
         }
 #endif
-        if (tree->gtFlags & GTF_REDINDEX_CHECK)
-        {
-            chars += printf("[REDINDEX_CHECK]");
-        }
-        if (tree->gtFlags & GTF_REDINDEX_CHECK)
-        {
-            chars += printf("[REDINDEX_CHECK]");
-        }
         if (tree->gtFlags & GTF_ZSF_SET)
         {
             chars += printf("[ZSF_SET]");

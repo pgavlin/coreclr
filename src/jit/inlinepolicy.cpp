@@ -77,21 +77,24 @@ InlinePolicy* InlinePolicy::GetPolicy(Compiler* compiler, bool isPrejitRoot)
 
 #endif // defined(DEBUG) || defined(INLINE_DATA)
 
-    InlinePolicy* policy = nullptr;
+    // Optionally install the ModelPolicy.
     bool useModelPolicy = JitConfig.JitInlinePolicyModel() != 0;
 
     if (useModelPolicy)
     {
-        // Optionally install the ModelPolicy.
-        policy = new (compiler, CMK_Inlining) ModelPolicy(compiler, isPrejitRoot);
-    }
-    else
-    {
-        // Use the legacy policy
-        policy = new (compiler, CMK_Inlining) LegacyPolicy(compiler, isPrejitRoot);
+        return new (compiler, CMK_Inlining) ModelPolicy(compiler, isPrejitRoot);
     }
 
-    return policy;
+    // Optionally fallback to the original legacy policy
+    bool useLegacyPolicy = JitConfig.JitInlinePolicyLegacy() != 0;
+
+    if (useLegacyPolicy)
+    {
+        return new (compiler, CMK_Inlining) LegacyPolicy(compiler, isPrejitRoot);
+    }
+
+    // Use the enhanced legacy policy by default
+    return new (compiler, CMK_Inlining) EnhancedLegacyPolicy(compiler, isPrejitRoot);
 }
 
 //------------------------------------------------------------------------
@@ -298,7 +301,6 @@ void LegacyPolicy::NoteBool(InlineObservation obs, bool value)
 
         case InlineObservation::CALLEE_HAS_SWITCH:
         case InlineObservation::CALLEE_UNSUPPORTED_OPCODE:
-        case InlineObservation::CALLEE_STORES_TO_ARGUMENT:
             // LegacyPolicy ignores these for prejit roots.
             if (!m_IsPrejitRoot)
             {
@@ -850,6 +852,96 @@ int LegacyPolicy::CodeSizeEstimate()
     }
 }
 
+//------------------------------------------------------------------------
+// NoteBool: handle a boolean observation with non-fatal impact
+//
+// Arguments:
+//    obs      - the current obsevation
+//    value    - the value of the observation
+
+void EnhancedLegacyPolicy::NoteBool(InlineObservation obs, bool value)
+{
+    switch (obs)
+    {
+    case InlineObservation::CALLEE_DOES_NOT_RETURN:
+        m_IsNoReturn = value;
+        m_IsNoReturnKnown = true;
+        break;
+
+    default:
+        // Pass all other information to the legacy policy
+        LegacyPolicy::NoteBool(obs, value);
+        break;
+    }
+}
+
+//------------------------------------------------------------------------
+// NoteInt: handle an observed integer value
+//
+// Arguments:
+//    obs      - the current obsevation
+//    value    - the value being observed
+
+void EnhancedLegacyPolicy::NoteInt(InlineObservation obs, int value)
+{
+    switch (obs)
+    {
+    case InlineObservation::CALLEE_NUMBER_OF_BASIC_BLOCKS:
+        {
+            assert(value != 0);
+            assert(m_IsNoReturnKnown);
+
+            //
+            // Let's be conservative for now and reject inlining of "no return" methods only 
+            // if the callee contains a single basic block. This covers most of the use cases 
+            // (typical throw helpers simply do "throw new X();" and so they have a single block) 
+            // without affecting more exotic cases (loops that do actual work for example) where 
+            // failure to inline could negatively impact code quality.
+            //
+
+            unsigned basicBlockCount = static_cast<unsigned>(value);
+
+            if (m_IsNoReturn && (basicBlockCount == 1))
+            {
+                SetNever(InlineObservation::CALLEE_DOES_NOT_RETURN);
+            }
+            else
+            {
+                LegacyPolicy::NoteInt(obs, value);
+            }
+
+            break;
+        }
+
+    default:
+        // Pass all other information to the legacy policy
+        LegacyPolicy::NoteInt(obs, value);
+        break;
+    }
+}
+
+//------------------------------------------------------------------------
+// PropagateNeverToRuntime: determine if a never result should cause the
+// method to be marked as un-inlinable.
+
+bool EnhancedLegacyPolicy::PropagateNeverToRuntime() const
+{
+    //
+    // Do not propagate the "no return" observation. If we do this then future inlining 
+    // attempts will fail immediately without marking the call node as "no return". 
+    // This can have an adverse impact on caller's code quality as it may have to preserve
+    // registers across the call.
+    // TODO-Throughput: We should persist the "no return" information in the runtime 
+    // so we don't need to re-analyze the inlinee all the time.
+    // 
+
+    bool propagate = (m_Observation != InlineObservation::CALLEE_DOES_NOT_RETURN);
+
+    propagate &= LegacyPolicy::PropagateNeverToRuntime();
+
+    return propagate;
+}
+
 #ifdef DEBUG
 
 //------------------------------------------------------------------------
@@ -927,7 +1019,6 @@ void RandomPolicy::NoteBool(InlineObservation obs, bool value)
 
         case InlineObservation::CALLEE_HAS_SWITCH:
         case InlineObservation::CALLEE_UNSUPPORTED_OPCODE:
-        case InlineObservation::CALLEE_STORES_TO_ARGUMENT:
             // Pass these on, they should cause inlining to fail.
             propagate = true;
             break;
@@ -1141,10 +1232,15 @@ DiscretionaryPolicy::DiscretionaryPolicy(Compiler* compiler, bool isPrejitRoot)
     , m_StaticFieldStoreCount(0)
     , m_LoadAddressCount(0)
     , m_ThrowCount(0)
+    , m_ReturnCount(0)
     , m_CallCount(0)
     , m_CallSiteWeight(0)
     , m_ModelCodeSizeEstimate(0)
     , m_PerCallInstructionEstimate(0)
+    , m_IsClassCtor(false)
+    , m_IsSameThis(false)
+    , m_CallerHasNewArray(false)
+    , m_CallerHasNewObj(false)
 {
     // Empty
 }
@@ -1178,6 +1274,22 @@ void DiscretionaryPolicy::NoteBool(InlineObservation obs, bool value)
     case InlineObservation::CALLSITE_CONSTANT_ARG_FEEDS_TEST:
         assert(value);
         m_ConstantArgFeedsConstantTest++;
+        break;
+
+    case InlineObservation::CALLEE_IS_CLASS_CTOR:
+        m_IsClassCtor = value;
+        break;
+
+    case InlineObservation::CALLSITE_IS_SAME_THIS:
+        m_IsSameThis = value;
+        break;
+
+    case InlineObservation::CALLER_HAS_NEWARRAY:
+        m_CallerHasNewArray = value;
+        break;
+
+    case InlineObservation::CALLER_HAS_NEWOBJ:
+        m_CallerHasNewObj = value;
         break;
 
     default:
@@ -1505,6 +1617,9 @@ void DiscretionaryPolicy::ComputeOpcodeBin(OPCODE opcode)
             m_ThrowCount++;
             break;
 
+        case CEE_RET:
+            m_ReturnCount++;
+
         default:
             break;
     }
@@ -1819,6 +1934,7 @@ void DiscretionaryPolicy::DumpSchema(FILE* file) const
     fprintf(file, ",StaticFieldStoreCount");
     fprintf(file, ",LoadAddressCount");
     fprintf(file, ",ThrowCount");
+    fprintf(file, ",ReturnCount");
     fprintf(file, ",CallCount");
     fprintf(file, ",CallSiteWeight");
     fprintf(file, ",IsForceInline");
@@ -1834,6 +1950,10 @@ void DiscretionaryPolicy::DumpSchema(FILE* file) const
     fprintf(file, ",CallsiteNativeSizeEstimate");
     fprintf(file, ",ModelCodeSizeEstimate");
     fprintf(file, ",ModelPerCallInstructionEstimate");
+    fprintf(file, ",IsClassCtor");
+    fprintf(file, ",IsSameThis");
+    fprintf(file, ",CallerHasNewArray");
+    fprintf(file, ",CallerHasNewObj");
 }
 
 //------------------------------------------------------------------------
@@ -1893,6 +2013,7 @@ void DiscretionaryPolicy::DumpData(FILE* file) const
     fprintf(file, ",%u", m_StaticFieldLoadCount);
     fprintf(file, ",%u", m_StaticFieldStoreCount);
     fprintf(file, ",%u", m_LoadAddressCount);
+    fprintf(file, ",%u", m_ReturnCount);
     fprintf(file, ",%u", m_ThrowCount);
     fprintf(file, ",%u", m_CallCount);
     fprintf(file, ",%u", m_CallSiteWeight);
@@ -1909,6 +2030,10 @@ void DiscretionaryPolicy::DumpData(FILE* file) const
     fprintf(file, ",%d", m_CallsiteNativeSizeEstimate);
     fprintf(file, ",%d", m_ModelCodeSizeEstimate);
     fprintf(file, ",%d", m_PerCallInstructionEstimate);
+    fprintf(file, ",%u", m_IsClassCtor ? 1 : 0);
+    fprintf(file, ",%u", m_IsSameThis ? 1 : 0);
+    fprintf(file, ",%u", m_CallerHasNewArray ? 1 : 0);
+    fprintf(file, ",%u", m_CallerHasNewObj ? 1 : 0);
 }
 
 #endif // defined(DEBUG) || defined(INLINE_DATA)

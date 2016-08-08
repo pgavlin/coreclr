@@ -9,17 +9,20 @@
 //
 // -- CLASSES --
 //
-// LegalPolicy         - partial class providing common legality checks
-// LegacyPolicy        - policy that provides legacy inline behavior
-// DiscretionaryPolicy - legacy variant with uniform size policy
-// ModelPolicy         - policy based on statistical modelling
+// LegalPolicy          - partial class providing common legality checks
+// LegacyPolicy         - policy that provides legacy inline behavior
+// EnhancedLegacyPolicy - legacy variant with some enhancements
+// DiscretionaryPolicy  - legacy variant with uniform size policy
+// ModelPolicy          - policy based on statistical modelling
 //
 // These experimental policies are available only in
 // DEBUG or release+INLINE_DATA builds of the jit.
 //
-// RandomPolicy        - randomized inlining
-// FullPolicy          - inlines everything up to size and depth limits
-// SizePolicy          - tries not to increase method sizes
+// RandomPolicy         - randomized inlining
+// FullPolicy           - inlines everything up to size and depth limits
+// SizePolicy           - tries not to increase method sizes
+//
+// The default policy in use is the EnhancedLegacyPolicy.
 
 #ifndef _INLINE_POLICY_H_
 #define _INLINE_POLICY_H_
@@ -156,6 +159,35 @@ protected:
     bool                    m_MethodIsMostlyLoadStore :1;
 };
 
+// EnhancedLegacyPolicy extends the legacy policy by rejecting
+// inlining of methods that never return because they throw.
+
+class EnhancedLegacyPolicy : public LegacyPolicy
+{
+public:
+    EnhancedLegacyPolicy(Compiler* compiler, bool isPrejitRoot)
+        : LegacyPolicy(compiler, isPrejitRoot)
+        , m_IsNoReturn(false)
+        , m_IsNoReturnKnown(false)
+    {
+        // empty
+    }
+
+    // Policy observations
+    void NoteBool(InlineObservation obs, bool value) override;
+    void NoteInt(InlineObservation obs, int value) override;
+
+    // Policy policies
+    bool PropagateNeverToRuntime() const override;
+    bool IsLegacyPolicy() const override { return false; }
+
+protected:
+
+    // Data members
+    bool m_IsNoReturn :1;
+    bool m_IsNoReturnKnown :1;
+};
+
 #ifdef DEBUG
 
 // RandomPolicy implements a policy that inlines at random.
@@ -284,10 +316,15 @@ protected:
     unsigned    m_StaticFieldStoreCount;
     unsigned    m_LoadAddressCount;
     unsigned    m_ThrowCount;
+    unsigned    m_ReturnCount;
     unsigned    m_CallCount;
     unsigned    m_CallSiteWeight;
     int         m_ModelCodeSizeEstimate;
     int         m_PerCallInstructionEstimate;
+    bool        m_IsClassCtor;
+    bool        m_IsSameThis;
+    bool        m_CallerHasNewArray;
+    bool        m_CallerHasNewObj;
 };
 
 // ModelPolicy is an experimental policy that uses the results

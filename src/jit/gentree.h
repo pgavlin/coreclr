@@ -683,8 +683,6 @@ public:
     #define GTF_NOREG_AT_USE    0x00000100  // tree node is in memory at the point of use
 #endif // LEGACY_BACKEND
 
-    #define GTF_REDINDEX_CHECK  0x00000100  // Used for redundant range checks. Disjoint from GTF_SPILLED_OPER
-
     #define GTF_ZSF_SET         0x00000400  // the zero(ZF) and sign(SF) flags set to the operand
 #if FEATURE_SET_FLAGS
     #define GTF_SET_FLAGS       0x00000800  // Requires that codegen for this node set the flags
@@ -1025,6 +1023,19 @@ public:
     {
         return (gtOper == GT_LCL_VAR_ADDR ||
                 gtOper == GT_LCL_FLD_ADDR);
+    }
+
+    static
+    bool            OperIsLocalField(genTreeOps gtOper)
+    {
+        return (gtOper == GT_LCL_FLD       ||
+                gtOper == GT_LCL_FLD_ADDR  ||
+                gtOper == GT_STORE_LCL_FLD   );
+    }
+
+    inline bool     OperIsLocalField() const
+    {
+        return OperIsLocalField(gtOper);
     }
 
     static
@@ -3017,6 +3028,7 @@ struct GenTreeCall final : public GenTree
                                                        // know when these flags are set.
 
 #define     GTF_CALL_M_R2R_REL_INDIRECT        0x2000  // GT_CALL -- ready to run call is indirected through a relative address
+#define     GTF_CALL_M_DOES_NOT_RETURN         0x4000  // GT_CALL -- call does not return
 
     bool IsUnmanaged()       const { return (gtFlags & GTF_CALL_UNMANAGED) != 0; }
     bool NeedsNullCheck()    const { return (gtFlags & GTF_CALL_NULLCHECK) != 0; }
@@ -3136,6 +3148,8 @@ struct GenTreeCall final : public GenTree
 #endif // FEATURE_READYTORUN_COMPILER
 
     bool IsVarargs() const                  { return (gtCallMoreFlags & GTF_CALL_M_VARARGS) != 0; }
+
+    bool IsNoReturn() const                 { return (gtCallMoreFlags & GTF_CALL_M_DOES_NOT_RETURN) != 0; }
 
     unsigned short  gtCallMoreFlags;        // in addition to gtFlags
     

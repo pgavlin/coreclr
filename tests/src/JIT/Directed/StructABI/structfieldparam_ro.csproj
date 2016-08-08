@@ -1,12 +1,12 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="12.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <Import Project="$([MSBuild]::GetDirectoryNameOfFileAbove($(MSBuildThisFileDirectory), dir.props))\dir.props" />
   <PropertyGroup>
     <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
     <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
-    <AssemblyName>MarshalClassTests</AssemblyName>
+    <AssemblyName>$(MSBuildProjectName)</AssemblyName>
     <SchemaVersion>2.0</SchemaVersion>
-    <ProjectGuid>{F1E66554-8C8E-4141-85CF-D0CD6A0CD0B0}</ProjectGuid>
+    <ProjectGuid>{95DFC527-4DC1-495E-97D7-E94EE1F7140D}</ProjectGuid>
     <OutputType>Exe</OutputType>
     <AppDesignerFolder>Properties</AppDesignerFolder>
     <FileAlignment>512</FileAlignment>
@@ -15,34 +15,35 @@
     <SolutionDir Condition="$(SolutionDir) == '' Or $(SolutionDir) == '*Undefined*'">..\..\</SolutionDir>
 
     <NuGetPackageImportStamp>7a9bfb7d</NuGetPackageImportStamp>
-    <DefineConstants>$(DefineConstants);STATIC</DefineConstants>
-    <NoWarn>0618;0649</NoWarn>
   </PropertyGroup>
   <!-- Default configurations to help VS understand the configurations -->
-  <PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'Debug|x64'">
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
   </PropertyGroup>
-  <PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'Release|x64'">
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
   </PropertyGroup>
   <ItemGroup>
     <CodeAnalysisDependentAssemblyPaths Condition=" '$(VS100COMNTOOLS)' != '' " Include="$(VS100COMNTOOLS)..\IDE\PrivateAssemblies">
       <Visible>False</Visible>
     </CodeAnalysisDependentAssemblyPaths>
   </ItemGroup>
+  <PropertyGroup>
+    <DebugType>None</DebugType>
+    <Optimize>True</Optimize>
+  </PropertyGroup>
   <ItemGroup>
-    <Compile Include="MarshalClassTests.cs" />
-    <Compile Include="..\..\common\Assertion.cs" />
+    <Compile Include="structfieldparam.cs" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="project.json" />
+    <None Include="$(JitPackagesConfigFileDirectory)minimal\project.json" />
   </ItemGroup>
   <ItemGroup>
     <Service Include="{82A7F48D-3B50-4B1E-B82E-3ADA8210C358}" />
   </ItemGroup>
-  <ItemGroup>
-    <ProjectReference Include="..\..\..\Common\CoreCLRTestLibrary\CoreCLRTestLibrary.csproj">
-      <Project>{c8c0dc74-fac4-45b1-81fe-70c4808366e0}</Project>
-      <Name>CoreCLRTestLibrary</Name>
-    </ProjectReference>    
-  </ItemGroup>
+  <PropertyGroup>
+    <ProjectJson>$(JitPackagesConfigFileDirectory)minimal\project.json</ProjectJson>
+    <ProjectLockJson>$(JitPackagesConfigFileDirectory)minimal\project.lock.json</ProjectLockJson>
+  </PropertyGroup>
   <Import Project="$([MSBuild]::GetDirectoryNameOfFileAbove($(MSBuildThisFileDirectory), dir.targets))\dir.targets" />
+  <PropertyGroup Condition=" '$(MsBuildProjectDirOverride)' != '' ">
+  </PropertyGroup> 
 </Project>
