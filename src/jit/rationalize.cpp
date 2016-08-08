@@ -490,7 +490,8 @@ void Rationalizer::RewriteInitBlk(LIR::Use& use)
     GenTreeLclVar* store = dstAddr->AsLclVar();
     store->gtType = simdType;
     store->gtOp.gtOp1 = simdNode;
-    store->gtFlags |= (simdNode->gtFlags & GTF_ALL_EFFECT);
+    store->gtFlags |= ((simdNode->gtFlags & GTF_ALL_EFFECT) | GTF_ASG);
+    m_range.Remove(store);
 
     // Insert the new nodes into the block
     m_range.InsertAfter(simdNode, initVal);
@@ -590,21 +591,18 @@ void Rationalizer::RewriteCopyBlk(LIR::Use& use)
     }
 
     GenTree* simdSrc = nullptr;
-    if (srcIsSIMDAddr)
+    if ((srcAddr->OperGet() == GT_ADDR) && varTypeIsSIMD(srcAddr->gtGetOp1()))
     {
-        if (srcAddr->OperGet() == GT_ADDR)
-        {
-            // Get rid of parent node of GT_ADDR(..) if its child happens to be of a SIMD type.
-            m_range.Remove(srcAddr);
-            simdSrc = srcAddr->gtGetOp1();
-        }
-        else if (srcAddr->OperIsLocalAddr())
-        {
-            // If the source has been rewritten into a local addr node, rewrite it back into a
-            // local var node.
-            simdSrc = srcAddr;
-            simdSrc->SetOper(loadForm(srcAddr->OperGet()));
-        }
+        // Get rid of parent node of GT_ADDR(..) if its child happens to be of a SIMD type.
+        m_range.Remove(srcAddr);
+        simdSrc = srcAddr->gtGetOp1();
+    }
+    else if (srcIsSIMDAddr && srcAddr->OperIsLocalAddr())
+    {
+        // If the source has been rewritten into a local addr node, rewrite it back into a
+        // local var node.
+        simdSrc = srcAddr;
+        simdSrc->SetOper(loadForm(srcAddr->OperGet()));
     }
     else
     {
@@ -633,7 +631,6 @@ void Rationalizer::RewriteCopyBlk(LIR::Use& use)
     assert(simdSrc != nullptr);
 
     GenTree* newNode = nullptr;
-    GenTree* list = cpBlk->gtGetOp1();
     if (oper == GT_STORE_LCL_VAR)
     {
         newNode = simdDst;
@@ -642,7 +639,7 @@ void Rationalizer::RewriteCopyBlk(LIR::Use& use)
         GenTreeLclVar* store = newNode->AsLclVar();
         store->gtOp1 = simdSrc;         
         store->gtType = simdType;
-        store->gtFlags |= (simdSrc->gtFlags & GTF_ALL_EFFECT);
+        store->gtFlags |= ((simdSrc->gtFlags & GTF_ALL_EFFECT) | GTF_ASG);
 
         m_range.Remove(simdDst);
         m_range.InsertAfter(store, simdSrc);
@@ -651,12 +648,12 @@ void Rationalizer::RewriteCopyBlk(LIR::Use& use)
     {
         assert(oper == GT_STOREIND);
 
-        newNode = list;
+        newNode = cpBlk->gtGetOp1();
         newNode->SetOper(oper);
 
         GenTreeStoreInd* storeInd = newNode->AsStoreInd();
         storeInd->gtType = simdType;
-        storeInd->gtFlags |= (simdSrc->gtFlags & GTF_ALL_EFFECT);
+        storeInd->gtFlags |= ((simdSrc->gtFlags & GTF_ALL_EFFECT) | GTF_ASG);
         storeInd->gtOp1 = simdDst;
         storeInd->gtOp2 = simdSrc;
 
@@ -1015,6 +1012,10 @@ void Rationalizer::RewriteAssignmentIntoStoreLcl(GenTreeOp* assignment)
 
     GenTree* location = assignment->gtGetOp1();
     GenTree* value = assignment->gtGetOp2();
+
+    // TODO(pdg): because this function does not have access to an LIR::Range,
+    // it cannot remove the location node. If the location has been threaded into
+    // a range, it will need to be removed by the caller.
 
     RewriteAssignmentIntoStoreLclCore(assignment, location, value, location->OperGet());
 }
