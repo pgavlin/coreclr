@@ -13769,11 +13769,12 @@ bool Compiler::fgOptimizeSwitchBranches(BasicBlock* block)
         GenTree* switchVal = switchTree->gtOp.gtOp1;
         noway_assert(genActualTypeIsIntOrI(switchVal->TypeGet()));
 
-        // If we are in LIR, remove the switch table from the block.
+        // If we are in LIR, remove the jump table from the block.
         if (block->IsLIR())
         {
-            GenTree* switchTable = switchTree->gtOp.gtOp2;
-            blockRange.Remove(switchTable);
+            GenTree* jumpTable = switchTree->gtOp.gtOp2;
+            assert(jumpTable->OperGet() == GT_JMPTABLE);
+            blockRange.Remove(jumpTable);
         }
 
         // Change the GT_SWITCH(switchVal) into GT_JTRUE(GT_EQ(switchVal==0)).
