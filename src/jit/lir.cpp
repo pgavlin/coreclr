@@ -314,7 +314,7 @@ LIR::Range::Range(GenTree** firstNodeSlot, GenTree** lastNodeSlot)
     assert(firstNodeSlot != lastNodeSlot);
 
     assert((FirstNode() != nullptr) == (LastNode() != nullptr));
-    assert((FirstNode() == LastNode()) || FirstNode()->Precedes(LastNode()));
+    assert((FirstNode() == LastNode()) || ContainsNode(LastNode()));
 }
 
 //------------------------------------------------------------------------
@@ -332,7 +332,7 @@ LIR::Range::Range(GenTree* firstNode, GenTree* lastNode)
     , m_isSimpleRange(true)
 {
     assert((FirstNode() != nullptr) == (LastNode() != nullptr));
-    assert((FirstNode() == LastNode()) || FirstNode()->Precedes(LastNode()));
+    assert((FirstNode() == LastNode()) || ContainsNode(LastNode()));
 }
 
 
@@ -1058,6 +1058,14 @@ LIR::Range LIR::Range::GetRangeOfOperandTrees(GenTree* root, bool* isClosed, uns
 bool LIR::Range::ContainsNode(GenTree* node) const
 {
     assert(node != nullptr);
+
+    // TODO(pdg): derive this from the # of nodes in the function as well as
+    // the debug level. Checking small functions is pretty cheap; checking
+    // large functions is not.
+    if (JitConfig.JitExpensiveDebugCheckLevel() < 2)
+    {
+        return true;
+    }
 
     for (GenTree* n : *this)
     {
