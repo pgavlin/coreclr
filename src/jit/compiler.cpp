@@ -3941,7 +3941,7 @@ void                Compiler::compFunctionTraceStart()
 
         for (LONG i = 0; i < newJitNestingLevel - 1; i++)
             printf("  ");
-        printf("{ Start Jitting %s\n", info.compFullName); /* } editor brace matching workaround for this printf */
+        printf("{ Start Jitting %s (MethodHash=%08x)\n", info.compFullName, info.compMethodHash()); /* } editor brace matching workaround for this printf */
     }
 #endif // DEBUG
 }
