@@ -8988,7 +8988,7 @@ void                CodeGen::genFnEpilog(BasicBlock* block)
 
         /* figure out what jump we have */
 
-        GenTree* jmpNode = block->bbLastNode;
+        GenTree* jmpNode = block->lastNode();
         noway_assert(jmpNode->gtOper == GT_JMP);
 
         CORINFO_METHOD_HANDLE  methHnd    = (CORINFO_METHOD_HANDLE)jmpNode->gtVal.gtVal1;
@@ -9112,7 +9112,7 @@ void                CodeGen::genFnEpilog(BasicBlock* block)
         noway_assert(block->bbTreeList != nullptr);
 
         // figure out what jump we have
-        GenTree* jmpNode = block->bbLastNode;
+        GenTree* jmpNode = block->lastNode();
 #if !FEATURE_FASTTAILCALL
         noway_assert(jmpNode->gtOper == GT_JMP);
 #else
