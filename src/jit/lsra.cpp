@@ -7719,7 +7719,7 @@ LinearScan::insertUpperVectorSaveAndReload(GenTreePtr tree, RefPosition* refPosi
     regNumber spillReg = refPosition->assignedReg();
     bool spillToMem = refPosition->spillAfter;
 
-    LIR::Range blockRange = LIR::AsRange(block);
+    LIR::Range& blockRange = LIR::AsRange(block);
 
     // First, insert the save as an embedded statement before the call.
 

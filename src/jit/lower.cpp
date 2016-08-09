@@ -1805,10 +1805,10 @@ GenTree* Lowering::LowerTailCallViaHelper(GenTreeCall* call, GenTree *callTarget
     assert(argEntry->node->gtOper == GT_PUTARG_STK);
     GenTree* arg0 = argEntry->node->gtOp.gtOp1;
 
-    BlockRange().InsertAfter(callTargetRange, arg0);
+    BlockRange().InsertAfter(std::move(callTargetRange), arg0);
 
     bool isClosed;
-    LIR::Range secondArgRange = BlockRange().GetTreeRange(arg0, &isClosed);
+    LIR::ReadOnlyRange secondArgRange = BlockRange().GetTreeRange(arg0, &isClosed);
     assert(isClosed);
     
     argEntry->node->gtOp.gtOp1 = callTarget;

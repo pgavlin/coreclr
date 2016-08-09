@@ -70,7 +70,6 @@ void DecomposeLongs::DecomposeBlock(BasicBlock* block)
     assert(block->isEmpty() || block->IsLIR());
 
     m_block = block;
-    BlockRange() = LIR::AsRange(block);
 
     GenTree* node = BlockRange().FirstNonPhiNode();
     while (node != nullptr)
@@ -284,8 +283,8 @@ GenTree* DecomposeLongs::FinalizeDecomposition(LIR::Use& use, GenTree* loResult,
     assert(use.IsInitialized());
     assert(loResult != nullptr);
     assert(hiResult != nullptr);
-    assert(BlockRange().ContainsNode(loResult));
-    assert(BlockRange().ContainsNode(hiResult));
+    assert(BlockRange().Contains(loResult));
+    assert(BlockRange().Contains(hiResult));
     assert(loResult->Precedes(hiResult));
 
     GenTree* gtLong = new (m_compiler, GT_LONG) GenTreeOp(GT_LONG, TYP_LONG, loResult, hiResult);
