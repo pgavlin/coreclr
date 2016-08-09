@@ -2847,8 +2847,8 @@ bool                Compiler::fgIsThrowHlpBlk(BasicBlock * block)
     if (block->IsLIR())
     {
         // TODO(pdg): it would be nice if there was simply a bit on the block we could check.
-        LIR::Range blockRange = LIR::AsRange(block);
-        call = blockRange.EndExclusive();
+        LIR::Range& blockRange = LIR::AsRange(block);
+        call = blockRange.LastNode();
 
 #ifdef DEBUG
         for (LIR::Range::ReverseIterator node = blockRange.rbegin(), end = blockRange.rend(); node != end; ++node)
@@ -4741,7 +4741,7 @@ inline bool         BasicBlock::endsWithJmpMethod(Compiler *comp)
 {
     if (comp->compJmpOpUsed && (bbJumpKind == BBJ_RETURN) && (bbFlags & BBF_HAS_JMP))
     {
-        GenTree* lastNode = IsLIR() ? bbLastNode : comp->fgGetLastTopLevelStmt(this)->gtStmt.gtStmtExpr;
+        GenTree* lastNode = this->lastNode();
         assert(lastNode != nullptr);
         return lastNode->OperGet() == GT_JMP;
     }
@@ -4804,7 +4804,7 @@ inline bool BasicBlock::endsWithTailCall(Compiler* comp, bool fastTailCallsOnly,
 
         if (result)
         {
-            GenTree* lastNode = IsLIR() ? bbLastNode : comp->fgGetLastTopLevelStmt(this)->gtStmt.gtStmtExpr;
+            GenTree* lastNode = this->lastNode();
             if (lastNode->OperGet() == GT_CALL)
             {
                 GenTreeCall* call = lastNode->AsCall();

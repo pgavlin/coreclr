@@ -9,7 +9,6 @@ class Rationalizer : public Phase
 {
 private:
     BasicBlock* m_block;
-    LIR::Range m_range;
     GenTreeStmt* m_statement;
 
 public:
@@ -31,6 +30,11 @@ public:
     static void RewriteAssignmentIntoStoreLcl(GenTreeOp* assignment);
 
 private:
+    inline LIR::Range& BlockRange() const
+    {
+        return LIR::AsRange(m_block);
+    }
+
     // SIMD related transformations
     void RewriteInitBlk(LIR::Use& use);
     void RewriteCopyBlk(LIR::Use& use);

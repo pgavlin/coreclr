@@ -3168,7 +3168,7 @@ void Lowering::LowerCmp(GenTreePtr tree)
                             }
                         }
 
-                        m_blockRange.Remove(removeTreeNode);
+                        BlockRange().Remove(removeTreeNode);
 #ifdef DEBUG
                         if (comp->verbose)
                         {
@@ -3312,7 +3312,7 @@ void Lowering::LowerCast(GenTree* tree)
 
         tree->gtFlags &= ~GTF_UNSIGNED;
         tree->gtOp.gtOp1 = tmp;
-        m_blockRange.InsertAfter(tmp, op1);
+        BlockRange().InsertAfter(tmp, op1);
     }
 }
 
@@ -3343,7 +3343,7 @@ bool Lowering::IsBinOpInRMWStoreInd(GenTreePtr tree)
     }
 
     LIR::Use use;
-    if (!m_blockRange.TryGetUse(tree, &use) || use.User()->OperGet() != GT_STOREIND || use.User()->gtGetOp2() != tree)
+    if (!BlockRange().TryGetUse(tree, &use) || use.User()->OperGet() != GT_STOREIND || use.User()->gtGetOp2() != tree)
     {
         return false;
     }

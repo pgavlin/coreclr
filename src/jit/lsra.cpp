@@ -4377,8 +4377,8 @@ LinearScan::buildIntervals()
         // Also: rethink ranges vs. subranges in order to ensure that first/last nodes
         // are updated correctly when dealing in subranges.
 
-        LIR::Range blockRange = LIR::AsRange(block);
-        for (GenTree* node = blockRange.FirstNonPhiNode(), *end = blockRange.End(); node != end; node = node->gtNext)
+        LIR::Range& blockRange = LIR::AsRange(block);
+        for (GenTree* node : blockRange.NonPhiNodes())
         {
             assert(node->gtLsraInfo.loc >= currentLoc);
             assert(((node->gtLIRFlags & LIR::Flags::IsUnusedValue) == 0) || node->gtLsraInfo.isLocalDefUse);
@@ -7613,7 +7613,7 @@ LinearScan::writeRegisters(RefPosition *currentRefPosition, GenTree *tree)
 void
 LinearScan::insertCopyOrReload(BasicBlock* block, GenTreePtr tree, unsigned multiRegIdx, RefPosition* refPosition)
 {
-    LIR::Range blockRange = LIR::AsRange(block);
+    LIR::Range& blockRange = LIR::AsRange(block);
 
     LIR::Use treeUse;
     bool foundUse = blockRange.TryGetUse(tree, &treeUse);
@@ -8566,11 +8566,11 @@ LinearScan::insertMove(BasicBlock * block,
     top->gtLsraInfo.isLocalDefUse = true;
 
     LIR::Range treeRange = LIR::SeqTree(compiler, top);
-    LIR::Range blockRange = LIR::AsRange(block);
+    LIR::Range& blockRange = LIR::AsRange(block);
 
     if (insertionPoint != nullptr)
     {
-        blockRange.InsertBefore(treeRange, insertionPoint);
+        blockRange.InsertBefore(std::move(treeRange), insertionPoint);
     }
     else
     {
@@ -8581,15 +8581,15 @@ LinearScan::insertMove(BasicBlock * block,
         {
             noway_assert(!blockRange.IsEmpty());
 
-            GenTree* branch = blockRange.EndExclusive();
+            GenTree* branch = blockRange.LastNode();
             assert(branch->OperGet() == GT_JTRUE || branch->OperGet() == GT_SWITCH_TABLE || branch->OperGet() == GT_SWITCH);
 
-            blockRange.InsertBefore(treeRange, branch);
+            blockRange.InsertBefore(std::move(treeRange), branch);
         }
         else
         {
             assert(block->bbJumpKind == BBJ_NONE || block->bbJumpKind == BBJ_ALWAYS);
-            blockRange.InsertAfter(treeRange, blockRange.EndExclusive());
+            blockRange.InsertAfter(std::move(treeRange), blockRange.LastNode());
         }
     }
 }
@@ -8642,11 +8642,11 @@ LinearScan::insertSwap(BasicBlock* block,
     swap->gtPrev = lcl2;
 
     LIR::Range swapRange = LIR::SeqTree(compiler, swap);
-    LIR::Range blockRange = LIR::AsRange(block);
+    LIR::Range& blockRange = LIR::AsRange(block);
     
     if (insertionPoint != nullptr)
     {
-        blockRange.InsertBefore(swapRange, insertionPoint);
+        blockRange.InsertBefore(std::move(swapRange), insertionPoint);
     }
     else
     {
@@ -8657,15 +8657,15 @@ LinearScan::insertSwap(BasicBlock* block,
         {
             noway_assert(!blockRange.IsEmpty());
 
-            GenTree* branch = blockRange.EndExclusive();
+            GenTree* branch = blockRange.LastNode();
             assert(branch->OperGet() == GT_JTRUE || branch->OperGet() == GT_SWITCH_TABLE || branch->OperGet() == GT_SWITCH);
 
-            blockRange.InsertBefore(swapRange, branch);
+            blockRange.InsertBefore(std::move(swapRange), branch);
         }
         else
         {
             assert(block->bbJumpKind == BBJ_NONE || block->bbJumpKind == BBJ_ALWAYS);
-            blockRange.InsertAfter(swapRange, blockRange.EndExclusive());
+            blockRange.InsertAfter(std::move(swapRange), blockRange.LastNode());
         }
     }
 }
@@ -8825,7 +8825,7 @@ LinearScan::handleOutgoingCriticalEdges(BasicBlock*  block)
     {
         // At this point, Lowering has transformed any non-switch-table blocks into
         // cascading ifs.
-        GenTree* switchTable = LIR::AsRange(block).EndExclusive();
+        GenTree* switchTable = LIR::AsRange(block).LastNode();
         assert(switchTable != nullptr && switchTable->OperGet() == GT_SWITCH_TABLE);
 
         switchRegs = switchTable->gtRsvdRegs;
@@ -10062,8 +10062,7 @@ void LinearScan::TupleStyleDump(LsraTupleDumpMode mode)
             printf("New block introduced for resolution from BB%02u to BB%02u\n", splitEdgeInfo.fromBBNum, splitEdgeInfo.toBBNum);
         }
 
-        LIR::Range blockRange = LIR::AsRange(block);
-        for (GenTree* node = blockRange.FirstNonPhiNode(), *end = blockRange.End(); node != end; node = node->gtNext)
+        for (GenTree* node : LIR::AsRange(block).NonPhiNodes())
         {
             // TODO(pdg): fix the dump below for LIR
 

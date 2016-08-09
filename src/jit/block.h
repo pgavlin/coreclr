@@ -269,8 +269,10 @@ public:
  *  The following structure describes a basic block.
  */
 
-struct BasicBlock
+struct BasicBlock : private LIR::Range
 {
+    friend class LIR;
+
     BasicBlock*         bbNext;     // next BB in ascending PC offset order
     BasicBlock*         bbPrev;
 
@@ -281,7 +283,9 @@ struct BasicBlock
             next->bbPrev = this; 
     }
 
-    unsigned            bbNum;      // the block's number
+    unsigned            bbNum : 31;      // the block's number
+    unsigned            bbIsLIR : 1;     // Indicates whether or not this is an LIR block
+
     unsigned            bbPostOrderNum; // the block's post order number in the graph.
     unsigned            bbRefs;     // number of blocks that can reach here, either by fall-through or a branch. If this falls to zero, the block is unreachable.
 
@@ -614,9 +618,19 @@ typedef unsigned weight_t;             // Type used to hold block and edge weigh
         return bbRefs;
     }
 
-
+    __declspec(property(get=getBBTreeList,put=setBBTreeList))
     GenTree*            bbTreeList; // the body of the block.
-    GenTree*            bbLastNode; // last LIR node in the body of the block. // REVIEW: should we just have gtPrev links be circular, like statment links are?
+
+    GenTree* getBBTreeList() const
+    {
+        return m_firstNode;
+    }
+
+    void setBBTreeList(GenTree* tree)
+    {
+        m_firstNode = tree;
+    }
+
     EntryState*         bbEntryState; // verifier tracked state of all entries in stack.
 
 #define NO_BASE_TMP     UINT_MAX    // base# to use when we have none
@@ -1002,9 +1016,8 @@ public:
     // Assumes that "to" is an empty block.
     static void CloneBlockState(Compiler* compiler, BasicBlock* to, const BasicBlock* from);
 
+    void MakeLIR(GenTree* firstNode, GenTree* lastNode);
     bool IsLIR();
-    GenTree** FirstLIRNodeSlot();
-    GenTree** LastLIRNodeSlot();
 };
 
 template <>

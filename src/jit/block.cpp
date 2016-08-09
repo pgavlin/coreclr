@@ -498,20 +498,21 @@ void BasicBlock::CloneBlockState(Compiler* compiler, BasicBlock* to, const Basic
 }
 
 // LIR helpers
+void BasicBlock::MakeLIR(GenTree* firstNode, GenTree* lastNode)
+{
+    assert(!IsLIR());
+    assert((firstNode == nullptr) == (lastNode == nullptr));
+    assert((firstNode == lastNode) || firstNode->Precedes(lastNode));
+
+    m_firstNode = firstNode;
+    m_lastNode = lastNode;
+    bbIsLIR = 1;
+}
+
 bool BasicBlock::IsLIR()
 {
-    // TODO(btf): why can't you have empty LIR blocks?
-    return bbTreeList != nullptr && !bbTreeList->IsStatement();
-}
-
-GenTree** BasicBlock::FirstLIRNodeSlot()
-{
-    return &bbTreeList;
-}
-
-GenTree** BasicBlock::LastLIRNodeSlot()
-{
-    return &bbLastNode;
+    assert((bbTreeList == nullptr) || ((bbIsLIR != 0) == !bbTreeList->IsStatement()));
+    return bbIsLIR != 0;
 }
 
 //------------------------------------------------------------------------
@@ -594,7 +595,7 @@ GenTree* BasicBlock::firstNode()
 // TODO(pdg): comments
 GenTree* BasicBlock::lastNode()
 {
-    return IsLIR() ? bbLastNode : lastStmt()->gtStmtExpr;
+    return IsLIR() ? m_lastNode : lastStmt()->gtStmtExpr;
 }
 
 //------------------------------------------------------------------------
@@ -672,7 +673,14 @@ bool BasicBlock::isEmpty()
         return (this->FirstNonPhiDef() == nullptr);
     }
 
-    LIR::Range range = LIR::AsRange(this);
-    return range.FirstNonPhiNode() == range.End();
+    for (GenTree* node : LIR::AsRange(this).NonPhiNodes())
+    {
+        if (node->OperGet() != GT_IL_OFFSET)
+        {
+            return false;
+        }
+    }
+
+    return true;
 }
 

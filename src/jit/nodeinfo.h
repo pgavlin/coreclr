@@ -6,6 +6,8 @@
 #ifndef _NODEINFO_H_
 #define _NODEINFO_H_
 
+struct GenTree;
+
 class LinearScan;
 typedef unsigned int LsraLocation;
 
