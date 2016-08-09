@@ -13621,7 +13621,7 @@ bool Compiler::fgOptimizeSwitchBranches(BasicBlock* block)
     while (++jmpTab, --jmpCnt);
 
     GenTreeStmt* switchStmt = nullptr;
-    LIR::Range* blockRange;
+    LIR::Range* blockRange = nullptr;
 
     GenTree* switchTree;
     if (block->IsLIR())
