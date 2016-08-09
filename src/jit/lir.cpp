@@ -562,7 +562,10 @@ GenTree* LIR::Range::FirstNonPhiOrCatchArgNode() const
 // Arguments:
 //    node - The node to insert. Must not be part of any range.
 //    insertionPoint - The node before which `node` will be inserted.
-//                     Must be part of this range.
+//                     Must be part of this range. A null `insertionPoint`
+//                     is allowed if the range is empty, in which case
+//                     the node will be inserted as the only node in the
+//                     range.
 //
 void LIR::Range::InsertBefore(GenTree* node, GenTree* insertionPoint)
 {
@@ -604,7 +607,10 @@ void LIR::Range::InsertBefore(GenTree* node, GenTree* insertionPoint)
 // Arguments:
 //    node - The node to insert. Must not be part of any range.
 //    insertionPoint - The node after which `node` will be inserted.
-//                     Must be part of this range.
+//                     Must be part of this range. A null `insertionPoint`
+//                     is allowed if the range is empty, in which case
+//                     the node will be inserted as the only node in the
+//                     range.
 //
 void LIR::Range::InsertAfter(GenTree* node, GenTree* insertionPoint)
 {
@@ -646,7 +652,10 @@ void LIR::Range::InsertAfter(GenTree* node, GenTree* insertionPoint)
 // Arguments:
 //    range - The range to splice in.
 //    insertionPoint - The node before which `range` will be inserted.
-//                     Must be part of `this` range.
+//                     Must be part of `this` range. A null `insertionPoint`
+//                     is allowed if the range is empty, in which case
+//                     the contents of `this` range will be set to those of
+//                     `range`.
 //
 void LIR::Range::InsertBefore(const Range& range, GenTree* insertionPoint)
 {
@@ -687,7 +696,10 @@ void LIR::Range::InsertBefore(const Range& range, GenTree* insertionPoint)
 // Arguments:
 //    range - The range to splice in.
 //    insertionPoint - The node after which `range` will be inserted.
-//                     Must be part of `this` range.
+//                     Must be part of `this` range. A null `insertionPoint`
+//                     is allowed if the range is empty, in which case
+//                     the contents of `this` range will be set to those of
+//                     `range`.
 //
 void LIR::Range::InsertAfter(const Range& range, GenTree* insertionPoint)
 {
