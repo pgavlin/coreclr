@@ -1106,34 +1106,51 @@ bool LIR::Range::ContainsNode(GenTree* node) const
 //
 bool LIR::Range::CheckLIR(Compiler* compiler, bool checkUnusedValues) const
 {
+    // Make sure the range itself is valid.
+    assert(IsValid());
+
     // The check that uses are correctly linked into this range may fail
     // erroneously if this range is a sub-range.
     assert(!IsSubRange());
 
-    // Make sure the range itself is valid.
-    assert(IsValid());
-
-    // Make sure the list is well-formed: no node appears more than once (no circularities). Insert each node in a set
-    // and assert we don't find the node again.
-    typedef SimplerHashTable<GenTreePtr, PtrKeyFuncs<GenTree>, bool, JitSimplerHashBehavior> NodeToBoolMap;
-    NodeToBoolMap* nodes = new (compiler->getAllocatorDebugOnly()) NodeToBoolMap(compiler->getAllocatorDebugOnly());
-
-    for (Iterator node = begin(), end = this->end(); node != end; ++node)
+    if (IsEmpty())
     {
-        bool val;
-        assert(!nodes->Lookup(*node, &val));
-        nodes->Set(*node, true);
+        // Nothing more to check.
+        return true;
     }
-    nodes->RemoveAll();
 
-    // Now check the reverse links.
-    for (ReverseIterator node = rbegin(), rend = this->rend(); node != rend; ++node)
+    // Check the gtNext/gtPrev links: (1) ensure there are no circularities, (2) ensure the gtPrev list is
+    // precisely the inverse of the gtNext list.
+    //
+    // To detect circularity, use the "tortoise and hare" 2-pointer algorithm.
+
+    GenTree* slowNode = Begin();
+    assert(slowNode != nullptr);    // because it's a non-empty range
+    GenTree* fastNode1 = nullptr;
+    GenTree* fastNode2 = slowNode;
+    GenTree* prevSlowNode = nullptr;
+    while (((fastNode1 = fastNode2->gtNext) != nullptr) &&
+           ((fastNode2 = fastNode1->gtNext) != nullptr))
     {
-        bool val;
-        assert(!nodes->Lookup(*node, &val));
-        nodes->Set(*node, true);
+        if ((slowNode == fastNode1) || (slowNode == fastNode2))
+        {
+            assert(!"gtNext nodes have a circularity!");
+        }
+        assert(slowNode->gtPrev == prevSlowNode);
+        prevSlowNode = slowNode;
+        slowNode = slowNode->gtNext;
+        assert(slowNode != nullptr); // the fastNodes would have gone null first.
     }
-    nodes->RemoveAll();
+    // If we get here, the list had no circularities, so either fastNode1 or fastNode2 must be nullptr.
+    assert((fastNode1 == nullptr) || (fastNode2 == nullptr));
+
+    // Need to check the rest of the gtPrev links.
+    while (slowNode != nullptr)
+    {
+        assert(slowNode->gtPrev == prevSlowNode);
+        prevSlowNode = slowNode;
+        slowNode = slowNode->gtNext;
+    }
 
     SmallHashTable<GenTree*, bool, 32> unusedDefs(compiler);
 

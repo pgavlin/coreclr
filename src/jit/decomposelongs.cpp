@@ -294,6 +294,8 @@ GenTree* DecomposeLongs::FinalizeDecomposition(LIR::Use& use, GenTree* loResult,
 
     use.ReplaceWith(m_compiler, gtLong);
 
+    assert(m_blockRange.CheckLIR(m_compiler));
+
     return gtLong->gtNext;
 }
 
@@ -451,6 +453,7 @@ GenTree* DecomposeLongs::DecomposeStoreLclVar(LIR::Use& use)
     hiStore->CopyCosts(tree);
     m_blockRange.InsertAfter(hiStore, tree);
 
+    assert(m_blockRange.CheckLIR(m_compiler));
     return hiStore->gtNext;
 }
 
@@ -724,7 +727,14 @@ GenTree* DecomposeLongs::DecomposeStoreInd(LIR::Use& use)
     storeIndHigh->gtFlags = (storeIndLow->gtFlags & (GTF_ALL_EFFECT | GTF_LIVENESS_MASK));
     storeIndHigh->gtFlags |= GTF_REVERSE_OPS;
 
-    m_blockRange.InsertAfter(LIR::SeqTree(m_compiler, storeIndHigh), storeIndLow);
+    m_compiler->gtPrepareCost(storeIndHigh);
+
+    m_blockRange.InsertAfter(dataHigh, storeIndLow);
+    m_blockRange.InsertAfter(addrBaseHigh, dataHigh);
+    m_blockRange.InsertAfter(addrHigh, addrBaseHigh);
+    m_blockRange.InsertAfter(storeIndHigh, addrHigh);
+
+    assert(m_blockRange.CheckLIR(m_compiler));
 
     return storeIndHigh;
 
@@ -800,8 +810,12 @@ GenTree* DecomposeLongs::DecomposeInd(LIR::Use& use)
     GenTreePtr addrHigh = new(m_compiler, GT_LEA) GenTreeAddrMode(TYP_REF, addrBaseHigh, nullptr, 0, genTypeSize(TYP_INT));
     GenTreePtr indHigh = new (m_compiler, GT_IND) GenTreeIndir(GT_IND, TYP_INT, addrHigh, nullptr);
 
+    m_compiler->gtPrepareCost(indHigh);
+
     // Insert the nodes into the block
-    m_blockRange.InsertAfter(LIR::SeqTree(m_compiler, indHigh), indLow);
+    m_blockRange.InsertAfter(addrBaseHigh, indLow);
+    m_blockRange.InsertAfter(addrHigh, addrBaseHigh);
+    m_blockRange.InsertAfter(indHigh, addrHigh);
 
     return FinalizeDecomposition(use, indLow, indHigh);
 }
