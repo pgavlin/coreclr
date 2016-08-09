@@ -1014,13 +1014,11 @@ void Lowering::LowerArg(GenTreeCall* call, GenTreePtr* ppArg)
 #if !defined(_TARGET_64BIT_)
     if (varTypeIsLong(type))
     {
-        // TODO(pdg): the code below uses tree order to freely reorder the lo and hi pieces of
-        // a long-type argument. This needs to be fixed.
-
         if (isReg)
         {
             NYI("Lowering of long register argument");
         }
+
         // For longs, we will create two PUTARG_STKs below the GT_LONG.
         // This is because the lo/hi values will be marked localDefUse, and we need to ensure that
         // they are pushed onto the stack as soon as they are created.
@@ -1039,6 +1037,10 @@ void Lowering::LowerArg(GenTreeCall* call, GenTreePtr* ppArg)
 
         arg->gtOp.gtOp1 = putArgLo;
         arg->gtOp.gtOp2 = putArgHi;
+
+        // TODO(pdg): the code below uses tree order to freely reorder the lo and hi pieces of
+        // a long-type argument. This needs to be fixed.
+        NYI("LIR: long arg lowering");
 
         // Now, reorder the arguments and insert the putArg in the right place.
 

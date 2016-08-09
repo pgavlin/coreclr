@@ -277,9 +277,11 @@ unsigned LIR::Use::ReplaceWithLclVar(Compiler* compiler, unsigned blockWeight, u
     compiler->lvaTable[lclNum].incRefCnts(blockWeight, compiler);
 
     GenTreeLclVar* store = compiler->gtNewTempAssign(lclNum, node)->AsLclVar();
+    store->CopyCosts(node);
     m_range->InsertAfter(store, node);
 
     GenTree* load = new (compiler, GT_LCL_VAR) GenTreeLclVar(store->TypeGet(), store->AsLclVarCommon()->GetLclNum(), BAD_IL_OFFSET);
+    compiler->gtPrepareCost(load);
     m_range->InsertAfter(load, store);
 
     ReplaceWith(compiler, load);
@@ -495,7 +497,8 @@ LIR::Range::ReverseIterator LIR::Range::rbegin() const
 //
 LIR::Range::ReverseIterator LIR::Range::rend() const
 {
-    return ReverseIterator(Begin()->gtPrev);
+    GenTree* theEnd = IsEmpty() ? nullptr : Begin()->gtPrev;
+    return ReverseIterator(theEnd);
 }
 
 //------------------------------------------------------------------------
@@ -1109,6 +1112,28 @@ bool LIR::Range::CheckLIR(Compiler* compiler, bool checkUnusedValues) const
 
     // Make sure the range itself is valid.
     assert(IsValid());
+
+    // Make sure the list is well-formed: no node appears more than once (no circularities). Insert each node in a set
+    // and assert we don't find the node again.
+    typedef SimplerHashTable<GenTreePtr, PtrKeyFuncs<GenTree>, bool, JitSimplerHashBehavior> NodeToBoolMap;
+    NodeToBoolMap* nodes = new (compiler->getAllocatorDebugOnly()) NodeToBoolMap(compiler->getAllocatorDebugOnly());
+
+    for (Iterator node = begin(), end = this->end(); node != end; ++node)
+    {
+        bool val;
+        assert(!nodes->Lookup(*node, &val));
+        nodes->Set(*node, true);
+    }
+    nodes->RemoveAll();
+
+    // Now check the reverse links.
+    for (ReverseIterator node = rbegin(), rend = this->rend(); node != rend; ++node)
+    {
+        bool val;
+        assert(!nodes->Lookup(*node, &val));
+        nodes->Set(*node, true);
+    }
+    nodes->RemoveAll();
 
     SmallHashTable<GenTree*, bool, 32> unusedDefs(compiler);
 

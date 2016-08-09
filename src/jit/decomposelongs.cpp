@@ -321,6 +321,7 @@ GenTree* DecomposeLongs::DecomposeLclVar(LIR::Use& use)
     loResult->gtType = TYP_INT;
 
     GenTree* hiResult = m_compiler->gtNewLclLNode(varNum, TYP_INT);
+    hiResult->CopyCosts(loResult);
     m_blockRange.InsertAfter(hiResult, loResult);
 
     if (varDsc->lvPromoted)
@@ -372,6 +373,7 @@ GenTree* DecomposeLongs::DecomposeLclFld(LIR::Use& use)
     GenTree* hiResult = m_compiler->gtNewLclFldNode(loResult->gtLclNum,
                                                     TYP_INT,
                                                     loResult->gtLclOffs + 4);
+    hiResult->CopyCosts(loResult);
     m_blockRange.InsertAfter(hiResult, loResult);
 
     return FinalizeDecomposition(use, loResult, hiResult);
@@ -446,6 +448,7 @@ GenTree* DecomposeLongs::DecomposeStoreLclVar(LIR::Use& use)
     m_compiler->lvaIncRefCnts(tree);
     m_compiler->lvaIncRefCnts(hiStore);
 
+    hiStore->CopyCosts(tree);
     m_blockRange.InsertAfter(hiStore, tree);
 
     return hiStore->gtNext;
@@ -481,6 +484,7 @@ GenTree* DecomposeLongs::DecomposeCast(LIR::Use& use)
             m_blockRange.Remove(tree);
 
             hiResult = new (m_compiler, GT_CNS_INT) GenTreeIntCon(TYP_INT, 0);
+            hiResult->CopyCosts(loResult);
             m_blockRange.InsertAfter(hiResult, loResult);
         }
         else
@@ -520,6 +524,7 @@ GenTree* DecomposeLongs::DecomposeCnsLng(LIR::Use& use)
     loResult->gtType = TYP_INT;
 
     GenTree* hiResult = new (m_compiler, GT_CNS_INT) GenTreeIntCon(TYP_INT, hiVal);
+    hiResult->CopyCosts(loResult);
     m_blockRange.InsertAfter(hiResult, loResult);
 
     return FinalizeDecomposition(use, loResult, hiResult);
@@ -620,17 +625,18 @@ GenTree* DecomposeLongs::DecomposeStoreInd(LIR::Use& use)
     // (editor brace matching compensation: }}}}}}}}}}}}}}}}}})
 
     GenTree* gtLong = tree->gtOp.gtOp2;
+    unsigned blockWeight = m_block->getBBWeight(m_compiler);
 
     // Save address to a temp. It is used in storeIndLow and storeIndHigh trees.
     LIR::Use address(m_blockRange, &tree->gtOp.gtOp1, tree);
-    address.ReplaceWithLclVar(m_compiler, m_block->getBBWeight(m_compiler));
+    address.ReplaceWithLclVar(m_compiler, blockWeight);
     JITDUMP("[DecomposeStoreInd]: Saving address tree to a temp var:\n");
     DISPTREE(address.Def());
 
     if (!gtLong->gtOp.gtOp1->OperIsLeaf())
     {
         LIR::Use op1(m_blockRange, &gtLong->gtOp.gtOp1, gtLong);
-        op1.ReplaceWithLclVar(m_compiler, m_block->getBBWeight(m_compiler));
+        op1.ReplaceWithLclVar(m_compiler, blockWeight);
         JITDUMP("[DecomposeStoreInd]: Saving low data tree to a temp var:\n");
         DISPTREE(op1.Def());
     }
@@ -638,7 +644,7 @@ GenTree* DecomposeLongs::DecomposeStoreInd(LIR::Use& use)
     if (!gtLong->gtOp.gtOp2->OperIsLeaf())
     {
         LIR::Use op2(m_blockRange, &gtLong->gtOp.gtOp2, gtLong);
-        op2.ReplaceWithLclVar(m_compiler, m_block->getBBWeight(m_compiler));
+        op2.ReplaceWithLclVar(m_compiler, blockWeight);
         JITDUMP("[DecomposeStoreInd]: Saving high data tree to a temp var:\n");
         DISPTREE(op2.Def());
     }
@@ -718,10 +724,7 @@ GenTree* DecomposeLongs::DecomposeStoreInd(LIR::Use& use)
     storeIndHigh->gtFlags = (storeIndLow->gtFlags & (GTF_ALL_EFFECT | GTF_LIVENESS_MASK));
     storeIndHigh->gtFlags |= GTF_REVERSE_OPS;
 
-    m_blockRange.InsertAfter(dataHigh, storeIndLow);
-    m_blockRange.InsertAfter(addrBaseHigh, dataHigh);
-    m_blockRange.InsertAfter(addrHigh, addrBaseHigh);
-    m_blockRange.InsertAfter(storeIndHigh, addrHigh);
+    m_blockRange.InsertAfter(LIR::SeqTree(m_compiler, storeIndHigh), storeIndLow);
 
     return storeIndHigh;
 
@@ -796,11 +799,9 @@ GenTree* DecomposeLongs::DecomposeInd(LIR::Use& use)
         addrBase->TypeGet(), addrBase->AsLclVarCommon()->GetLclNum(), BAD_IL_OFFSET);
     GenTreePtr addrHigh = new(m_compiler, GT_LEA) GenTreeAddrMode(TYP_REF, addrBaseHigh, nullptr, 0, genTypeSize(TYP_INT));
     GenTreePtr indHigh = new (m_compiler, GT_IND) GenTreeIndir(GT_IND, TYP_INT, addrHigh, nullptr);
-    
+
     // Insert the nodes into the block
-    m_blockRange.InsertAfter(addrBaseHigh, indLow);
-    m_blockRange.InsertAfter(addrHigh, addrBaseHigh);
-    m_blockRange.InsertAfter(indHigh, addrHigh);
+    m_blockRange.InsertAfter(LIR::SeqTree(m_compiler, indHigh), indLow);
 
     return FinalizeDecomposition(use, indLow, indHigh);
 }
@@ -832,6 +833,7 @@ GenTree* DecomposeLongs::DecomposeNot(LIR::Use& use)
     loResult->gtOp.gtOp1 = loOp1;
 
     GenTree* hiResult = new (m_compiler, GT_NOT) GenTreeOp(GT_NOT, TYP_INT, hiOp1, nullptr);
+    hiResult->CopyCosts(loResult);
     m_blockRange.InsertAfter(hiResult, loResult);
 
     return FinalizeDecomposition(use, loResult, hiResult);
@@ -855,11 +857,13 @@ GenTree* DecomposeLongs::DecomposeNeg(LIR::Use& use)
     GenTree* gtLong = tree->gtGetOp1();
     noway_assert(gtLong->OperGet() == GT_LONG);
 
+    unsigned blockWeight = m_block->getBBWeight(m_compiler);
+
     LIR::Use op1(m_blockRange, &gtLong->gtOp.gtOp1, gtLong);
-    op1.ReplaceWithLclVar(m_compiler, m_block->getBBWeight(m_compiler));
+    op1.ReplaceWithLclVar(m_compiler, blockWeight);
 
     LIR::Use op2(m_blockRange, &gtLong->gtOp.gtOp2, gtLong);
-    op2.ReplaceWithLclVar(m_compiler, m_block->getBBWeight(m_compiler));
+    op2.ReplaceWithLclVar(m_compiler, blockWeight);
 
     // Neither GT_NEG nor the introduced temporaries have side effects.
     tree->gtFlags &= ~GTF_ALL_EFFECT;
@@ -876,6 +880,9 @@ GenTree* DecomposeLongs::DecomposeNeg(LIR::Use& use)
     GenTree* hiAdjust = m_compiler->gtNewOperNode(GT_ADD_HI, TYP_INT, hiOp1, zero);
     GenTree* hiResult = m_compiler->gtNewOperNode(GT_NEG, TYP_INT, hiAdjust);
     hiResult->gtFlags = tree->gtFlags;
+
+    // Annotate new nodes with costs. This will re-cost the hiOp1 tree as well.
+    m_compiler->gtPrepareCost(hiResult);
 
     m_blockRange.InsertAfter(zero, loResult);
     m_blockRange.InsertAfter(hiAdjust, zero);
@@ -952,6 +959,7 @@ GenTree* DecomposeLongs::DecomposeArith(LIR::Use& use)
     loResult->gtOp.gtOp2 = loOp2;
 
     GenTree* hiResult = new (m_compiler, oper) GenTreeOp(GetHiOper(oper), TYP_INT, hiOp1, hiOp2);
+    hiResult->CopyCosts(loResult);
     m_blockRange.InsertAfter(hiResult, loResult);
 
     if ((oper == GT_ADD) || (oper == GT_SUB))
