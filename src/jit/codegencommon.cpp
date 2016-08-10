@@ -9384,7 +9384,7 @@ void                CodeGen::genFnEpilog(BasicBlock* block)
         noway_assert(block->bbTreeList);
 
         // figure out what jump we have
-        GenTree* jmpNode = LIR::AsRange(block).LastNode();
+        GenTree* jmpNode = block->lastNode();
 #if !FEATURE_FASTTAILCALL
         // x86                        
         noway_assert(jmpNode->gtOper == GT_JMP);                

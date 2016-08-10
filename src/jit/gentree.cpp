@@ -13348,7 +13348,10 @@ BasicBlock *        Compiler::bbNewBasicBlock(BBjumpKinds jumpKind)
         block->bbNum = ++fgBBNumMax;
     }
 
-    block->bbIsLIR = compRationalIRForm ? 1 : 0;
+    if (compRationalIRForm)
+    {
+        block->bbFlags |= BBF_IS_LIR;
+    }
 
     block->bbRefs     = 1;
     block->bbWeight   = BB_UNITY_WEIGHT;

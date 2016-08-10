@@ -73,6 +73,33 @@ public:
         unsigned ReplaceWithLclVar(Compiler* compiler, unsigned blockWeight, unsigned lclNum = BAD_VAR_NUM);
     };
 
+    //------------------------------------------------------------------------
+    // LIR::ReadOnlyRange:
+    //
+    // Represents a contiguous range of LIR nodes that may be a subrange of
+    // a containing range. Provides a small set of utilities for iteration.
+    // Instances of this type are primarily created by and provided to
+    // analysis and utility methods on LIR::Range.
+    //
+    // Although some pains have been taken to help guard against the existence
+    // of invalid subranges, it remains possible to create them. For example,
+    // consider the following:
+    //
+    //     // View the block as a range
+    //     LIR::Range& blockRange = LIR::AsRange(block);
+    //
+    //     // Create a range from the first non-phi node in the block to the
+    //     // last node in the block
+    //     LIR::ReadOnlyRange nonPhis = blockRange.NonPhiNodes();
+    //
+    //     // Remove the last node from the block
+    //     blockRange.Remove(blockRange.LastNode());
+    //
+    // After the removal of the last node in the block, the last node of
+    // nonPhis is no longer linked to any of the other nodes in nonPhis. Due
+    // to issues such as the above, some care must be taken in order to
+    // ensure that ranges are not used once they have been invalidated.
+    //
     class ReadOnlyRange
     {
         friend class LIR;
@@ -197,9 +224,16 @@ public:
     };
 
     //------------------------------------------------------------------------
-    // LIR::Range: Represents a contiguous range of LIR nodes. Provides a
-    //             variety of utilites that modify the LIR contained in the
-    //             range.
+    // LIR::Range:
+    //
+    // Represents a contiguous range of LIR nodes. Provides a variety of
+    // variety of utilites that modify the LIR contained in the range. Unlike
+    // `ReadOnlyRange`, values of this type may be edited.
+    //
+    // Because it is not a final class, it is possible to slice values of this
+    // type; this is especially dangerous when the Range value is actually of
+    // type `BasicBlock`. As a result, this type is not copyable and it is
+    // not possible to view a `BasicBlock` as anything other than a `Range&`.
     //
     class Range : public ReadOnlyRange
     {
@@ -218,6 +252,7 @@ public:
         Range();
         Range(Range&& other);
 
+        GenTree* LastPhiNode() const;
         GenTree* FirstNonPhiNode() const;
         GenTree* FirstNonPhiOrCatchArgNode() const;
 

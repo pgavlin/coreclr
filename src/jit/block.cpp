@@ -262,7 +262,11 @@ void BasicBlock::dspFlags()
     if (bbFlags & BBF_LOOP_PREHEADER)       printf("LoopPH ");
     if (bbFlags & BBF_COLD)                 printf("cold ");
     if (bbFlags & BBF_PROF_WEIGHT)          printf("IBC ");
+#ifdef LEGACY_BACKEND
     if (bbFlags & BBF_FORWARD_SWITCH)       printf("fswitch ");
+#else // !LEGACY_BACKEND
+    if (bbFlags & BBF_IS_LIR)               printf("LIR ");
+#endif // LEGACY_BACKEND
     if (bbFlags & BBF_KEEP_BBJ_ALWAYS)      printf("KEEP ");
 }
 
@@ -506,13 +510,14 @@ void BasicBlock::MakeLIR(GenTree* firstNode, GenTree* lastNode)
 
     m_firstNode = firstNode;
     m_lastNode = lastNode;
-    bbIsLIR = 1;
+    bbFlags |= BBF_IS_LIR;
 }
 
 bool BasicBlock::IsLIR()
 {
-    assert((bbTreeList == nullptr) || ((bbIsLIR != 0) == !bbTreeList->IsStatement()));
-    return bbIsLIR != 0;
+    const bool isLIR = (bbFlags & BBF_IS_LIR) != 0;
+    assert((bbTreeList == nullptr) || ((isLIR) == !bbTreeList->IsStatement()));
+    return isLIR;
 }
 
 //------------------------------------------------------------------------

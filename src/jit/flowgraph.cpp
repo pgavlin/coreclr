@@ -9767,7 +9767,7 @@ void                Compiler::fgCompactBlocks(BasicBlock* block, BasicBlock* bNe
     // as well, in favor of one of the incoming branches.  Or at least be modified.
 
     assert(block->IsLIR() == bNext->IsLIR());
-    if (block->IsLIR() || bNext->IsLIR())
+    if (block->IsLIR())
     {
         LIR::Range& blockRange = LIR::AsRange(block);
         LIR::Range& nextRange = LIR::AsRange(bNext);
@@ -9777,17 +9777,17 @@ void                Compiler::fgCompactBlocks(BasicBlock* block, BasicBlock* bNe
         LIR::ReadOnlyRange nextPhis = nextRange.PhiNodes();
         if (!nextPhis.IsEmpty())
         {
-            GenTree* blockFirstNonPhi = blockRange.FirstNonPhiNode();
+            GenTree* blockLastPhi = blockRange.LastPhiNode();
             nextFirstNonPhi = nextPhis.LastNode()->gtNext;
 
             LIR::Range phisToMove = nextRange.Remove(std::move(nextPhis));
-            if (blockFirstNonPhi == nullptr)
+            if (blockLastPhi == nullptr)
             {
-                blockRange.InsertAtEnd(std::move(phisToMove));
+                blockRange.InsertAtBeginning(std::move(phisToMove));
             }
             else
             {
-                blockRange.InsertBefore(std::move(phisToMove), blockFirstNonPhi);
+                blockRange.InsertAfter(std::move(phisToMove), blockLastPhi);
             }
         }
         else
