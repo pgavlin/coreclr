@@ -7685,7 +7685,7 @@ LinearScan::insertCopyOrReload(BasicBlock* block, GenTreePtr tree, unsigned mult
 
         // Insert the copy/reload after the spilled node and replace the use of the original node with a use
         // of the copy/reload.
-        blockRange.InsertAfter(newNode, tree);
+        blockRange.InsertAfter(tree, newNode);
         treeUse.ReplaceWith(compiler, newNode);
     }
 }
@@ -7737,7 +7737,7 @@ LinearScan::insertUpperVectorSaveAndReload(GenTreePtr tree, RefPosition* refPosi
         simdNode->gtFlags |= GTF_SPILL;
     }
 
-    blockRange.InsertBefore(LIR::SeqTree(compiler, simdNode), tree);
+    blockRange.InsertBefore(tree, LIR::SeqTree(compiler, simdNode));
 
     // Now insert the restore after the call.
 
@@ -7755,7 +7755,7 @@ LinearScan::insertUpperVectorSaveAndReload(GenTreePtr tree, RefPosition* refPosi
         simdNode->gtFlags |= GTF_SPILLED;
     }
 
-    blockRange.InsertAfter(LIR::SeqTree(compiler, simdNode), tree);
+    blockRange.InsertAfter(tree, LIR::SeqTree(compiler, simdNode));
 
 }
 #endif // FEATURE_PARTIAL_SIMD_CALLEE_SAVE
@@ -8570,7 +8570,7 @@ LinearScan::insertMove(BasicBlock * block,
 
     if (insertionPoint != nullptr)
     {
-        blockRange.InsertBefore(std::move(treeRange), insertionPoint);
+        blockRange.InsertBefore(insertionPoint, std::move(treeRange));
     }
     else
     {
@@ -8584,12 +8584,12 @@ LinearScan::insertMove(BasicBlock * block,
             GenTree* branch = blockRange.LastNode();
             assert(branch->OperGet() == GT_JTRUE || branch->OperGet() == GT_SWITCH_TABLE || branch->OperGet() == GT_SWITCH);
 
-            blockRange.InsertBefore(std::move(treeRange), branch);
+            blockRange.InsertBefore(branch, std::move(treeRange));
         }
         else
         {
             assert(block->bbJumpKind == BBJ_NONE || block->bbJumpKind == BBJ_ALWAYS);
-            blockRange.InsertAfter(std::move(treeRange), blockRange.LastNode());
+            blockRange.InsertAfter(blockRange.LastNode(), std::move(treeRange));
         }
     }
 }
@@ -8646,7 +8646,7 @@ LinearScan::insertSwap(BasicBlock* block,
     
     if (insertionPoint != nullptr)
     {
-        blockRange.InsertBefore(std::move(swapRange), insertionPoint);
+        blockRange.InsertBefore(insertionPoint, std::move(swapRange));
     }
     else
     {
@@ -8660,12 +8660,12 @@ LinearScan::insertSwap(BasicBlock* block,
             GenTree* branch = blockRange.LastNode();
             assert(branch->OperGet() == GT_JTRUE || branch->OperGet() == GT_SWITCH_TABLE || branch->OperGet() == GT_SWITCH);
 
-            blockRange.InsertBefore(std::move(swapRange), branch);
+            blockRange.InsertBefore(branch, std::move(swapRange));
         }
         else
         {
             assert(block->bbJumpKind == BBJ_NONE || block->bbJumpKind == BBJ_ALWAYS);
-            blockRange.InsertAfter(std::move(swapRange), blockRange.LastNode());
+            blockRange.InsertAfter(blockRange.LastNode(), std::move(swapRange));
         }
     }
 }

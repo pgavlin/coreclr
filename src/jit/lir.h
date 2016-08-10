@@ -259,11 +259,11 @@ public:
         ReadOnlyRange PhiNodes() const;
         ReadOnlyRange NonPhiNodes() const;
 
-        void InsertBefore(GenTree* node, GenTree* insertionPoint);
-        void InsertAfter(GenTree* node, GenTree* insertionPoint);
+        void InsertBefore(GenTree* insertionPoint, GenTree* node);
+        void InsertAfter(GenTree* insertionPoint, GenTree* node);
 
-        void InsertBefore(Range&& range, GenTree* insertionPoint);
-        void InsertAfter(Range&& range, GenTree* insertionPoint);
+        void InsertBefore(GenTree* insertionPoint, Range&& range);
+        void InsertAfter(GenTree* insertionPoint, Range&& range);
 
         void InsertAtBeginning(GenTree* node);
         void InsertAtEnd(GenTree* node);

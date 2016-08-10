@@ -161,7 +161,7 @@ void LIR::Use::AssertIsValid() const
 // use of t17):
 //
 //    GenTree* constantOne = compiler->gtNewIconNode(1);
-//    range.InsertAfter(constantOne, opEq.Def());
+//    range.InsertAfter(opEq.Def(), constantOne);
 //    opEq.ReplaceWith(compiler, constantOne);
 //
 // Which would produce something like the following LIR:
@@ -277,11 +277,11 @@ unsigned LIR::Use::ReplaceWithLclVar(Compiler* compiler, unsigned blockWeight, u
 
     GenTreeLclVar* store = compiler->gtNewTempAssign(lclNum, node)->AsLclVar();
     store->CopyCosts(node);
-    m_range->InsertAfter(store, node);
+    m_range->InsertAfter(node, store);
 
     GenTree* load = new (compiler, GT_LCL_VAR) GenTreeLclVar(store->TypeGet(), store->AsLclVarCommon()->GetLclNum(), BAD_IL_OFFSET);
     compiler->gtPrepareCost(load);
-    m_range->InsertAfter(load, store);
+    m_range->InsertAfter(store, load);
 
     ReplaceWith(compiler, load);
 
@@ -564,14 +564,14 @@ LIR::ReadOnlyRange LIR::Range::NonPhiNodes() const
 //                           range.
 //
 // Arguments:
-//    node - The node to insert. Must not be part of any range.
 //    insertionPoint - The node before which `node` will be inserted.
 //                     Must be part of this range. A null `insertionPoint`
 //                     is allowed if the range is empty, in which case
 //                     the node will be inserted as the only node in the
 //                     range.
+//    node - The node to insert. Must not be part of any range.
 //
-void LIR::Range::InsertBefore(GenTree* node, GenTree* insertionPoint)
+void LIR::Range::InsertBefore(GenTree* insertionPoint, GenTree* node)
 {
     assert(node != nullptr);
     assert(node->gtPrev == nullptr);
@@ -608,14 +608,14 @@ void LIR::Range::InsertBefore(GenTree* node, GenTree* insertionPoint)
 //                          range.
 //
 // Arguments:
-//    node - The node to insert. Must not be part of any range.
 //    insertionPoint - The node after which `node` will be inserted.
 //                     Must be part of this range. A null `insertionPoint`
 //                     is allowed if the range is empty, in which case
 //                     the node will be inserted as the only node in the
 //                     range.
+//    node - The node to insert. Must not be part of any range.
 //
-void LIR::Range::InsertAfter(GenTree* node, GenTree* insertionPoint)
+void LIR::Range::InsertAfter(GenTree* insertionPoint, GenTree* node)
 {
     assert(node != nullptr);
     assert(node->gtPrev == nullptr);
@@ -652,14 +652,14 @@ void LIR::Range::InsertAfter(GenTree* node, GenTree* insertionPoint)
 //                           range.
 //
 // Arguments:
-//    range - The range to splice in.
 //    insertionPoint - The node before which `range` will be inserted.
 //                     Must be part of `this` range. A null `insertionPoint`
 //                     is allowed if the range is empty, in which case
 //                     the contents of `this` range will be set to those of
 //                     `range`.
+//    range - The range to splice in.
 //
-void LIR::Range::InsertBefore(Range&& range, GenTree* insertionPoint)
+void LIR::Range::InsertBefore(GenTree* insertionPoint, Range&& range)
 {
     assert(!range.IsEmpty());
 
@@ -694,14 +694,14 @@ void LIR::Range::InsertBefore(Range&& range, GenTree* insertionPoint)
 //                          range.
 //
 // Arguments:
-//    range - The range to splice in.
 //    insertionPoint - The node after which `range` will be inserted.
 //                     Must be part of `this` range. A null `insertionPoint`
 //                     is allowed if the range is empty, in which case
 //                     the contents of `this` range will be set to those of
 //                     `range`.
+//    range - The range to splice in.
 //
-void LIR::Range::InsertAfter(Range&& range, GenTree* insertionPoint)
+void LIR::Range::InsertAfter(GenTree* insertionPoint, Range&& range)
 {
     assert(!range.IsEmpty());
 
@@ -740,7 +740,7 @@ void LIR::Range::InsertAfter(Range&& range, GenTree* insertionPoint)
 //
 void LIR::Range::InsertAtBeginning(GenTree* node)
 {
-    InsertBefore(node, m_firstNode);
+    InsertBefore(m_firstNode, node);
 }
 
 //------------------------------------------------------------------------
@@ -751,7 +751,7 @@ void LIR::Range::InsertAtBeginning(GenTree* node)
 //
 void LIR::Range::InsertAtEnd(GenTree* node)
 {
-    InsertAfter(node, m_lastNode);
+    InsertAfter(m_lastNode, node);
 }
 
 //------------------------------------------------------------------------
@@ -762,7 +762,7 @@ void LIR::Range::InsertAtEnd(GenTree* node)
 //
 void LIR::Range::InsertAtBeginning(Range&& range)
 {
-    InsertBefore(std::move(range), m_firstNode);
+    InsertBefore(m_firstNode, std::move(range));
 }
 
 //------------------------------------------------------------------------
@@ -773,7 +773,7 @@ void LIR::Range::InsertAtBeginning(Range&& range)
 //
 void LIR::Range::InsertAtEnd(Range&& range)
 {
-    InsertAfter(std::move(range), m_lastNode);
+    InsertAfter(m_lastNode, std::move(range));
 }
 
 

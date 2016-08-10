@@ -288,7 +288,7 @@ GenTree* DecomposeLongs::FinalizeDecomposition(LIR::Use& use, GenTree* loResult,
     assert(loResult->Precedes(hiResult));
 
     GenTree* gtLong = new (m_compiler, GT_LONG) GenTreeOp(GT_LONG, TYP_LONG, loResult, hiResult);
-    BlockRange().InsertAfter(gtLong, hiResult);
+    BlockRange().InsertAfter(hiResult, gtLong);
 
     use.ReplaceWith(m_compiler, gtLong);
 
@@ -322,7 +322,7 @@ GenTree* DecomposeLongs::DecomposeLclVar(LIR::Use& use)
 
     GenTree* hiResult = m_compiler->gtNewLclLNode(varNum, TYP_INT);
     hiResult->CopyCosts(loResult);
-    BlockRange().InsertAfter(hiResult, loResult);
+    BlockRange().InsertAfter(loResult, hiResult);
 
     if (varDsc->lvPromoted)
     {
@@ -374,7 +374,7 @@ GenTree* DecomposeLongs::DecomposeLclFld(LIR::Use& use)
                                                     TYP_INT,
                                                     loResult->gtLclOffs + 4);
     hiResult->CopyCosts(loResult);
-    BlockRange().InsertAfter(hiResult, loResult);
+    BlockRange().InsertAfter(loResult, hiResult);
 
     return FinalizeDecomposition(use, loResult, hiResult);
 }
@@ -449,7 +449,7 @@ GenTree* DecomposeLongs::DecomposeStoreLclVar(LIR::Use& use)
     m_compiler->lvaIncRefCnts(hiStore);
 
     hiStore->CopyCosts(tree);
-    BlockRange().InsertAfter(hiStore, tree);
+    BlockRange().InsertAfter(tree, hiStore);
 
     assert(BlockRange().CheckLIR(m_compiler));
     return hiStore->gtNext;
@@ -486,7 +486,7 @@ GenTree* DecomposeLongs::DecomposeCast(LIR::Use& use)
 
             hiResult = new (m_compiler, GT_CNS_INT) GenTreeIntCon(TYP_INT, 0);
             hiResult->CopyCosts(loResult);
-            BlockRange().InsertAfter(hiResult, loResult);
+            BlockRange().InsertAfter(loResult, hiResult);
         }
         else
         {
@@ -526,7 +526,7 @@ GenTree* DecomposeLongs::DecomposeCnsLng(LIR::Use& use)
 
     GenTree* hiResult = new (m_compiler, GT_CNS_INT) GenTreeIntCon(TYP_INT, hiVal);
     hiResult->CopyCosts(loResult);
-    BlockRange().InsertAfter(hiResult, loResult);
+    BlockRange().InsertAfter(loResult, hiResult);
 
     return FinalizeDecomposition(use, loResult, hiResult);
 }
@@ -727,10 +727,10 @@ GenTree* DecomposeLongs::DecomposeStoreInd(LIR::Use& use)
 
     m_compiler->gtPrepareCost(storeIndHigh);
 
-    BlockRange().InsertAfter(dataHigh, storeIndLow);
-    BlockRange().InsertAfter(addrBaseHigh, dataHigh);
-    BlockRange().InsertAfter(addrHigh, addrBaseHigh);
-    BlockRange().InsertAfter(storeIndHigh, addrHigh);
+    BlockRange().InsertAfter(storeIndLow, dataHigh);
+    BlockRange().InsertAfter(dataHigh, addrBaseHigh);
+    BlockRange().InsertAfter(addrBaseHigh, addrHigh);
+    BlockRange().InsertAfter(addrHigh, storeIndHigh);
 
     assert(BlockRange().CheckLIR(m_compiler));
 
@@ -811,9 +811,9 @@ GenTree* DecomposeLongs::DecomposeInd(LIR::Use& use)
     m_compiler->gtPrepareCost(indHigh);
 
     // Insert the nodes into the block
-    BlockRange().InsertAfter(addrBaseHigh, indLow);
-    BlockRange().InsertAfter(addrHigh, addrBaseHigh);
-    BlockRange().InsertAfter(indHigh, addrHigh);
+    BlockRange().InsertAfter(indLow, addrBaseHigh);
+    BlockRange().InsertAfter(addrBaseHigh, addrHigh);
+    BlockRange().InsertAfter(addrHigh, indHigh);
 
     return FinalizeDecomposition(use, indLow, indHigh);
 }
@@ -846,7 +846,7 @@ GenTree* DecomposeLongs::DecomposeNot(LIR::Use& use)
 
     GenTree* hiResult = new (m_compiler, GT_NOT) GenTreeOp(GT_NOT, TYP_INT, hiOp1, nullptr);
     hiResult->CopyCosts(loResult);
-    BlockRange().InsertAfter(hiResult, loResult);
+    BlockRange().InsertAfter(loResult, hiResult);
 
     return FinalizeDecomposition(use, loResult, hiResult);
 }
@@ -896,9 +896,9 @@ GenTree* DecomposeLongs::DecomposeNeg(LIR::Use& use)
     // Annotate new nodes with costs. This will re-cost the hiOp1 tree as well.
     m_compiler->gtPrepareCost(hiResult);
 
-    BlockRange().InsertAfter(zero, loResult);
-    BlockRange().InsertAfter(hiAdjust, zero);
-    BlockRange().InsertAfter(hiResult, hiAdjust);
+    BlockRange().InsertAfter(loResult, zero);
+    BlockRange().InsertAfter(zero, hiAdjust);
+    BlockRange().InsertAfter(hiAdjust, hiResult);
 
     return FinalizeDecomposition(use, loResult, hiResult);
 }
@@ -972,7 +972,7 @@ GenTree* DecomposeLongs::DecomposeArith(LIR::Use& use)
 
     GenTree* hiResult = new (m_compiler, oper) GenTreeOp(GetHiOper(oper), TYP_INT, hiOp1, hiOp2);
     hiResult->CopyCosts(loResult);
-    BlockRange().InsertAfter(hiResult, loResult);
+    BlockRange().InsertAfter(loResult, hiResult);
 
     if ((oper == GT_ADD) || (oper == GT_SUB))
     {

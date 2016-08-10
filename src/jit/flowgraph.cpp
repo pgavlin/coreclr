@@ -9032,8 +9032,8 @@ void Compiler::fgSimpleLowering()
                         add->gtNext = tree;
                         tree->gtPrev = add;
 #else
-                        range.InsertAfter(con, arr);
-                        range.InsertAfter(add, con);
+                        range.InsertAfter(arr, con);
+                        range.InsertAfter(con, add);
 #endif
                     }
 
@@ -9787,7 +9787,7 @@ void                Compiler::fgCompactBlocks(BasicBlock* block, BasicBlock* bNe
             }
             else
             {
-                blockRange.InsertAfter(std::move(phisToMove), blockLastPhi);
+                blockRange.InsertAfter(blockLastPhi, std::move(phisToMove));
             }
         }
         else
@@ -9799,7 +9799,7 @@ void                Compiler::fgCompactBlocks(BasicBlock* block, BasicBlock* bNe
         if (nextFirstNonPhi != nullptr)
         {
             LIR::Range nextNodes = nextRange.Remove(nextFirstNonPhi, nextRange.LastNode());
-            blockRange.InsertAfter(std::move(nextNodes), blockRange.LastNode());
+            blockRange.InsertAfter(blockRange.LastNode(), std::move(nextNodes));
         }
 
         assert(blockRange.CheckLIR(this));
@@ -13786,8 +13786,8 @@ bool Compiler::fgOptimizeSwitchBranches(BasicBlock* block)
 
         if (block->IsLIR())
         {
-            blockRange->InsertAfter(zeroConstNode, switchVal);
-            blockRange->InsertAfter(condNode, zeroConstNode);
+            blockRange->InsertAfter(switchVal, zeroConstNode);
+            blockRange->InsertAfter(zeroConstNode, condNode);
         }
         else
         {

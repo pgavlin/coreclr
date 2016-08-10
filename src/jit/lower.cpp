@@ -356,7 +356,7 @@ GenTree* Lowering::LowerSwitch(GenTree* node)
         store->gtFlags = (rhs->gtFlags & GTF_COMMON_MASK);
         store->gtFlags |= GTF_VAR_DEF;
 
-        switchBBRange.InsertAfter(store, node);
+        switchBBRange.InsertAfter(node, store);
         switchBBRange.Remove(node);
 
         return store;
@@ -661,7 +661,7 @@ void Lowering::ReplaceArgWithPutArgOrCopy(GenTree** argSlot, GenTree* putArgOrCo
     putArgOrCopy->gtOp.gtOp1 = arg;
 
     // Insert the putarg/copy into the block
-    BlockRange().InsertAfter(putArgOrCopy, arg);
+    BlockRange().InsertAfter(arg, putArgOrCopy);
 }
 
 //------------------------------------------------------------------------
@@ -1264,7 +1264,7 @@ void Lowering::LowerCall(GenTree* node)
             }
         }
 
-        BlockRange().InsertBefore(std::move(resultRange), insertionPoint);
+        BlockRange().InsertBefore(insertionPoint, std::move(resultRange));
 
         call->gtControlExpr = result;
     }
@@ -1466,7 +1466,7 @@ void  Lowering::InsertProfTailCallHook(GenTreeCall* call, GenTree *insertionPoin
 
     assert(insertionPoint != nullptr);
     GenTreePtr profHookNode = new (comp, GT_PROF_HOOK) GenTree(GT_PROF_HOOK, TYP_VOID);
-    BlockRange().InsertBefore(profHookNode, insertionPoint);
+    BlockRange().InsertBefore(insertionPoint, profHookNode);
 }
 
 // Lower fast tail call implemented as epilog+jmp.
@@ -1639,7 +1639,7 @@ void Lowering::LowerFastTailCall(GenTreeCall *call)
             assert(tmpType != TYP_UNDEF);
             GenTreeLclVar* local = new(comp, GT_LCL_VAR) GenTreeLclVar(GT_LCL_VAR, tmpType, callerArgLclNum, BAD_IL_OFFSET);
             GenTree* assignExpr = comp->gtNewTempAssign(tmpLclNum, local);
-            BlockRange().InsertBefore(LIR::SeqTree(comp, assignExpr), firstPutArgStk);
+            BlockRange().InsertBefore(firstPutArgStk, LIR::SeqTree(comp, assignExpr));
         }
     }
 
@@ -1650,7 +1650,7 @@ void Lowering::LowerFastTailCall(GenTreeCall *call)
     if (firstPutArgStk != nullptr)
     {                
         startNonGCNode = new (comp, GT_START_NONGC) GenTree(GT_START_NONGC, TYP_VOID);
-        BlockRange().InsertBefore(startNonGCNode, firstPutArgStk);
+        BlockRange().InsertBefore(firstPutArgStk, startNonGCNode);
 
         // Gc-interruptability in the following case:
         //     foo(a, b, c, d, e) { bar(a, b, c, d, e); } 
@@ -1666,7 +1666,7 @@ void Lowering::LowerFastTailCall(GenTreeCall *call)
         {
             assert(comp->fgFirstBB == comp->compCurBB);
             GenTreePtr noOp = new (comp, GT_NO_OP) GenTree(GT_NO_OP, TYP_VOID);
-            BlockRange().InsertBefore(noOp, startNonGCNode);
+            BlockRange().InsertBefore(startNonGCNode, noOp);
         }
     }
 
@@ -1777,7 +1777,7 @@ GenTree* Lowering::LowerTailCallViaHelper(GenTreeCall* call, GenTree *callTarget
     assert(argEntry->node->gtOper == GT_PUTARG_REG);
     GenTree *secondArg = argEntry->node->gtOp.gtOp1;
 
-    BlockRange().InsertAfter(std::move(callTargetRange), secondArg);
+    BlockRange().InsertAfter(secondArg, std::move(callTargetRange));
 
     bool isClosed;
     LIR::ReadOnlyRange secondArgRange = BlockRange().GetTreeRange(secondArg, &isClosed);
@@ -1805,7 +1805,7 @@ GenTree* Lowering::LowerTailCallViaHelper(GenTreeCall* call, GenTree *callTarget
     assert(argEntry->node->gtOper == GT_PUTARG_STK);
     GenTree* arg0 = argEntry->node->gtOp.gtOp1;
 
-    BlockRange().InsertAfter(std::move(callTargetRange), arg0);
+    BlockRange().InsertAfter(arg0, std::move(callTargetRange));
 
     bool isClosed;
     LIR::ReadOnlyRange secondArgRange = BlockRange().GetTreeRange(arg0, &isClosed);
@@ -2087,11 +2087,11 @@ GenTree* Lowering::LowerDelegateInvoke(GenTreeCall* call)
                                                              nullptr,
                                                              0,
                                                              comp->eeGetEEInfo()->offsetOfDelegateInstance);
-    BlockRange().InsertAfter(newThisAddr, originalThisExpr);
+    BlockRange().InsertAfter(originalThisExpr, newThisAddr);
 
     GenTree* newThis = comp->gtNewOperNode(GT_IND, TYP_REF, newThisAddr);
     newThis->SetCosts(IND_COST_EX, 2);
-    BlockRange().InsertAfter(newThis, newThisAddr);
+    BlockRange().InsertAfter(newThisAddr, newThis);
     thisArgNode->gtOp.gtOp1 = newThis;
 
     // the control target is
@@ -2331,7 +2331,7 @@ void Lowering::InsertPInvokeMethodProlog()
     }
 
     comp->fgMorphTree(store);
-    firstBlockRange.InsertBefore(LIR::SeqTree(comp, store), insertionPoint);
+    firstBlockRange.InsertBefore(insertionPoint, LIR::SeqTree(comp, store));
 
     DISPTREE(store);
 
@@ -2345,7 +2345,7 @@ void Lowering::InsertPInvokeMethodProlog()
                                                     callFrameInfo.offsetOfCallSiteSP);
     storeSP->gtOp1 = PhysReg(REG_SPBASE);
 
-    firstBlockRange.InsertBefore(LIR::SeqTree(comp, storeSP), insertionPoint);
+    firstBlockRange.InsertBefore(insertionPoint, LIR::SeqTree(comp, storeSP));
 
     DISPTREE(storeSP);
 
@@ -2359,7 +2359,7 @@ void Lowering::InsertPInvokeMethodProlog()
                                                     callFrameInfo.offsetOfCalleeSavedFP);
     storeFP->gtOp1 = PhysReg(REG_FPBASE);
 
-    firstBlockRange.InsertBefore(LIR::SeqTree(comp, storeFP), insertionPoint);
+    firstBlockRange.InsertBefore(insertionPoint, LIR::SeqTree(comp, storeFP));
 
     DISPTREE(storeFP);
 
@@ -2370,7 +2370,7 @@ void Lowering::InsertPInvokeMethodProlog()
         // Push a frame - if we are NOT in an IL stub, this is done right before the call
         // The init routine sets InlinedCallFrame's m_pNext, so we just set the thead's top-of-stack
         GenTree* frameUpd = CreateFrameLinkUpdate(PushFrame);
-        firstBlockRange.InsertBefore(LIR::SeqTree(comp, frameUpd), insertionPoint);
+        firstBlockRange.InsertBefore(insertionPoint, LIR::SeqTree(comp, frameUpd));
         DISPTREE(frameUpd);
     }
 }
@@ -2433,13 +2433,13 @@ void Lowering::InsertPInvokeMethodEpilog(BasicBlock *returnBB
     // Thread.offsetOfGcState = 0/1 
     // That is [tcb + offsetOfGcState] = 1
     GenTree* storeGCState = SetGCState(1);
-    returnBlockRange.InsertBefore(LIR::SeqTree(comp, storeGCState), insertionPoint);
+    returnBlockRange.InsertBefore(insertionPoint, LIR::SeqTree(comp, storeGCState));
 
     if (comp->opts.eeFlags & CORJIT_FLG_IL_STUB)
     {
         // Pop the frame, in non-stubs we do this around each PInvoke call
         GenTree* frameUpd = CreateFrameLinkUpdate(PopFrame);
-        returnBlockRange.InsertBefore(LIR::SeqTree(comp, frameUpd), insertionPoint);
+        returnBlockRange.InsertBefore(insertionPoint, LIR::SeqTree(comp, frameUpd));
     }
 }
 
@@ -2483,7 +2483,7 @@ void Lowering::InsertPInvokeCallProlog(GenTreeCall* call)
         GenTree* helperCall = comp->gtNewHelperCallNode(CORINFO_HELP_JIT_PINVOKE_BEGIN, TYP_VOID, 0, comp->gtNewArgList(frameAddr));
 
         comp->fgMorphTree(helperCall);
-        BlockRange().InsertBefore(LIR::SeqTree(comp, helperCall), insertBefore);
+        BlockRange().InsertBefore(insertBefore, LIR::SeqTree(comp, helperCall));
         return;
     }
 #endif
@@ -2543,7 +2543,7 @@ void Lowering::InsertPInvokeCallProlog(GenTreeCall* call)
                           callFrameInfo.offsetOfCallTarget);
         store->gtOp1 = src;
 
-        BlockRange().InsertBefore(LIR::SeqTree(comp, store), insertBefore);
+        BlockRange().InsertBefore(insertBefore, LIR::SeqTree(comp, store));
     }
 
 #ifdef _TARGET_X86_
@@ -2559,7 +2559,7 @@ void Lowering::InsertPInvokeCallProlog(GenTreeCall* call)
 
     storeCallSiteSP->gtOp1 = PhysReg(REG_SPBASE);
 
-    BlockRange().InsertBefore(LIR::SeqTree(comp, storeCallSiteSP), insertBefore);
+    BlockRange().InsertBefore(insertBefore, LIR::SeqTree(comp, storeCallSiteSP));
 
 #endif
 
@@ -2578,7 +2578,7 @@ void Lowering::InsertPInvokeCallProlog(GenTreeCall* call)
     labelRef->gtType = TYP_I_IMPL;
     storeLab->gtOp1 = labelRef;
 
-    BlockRange().InsertBefore(LIR::SeqTree(comp, storeLab), insertBefore);
+    BlockRange().InsertBefore(insertBefore, LIR::SeqTree(comp, storeLab));
 
     if (!(comp->opts.eeFlags & CORJIT_FLG_IL_STUB))
     {
@@ -2588,7 +2588,7 @@ void Lowering::InsertPInvokeCallProlog(GenTreeCall* call)
         //
         // Stubs do this once per stub, not once per call.
         GenTree* frameUpd = CreateFrameLinkUpdate(PushFrame);
-        BlockRange().InsertBefore(LIR::SeqTree(comp, frameUpd), insertBefore);
+        BlockRange().InsertBefore(insertBefore, LIR::SeqTree(comp, frameUpd));
     }
 
     // IMPORTANT **** This instruction must come last!!! ****
@@ -2597,7 +2597,7 @@ void Lowering::InsertPInvokeCallProlog(GenTreeCall* call)
     //  [tcb + offsetOfGcState] = 0
 
     GenTree* storeGCState = SetGCState(0);
-    BlockRange().InsertBefore(LIR::SeqTree(comp, storeGCState), insertBefore);
+    BlockRange().InsertBefore(insertBefore, LIR::SeqTree(comp, storeGCState));
 }
 
 
@@ -2628,7 +2628,7 @@ void Lowering::InsertPInvokeCallEpilog(GenTreeCall* call)
         GenTree* helperCall = comp->gtNewHelperCallNode(CORINFO_HELP_JIT_PINVOKE_END, TYP_VOID, 0, comp->gtNewArgList(frameAddr));
 
         comp->fgMorphTree(helperCall);
-        BlockRange().InsertAfter(LIR::SeqTree(comp, helperCall), call);
+        BlockRange().InsertAfter(call, LIR::SeqTree(comp, helperCall));
         return;
     }
 #endif
@@ -2637,18 +2637,18 @@ void Lowering::InsertPInvokeCallEpilog(GenTreeCall* call)
     GenTree* insertionPoint = call;
 
     GenTree* tree = SetGCState(1);
-    BlockRange().InsertAfter(LIR::SeqTree(comp, tree), insertionPoint);
+    BlockRange().InsertAfter(insertionPoint, LIR::SeqTree(comp, tree));
     insertionPoint = tree;
 
     tree = CreateReturnTrapSeq();
-    BlockRange().InsertAfter(LIR::SeqTree(comp, tree), insertionPoint);
+    BlockRange().InsertAfter(insertionPoint, LIR::SeqTree(comp, tree));
     insertionPoint = tree;
 
     // Pop the frame if necessasry
     if (!(comp->opts.eeFlags & CORJIT_FLG_IL_STUB))
     {
         tree = CreateFrameLinkUpdate(PopFrame);
-        BlockRange().InsertAfter(LIR::SeqTree(comp, tree), insertionPoint);
+        BlockRange().InsertAfter(insertionPoint, LIR::SeqTree(comp, tree));
     }
 }
 
@@ -2724,7 +2724,7 @@ GenTree* Lowering::LowerNonvirtPinvokeCall(GenTreeCall* call)
     // The PINVOKE_PROLOG op signals this to the code generator/emitter.
 
     GenTree* prolog = new (comp, GT_NOP) GenTree(GT_PINVOKE_PROLOG, TYP_VOID);
-    BlockRange().InsertBefore(prolog, call);
+    BlockRange().InsertBefore(call, prolog);
 
     InsertPInvokeCallProlog(call);
 
@@ -2924,7 +2924,7 @@ GenTree* Lowering::LowerVirtualStubCall(GenTreeCall* call)
         // All we have to do here is add an indirection to generate the actual call target.
 
         GenTree* ind = Ind(call->gtCallAddr);
-        BlockRange().InsertAfter(ind, call->gtCallAddr);
+        BlockRange().InsertAfter(call->gtCallAddr, ind);
         call->gtCallAddr = ind;
     }
     else
@@ -3145,7 +3145,7 @@ GenTree* Lowering::TryCreateAddrMode(LIR::Use&& use, bool isIndir)
         addrMode->gtFlags &= ~(GTF_REVERSE_OPS);
     }
 
-    BlockRange().InsertAfter(addrMode, addr);
+    BlockRange().InsertAfter(addr, addrMode);
 
     // Now we need to remove all the nodes subsumed by the addrMode
     AddrModeCleanupHelper(addrMode, addr);
@@ -3381,7 +3381,7 @@ GenTree* Lowering::LowerSignedDivOrMod(GenTreePtr node)
     BlockRange().Remove(dividend);
 
     // linearize and insert the new tree before the original divMod node
-    BlockRange().InsertBefore(LIR::SeqTree(comp, newDivMod), divMod);
+    BlockRange().InsertBefore(divMod, LIR::SeqTree(comp, newDivMod));
     BlockRange().Remove(divMod);
 
     // replace the original divmod node with the new divmod tree
@@ -3483,7 +3483,7 @@ GenTree* Lowering::LowerArrElem(GenTree* node)
 
     // The first ArrOffs node will have 0 for the offset of the previous dimension.
     GenTree* prevArrOffs = new(comp, GT_CNS_INT) GenTreeIntCon(TYP_I_IMPL, 0);
-    BlockRange().InsertBefore(prevArrOffs, insertionPoint);
+    BlockRange().InsertBefore(insertionPoint, prevArrOffs);
 
     for (unsigned char dim = 0; dim < rank; dim++)
     {
@@ -3498,22 +3498,22 @@ GenTree* Lowering::LowerArrElem(GenTree* node)
         else
         {
             idxArrObjNode = comp->gtClone(arrObjNode);
-            BlockRange().InsertBefore(idxArrObjNode, insertionPoint);
+            BlockRange().InsertBefore(insertionPoint, idxArrObjNode);
         }
 
         // Next comes the GT_ARR_INDEX node.
         GenTreeArrIndex* arrMDIdx = new(comp, GT_ARR_INDEX)
             GenTreeArrIndex(TYP_INT, idxArrObjNode, indexNode, dim, rank, arrElem->gtArrElem.gtArrElemType);
         arrMDIdx->gtFlags |= ((idxArrObjNode->gtFlags|indexNode->gtFlags) & GTF_ALL_EFFECT);
-        BlockRange().InsertBefore(arrMDIdx, insertionPoint);
+        BlockRange().InsertBefore(insertionPoint, arrMDIdx);
 
         GenTree* offsArrObjNode = comp->gtClone(arrObjNode);
-        BlockRange().InsertBefore(offsArrObjNode, insertionPoint);
+        BlockRange().InsertBefore(insertionPoint, offsArrObjNode);
 
         GenTreeArrOffs* arrOffs = new(comp, GT_ARR_OFFSET)
             GenTreeArrOffs(TYP_I_IMPL, prevArrOffs, arrMDIdx, offsArrObjNode, dim, rank, arrElem->gtArrElem.gtArrElemType);
         arrOffs->gtFlags |= ((prevArrOffs->gtFlags|arrMDIdx->gtFlags|offsArrObjNode->gtFlags) & GTF_ALL_EFFECT);
-        BlockRange().InsertBefore(arrOffs, insertionPoint);
+        BlockRange().InsertBefore(insertionPoint, arrOffs);
 
         prevArrOffs = arrOffs;
     }
@@ -3528,14 +3528,14 @@ GenTree* Lowering::LowerArrElem(GenTree* node)
         // We do the address arithmetic in TYP_I_IMPL, though note that the lower bounds and lengths in memory are TYP_INT
         GenTreePtr scaleNode = new(comp, GT_CNS_INT) GenTreeIntCon(TYP_I_IMPL, scale);
         GenTreePtr mulNode = new(comp, GT_MUL) GenTreeOp(GT_MUL, TYP_I_IMPL, leaIndexNode, scaleNode); 
-        BlockRange().InsertBefore(scaleNode, insertionPoint);
-        BlockRange().InsertBefore(mulNode, insertionPoint);
+        BlockRange().InsertBefore(insertionPoint, scaleNode);
+        BlockRange().InsertBefore(insertionPoint, mulNode);
         leaIndexNode = mulNode;
         scale = 1;
     }
 
     GenTreePtr leaBase = comp->gtClone(arrObjNode);
-    BlockRange().InsertBefore(leaBase, insertionPoint);
+    BlockRange().InsertBefore(insertionPoint, leaBase);
 
     GenTreePtr leaNode = new(comp, GT_LEA) GenTreeAddrMode(arrElem->TypeGet(), leaBase, leaIndexNode, scale, offset);
     leaNode->gtFlags |= GTF_REVERSE_OPS;
@@ -3544,7 +3544,7 @@ GenTree* Lowering::LowerArrElem(GenTree* node)
     // dataflow tree rooted at `leaNode`.
     comp->gtPrepareCost(leaNode);
 
-    BlockRange().InsertBefore(leaNode, insertionPoint);
+    BlockRange().InsertBefore(insertionPoint, leaNode);
 
     LIR::Use arrElemUse;
     if (BlockRange().TryGetUse(arrElem, &arrElemUse))
