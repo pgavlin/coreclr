@@ -52,6 +52,7 @@ set( JIT_SOURCES
   lower.cpp
   lsra.cpp
   morph.cpp
+  objectalloc.cpp
   optcse.cpp
   optimizer.cpp
   rangecheck.cpp
