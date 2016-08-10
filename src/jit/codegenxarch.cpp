@@ -638,8 +638,7 @@ void                CodeGen::genCodeForBBlist()
 #ifdef DEBUGGING_SUPPORT
         IL_OFFSETX currentILOffset = BAD_IL_OFFSET;
 #endif
-        LIR::Range blockRange = LIR::AsRange(block);
-        for (GenTree* node = blockRange.FirstNonPhiNode(), *end = blockRange.End(); node != end; node = node->gtNext)
+        for (GenTree* node : LIR::AsRange(block).NonPhiNodes())
         {
 #ifdef DEBUGGING_SUPPORT
             // Do we have a new IL offset?
@@ -1058,12 +1057,12 @@ void                CodeGen::genCodeForBBlist()
         case BBJ_EHFILTERRET:
             {
                 // The last statement of the block must be a GT_RETFILT, which has already been generated.
-                assert(block->bbLastNode != nullptr);
-                assert(block->bbLastNode->OperGet() == GT_RETFILT);
+                assert(block->lastNode() != nullptr);
+                assert(block->lastNode()->OperGet() == GT_RETFILT);
 
                 if (block->bbJumpKind == BBJ_EHFINALLYRET)
                 {
-                    assert(block->bbLastNode->gtOp.gtOp1 == nullptr); // op1 == nullptr means endfinally
+                    assert(block->lastNode()->gtOp.gtOp1 == nullptr); // op1 == nullptr means endfinally
 
                     // Return using a pop-jmp sequence. As the "try" block calls
                     // the finally with a jmp, this leaves the x86 call-ret stack

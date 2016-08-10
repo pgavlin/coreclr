@@ -645,8 +645,7 @@ void                Compiler::fgPerBlockLocalVarLiveness()
             // on all of the nodes that precede `asgdLclVar` in execution order to factor into the
             // dataflow for the value being assigned to the local var, which is not necessarily the
             // case without tree order. As a result, we simply pass `nullptr` for `asgdLclVar`.
-            LIR::Range blockRange = LIR::AsRange(block);
-            for (GenTree* node = blockRange.FirstNonPhiNode(), *end = blockRange.End(); node != end; node = node->gtNext)
+            for (GenTree* node : LIR::AsRange(block).NonPhiNodes())
             {
                 fgPerNodeLocalVarLiveness(node, nullptr);
             }
@@ -1956,14 +1955,14 @@ VARSET_VALRET_TP    Compiler::fgComputeLifeLIR(VARSET_VALARG_TP lifeArg, BasicBl
 
     noway_assert(VarSetOps::Equal(this, VarSetOps::Intersection(this, keepAliveVars, life), keepAliveVars));
 
-    LIR::Range blockRange = LIR::AsRange(block);
+    LIR::Range& blockRange = LIR::AsRange(block);
     GenTree* firstNonPhiNode = blockRange.FirstNonPhiNode();
     if (firstNonPhiNode == nullptr)
     {
         return life;
     }
 
-    for (GenTree* node = blockRange.EndExclusive(), *next = nullptr, *end = firstNonPhiNode->gtPrev; node != end; node = next)
+    for (GenTree* node = blockRange.LastNode(), *next = nullptr, *end = firstNonPhiNode->gtPrev; node != end; node = next)
     {
         next = node->gtPrev;
 
@@ -2364,7 +2363,7 @@ bool Compiler::fgTryRemoveDeadLIRStore(LIR::Range& blockRange, GenTree* node, Ge
 
     bool isClosed = false;
     unsigned sideEffects = 0;
-    LIR::Range operandsRange = blockRange.GetRangeOfOperandTrees(store, &isClosed, &sideEffects);
+    LIR::ReadOnlyRange operandsRange = blockRange.GetRangeOfOperandTrees(store, &isClosed, &sideEffects);
     if (!isClosed ||
         ((sideEffects & GTF_SIDE_EFFECT) != 0) ||
         (((sideEffects & GTF_ORDER_SIDEEFF) != 0) && (value->OperGet() == GT_CATCH_ARG)))
@@ -2384,18 +2383,17 @@ bool Compiler::fgTryRemoveDeadLIRStore(LIR::Range& blockRange, GenTree* node, Ge
         if (node->OperIsLocalStore())
         {
             assert(node == store);
-            *next = (operandsRange.End() == store) ? operandsRange.Begin()->gtPrev : node->gtPrev;
+            *next = (operandsRange.LastNode()->gtNext == store) ? operandsRange.FirstNode()->gtPrev : node->gtPrev;
         }
         else
         {
-            assert(operandsRange.ContainsNode(node));
-            *next = operandsRange.Begin()->gtPrev;
+            assert(operandsRange.Contains(node));
+            *next = operandsRange.FirstNode()->gtPrev;
         }
-
-        blockRange.Remove(operandsRange);
 
         // TODO(pdg): this scan should really be folded into LIR::Range::Remove().
         LIR::DecRefCnts(this, compCurBB, operandsRange);
+        blockRange.Remove(std::move(operandsRange));
     }
 
     blockRange.Remove(store);

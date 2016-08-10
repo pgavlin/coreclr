@@ -8785,14 +8785,12 @@ BasicBlock* Compiler::fgSplitBlockAfterNode(BasicBlock* curr, GenTree* node)
 
     if (node != nullptr)
     {
-        LIR::Range currBBRange = LIR::AsRange(curr);
+        LIR::Range& currBBRange = LIR::AsRange(curr);
 
-        if (node != curr->bbLastNode)
+        if (node != currBBRange.LastNode())
         {
-            LIR::Range nodesToMove = LIR::AsRange(node->gtNext, curr->bbLastNode);
-
-            currBBRange.Remove(nodesToMove);
-            LIR::AsRange(newBlock).InsertAtBeginning(nodesToMove);
+            LIR::Range nodesToMove = currBBRange.Remove(node->gtNext, currBBRange.LastNode());
+            LIR::AsRange(newBlock).InsertAtBeginning(std::move(nodesToMove));
         }
 
         // Update the IL offsets of the blocks to match the split.
@@ -8986,9 +8984,10 @@ void Compiler::fgSimpleLowering()
             for (GenTreePtr tree = stmt->gtStmtList; tree; tree = tree->gtNext)
             {
 #else
-        LIR::Range range = LIR::AsRange(block);
-        for (GenTree* tree = range.Begin(), *end = range.End(); tree != end; tree = tree->gtNext)
+        LIR::Range& range = LIR::AsRange(block);
+        for (GenTree* tree : range)
         {
+            {
 #endif
                 if (tree->gtOper == GT_ARR_LENGTH)
                 {
@@ -9053,9 +9052,7 @@ void Compiler::fgSimpleLowering()
                     fgSetRngChkTarget(tree, false);
                 }
             }
-#ifdef LEGACY_BACKEND
         }
-#endif
     }
 
 #ifdef DEBUG
@@ -9769,49 +9766,40 @@ void                Compiler::fgCompactBlocks(BasicBlock* block, BasicBlock* bNe
     // control-flow choice was constant-folded away.  So probably phi's need to go away,
     // as well, in favor of one of the incoming branches.  Or at least be modified.
 
-    assert((block->IsLIR() == bNext->IsLIR()) || (block->IsLIR() && bNext->isEmpty()) || (block->isEmpty() && bNext->IsLIR()));
-    if (block->IsLIR() || bNext->IsLIR())
+    assert(block->IsLIR() == bNext->IsLIR());
+    if (block->IsLIR())
     {
-        LIR::Range blockRange = LIR::AsRange(block);
-        LIR::Range nextRange = LIR::AsRange(bNext);
-
-        GenTree* blockBegin = blockRange.Begin();
-        GenTree* blockFirstNonPhi = blockRange.FirstNonPhiNode();
-
-        GenTree* nextBegin = nextRange.Begin();
-        GenTree* nextFirstNonPhi = nextRange.FirstNonPhiNode();
-
-        GenTree* insertionPoint = nullptr;
-        if (blockBegin != blockFirstNonPhi)
-        {
-            insertionPoint = blockFirstNonPhi != blockRange.End() ? blockFirstNonPhi->gtPrev : blockRange.EndExclusive();
-        }
+        LIR::Range& blockRange = LIR::AsRange(block);
+        LIR::Range& nextRange = LIR::AsRange(bNext);
 
         // Does the next block have any phis?
-        if (nextBegin != nextFirstNonPhi)
+        GenTree* nextFirstNonPhi = nullptr;
+        LIR::ReadOnlyRange nextPhis = nextRange.PhiNodes();
+        if (!nextPhis.IsEmpty())
         {
-            GenTree* lastPhi = nextFirstNonPhi != nextRange.End() ? nextFirstNonPhi->gtPrev : nextRange.EndExclusive();
+            GenTree* blockLastPhi = blockRange.LastPhiNode();
+            nextFirstNonPhi = nextPhis.LastNode()->gtNext;
 
-            LIR::Range nextPhis = LIR::AsRange(nextBegin, lastPhi);
-            nextRange.Remove(nextPhis);
-
-            if (insertionPoint == nullptr)
+            LIR::Range phisToMove = nextRange.Remove(std::move(nextPhis));
+            if (blockLastPhi == nullptr)
             {
-                blockRange.InsertAtBeginning(nextPhis);
+                blockRange.InsertAtBeginning(std::move(phisToMove));
             }
             else
             {
-                blockRange.InsertAfter(nextPhis, insertionPoint);
+                blockRange.InsertAfter(std::move(phisToMove), blockLastPhi);
             }
+        }
+        else
+        {
+            nextFirstNonPhi = nextRange.FirstNode();
         }
 
         // Does the block have any other code?
-        if (nextFirstNonPhi != nextRange.End())
+        if (nextFirstNonPhi != nullptr)
         {
-            LIR::Range nextNodes = LIR::AsRange(nextFirstNonPhi, nextRange.EndExclusive());
-            nextRange.Remove(nextNodes);
-
-            blockRange.InsertAfter(nextNodes, blockRange.EndExclusive());
+            LIR::Range nextNodes = nextRange.Remove(nextFirstNonPhi, nextRange.LastNode());
+            blockRange.InsertAfter(std::move(nextNodes), blockRange.LastNode());
         }
 
         assert(blockRange.CheckLIR(this));
@@ -10228,17 +10216,12 @@ void                Compiler::fgUnreachableBlock(BasicBlock* block)
 
     if (block->IsLIR())
     {
-        LIR::Range blockRange = LIR::AsRange(block);
-
-        // Skip phis when decrementing ref counts.
-        GenTree* firstNonPhiNode = blockRange.FirstNonPhiNode();
-        if (firstNonPhiNode != blockRange.End())
+        LIR::Range& blockRange = LIR::AsRange(block);
+        if (!blockRange.IsEmpty())
         {
-            LIR::DecRefCnts(this, block, LIR::AsRange(firstNonPhiNode, blockRange.EndExclusive()));
+            LIR::DecRefCnts(this, block, blockRange.NonPhiNodes());
+            blockRange.Remove(blockRange.FirstNode(), blockRange.LastNode());
         }
-
-        block->bbTreeList = nullptr;
-        block->bbLastNode = nullptr;
     }
     else
     {
@@ -10302,21 +10285,21 @@ void                Compiler::fgRemoveJTrue(BasicBlock *block)
 
     if (block->IsLIR())
     {
-        LIR::Range blockRange = LIR::AsRange(block);
+        LIR::Range& blockRange = LIR::AsRange(block);
 
-        GenTree* test = blockRange.EndExclusive();
+        GenTree* test = blockRange.LastNode();
         assert(test->OperGet() == GT_JTRUE);
 
         bool isClosed;
         unsigned sideEffects;
-        LIR::Range testRange = blockRange.GetTreeRange(test, &isClosed, &sideEffects);
+        LIR::ReadOnlyRange testRange = blockRange.GetTreeRange(test, &isClosed, &sideEffects);
 
         if (isClosed && ((sideEffects & GTF_ALL_EFFECT) == 0))
         {
             // If the jump and its operands form a contiguous, side-effect-free range,
             // remove them.
-            blockRange.Remove(testRange);
             LIR::DecRefCnts(this, block, testRange);
+            blockRange.Remove(std::move(testRange));
         }
         else
         {
@@ -13638,13 +13621,13 @@ bool Compiler::fgOptimizeSwitchBranches(BasicBlock* block)
     while (++jmpTab, --jmpCnt);
 
     GenTreeStmt* switchStmt = nullptr;
-    LIR::Range blockRange;
+    LIR::Range* blockRange = nullptr;
 
     GenTree* switchTree;
     if (block->IsLIR())
     {
-        blockRange = LIR::AsRange(block);
-        switchTree = blockRange.EndExclusive();
+        blockRange = &LIR::AsRange(block);
+        switchTree = blockRange->LastNode();
 
         assert(switchTree->OperGet() == GT_SWITCH_TABLE);
     }
@@ -13684,15 +13667,15 @@ bool Compiler::fgOptimizeSwitchBranches(BasicBlock* block)
         {
             bool isClosed;
             unsigned sideEffects;
-            LIR::Range switchTreeRange = blockRange.GetTreeRange(switchTree, &isClosed, &sideEffects);
+            LIR::ReadOnlyRange switchTreeRange = blockRange->GetTreeRange(switchTree, &isClosed, &sideEffects);
 
             // The switch tree should form a contiguous, side-effect free range by construction. See
             // Lowering::LowerSwitch for details.
             assert(isClosed);
             assert((sideEffects & GTF_ALL_EFFECT) == 0);
 
-            blockRange.Remove(switchTreeRange);
             LIR::DecRefCnts(this, block, switchTreeRange);
+            blockRange->Remove(std::move(switchTreeRange));
         }
         else
         {
@@ -13774,7 +13757,7 @@ bool Compiler::fgOptimizeSwitchBranches(BasicBlock* block)
         {
             GenTree* jumpTable = switchTree->gtOp.gtOp2;
             assert(jumpTable->OperGet() == GT_JMPTABLE);
-            blockRange.Remove(jumpTable);
+            blockRange->Remove(jumpTable);
         }
 
         // Change the GT_SWITCH(switchVal) into GT_JTRUE(GT_EQ(switchVal==0)).
@@ -13803,8 +13786,8 @@ bool Compiler::fgOptimizeSwitchBranches(BasicBlock* block)
 
         if (block->IsLIR())
         {
-            blockRange.InsertAfter(zeroConstNode, switchVal);
-            blockRange.InsertAfter(condNode, zeroConstNode);
+            blockRange->InsertAfter(zeroConstNode, switchVal);
+            blockRange->InsertAfter(condNode, zeroConstNode);
         }
         else
         {
@@ -14041,20 +14024,20 @@ bool Compiler::fgOptimizeBranchToNext(BasicBlock* block, BasicBlock* bNext, Basi
 
         if (block->IsLIR())
         {
-            LIR::Range blockRange = LIR::AsRange(block);
-            GenTree* jmp = blockRange.EndExclusive();
+            LIR::Range& blockRange = LIR::AsRange(block);
+            GenTree* jmp = blockRange.LastNode();
             assert(jmp->OperGet() == GT_JTRUE);
 
             bool isClosed;
             unsigned sideEffects;
-            LIR::Range jmpRange = blockRange.GetTreeRange(jmp, &isClosed, &sideEffects);
+            LIR::ReadOnlyRange jmpRange = blockRange.GetTreeRange(jmp, &isClosed, &sideEffects);
 
             if (isClosed && ((sideEffects & GTF_ALL_EFFECT) == 0))
             {
                 // If the jump and its operands form a contiguous, side-effect-free range,
                 // remove them.
-                blockRange.Remove(jmpRange);
                 LIR::DecRefCnts(this, block, jmpRange);
+                blockRange.Remove(std::move(jmpRange));
             }
             else
             {
@@ -16082,16 +16065,7 @@ REPEAT:;
 #endif // DEBUG
                         /* Reverse the jump condition */
 
-                        GenTree* test;
-                        if (block->IsLIR())
-                        {
-                            test = block->bbLastNode;
-                        }
-                        else
-                        {
-                            test = block->lastTopLevelStmt()->gtStmt.gtStmtExpr;
-                        }
-
+                        GenTree* test = block->lastNode();
                         noway_assert(test->gtOper == GT_JTRUE);
 
                         GenTree* cond = gtReverseCond(test->gtOp.gtOp1);

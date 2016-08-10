@@ -7,6 +7,7 @@
 
 class Compiler;
 struct GenTree;
+struct BasicBlock;
 
 class LIR final
 {
@@ -73,35 +74,51 @@ public:
     };
 
     //------------------------------------------------------------------------
-    // LIR::Range: Represents a contiguous range of LIR nodes. Provides a
-    //             variety of utilites that modify the LIR contained in the
-    //             range.
+    // LIR::ReadOnlyRange:
     //
-    class Range
+    // Represents a contiguous range of LIR nodes that may be a subrange of
+    // a containing range. Provides a small set of utilities for iteration.
+    // Instances of this type are primarily created by and provided to
+    // analysis and utility methods on LIR::Range.
+    //
+    // Although some pains have been taken to help guard against the existence
+    // of invalid subranges, it remains possible to create them. For example,
+    // consider the following:
+    //
+    //     // View the block as a range
+    //     LIR::Range& blockRange = LIR::AsRange(block);
+    //
+    //     // Create a range from the first non-phi node in the block to the
+    //     // last node in the block
+    //     LIR::ReadOnlyRange nonPhis = blockRange.NonPhiNodes();
+    //
+    //     // Remove the last node from the block
+    //     blockRange.Remove(blockRange.LastNode());
+    //
+    // After the removal of the last node in the block, the last node of
+    // nonPhis is no longer linked to any of the other nodes in nonPhis. Due
+    // to issues such as the above, some care must be taken in order to
+    // ensure that ranges are not used once they have been invalidated.
+    //
+    class ReadOnlyRange
     {
         friend class LIR;
-        friend class SimpleRange;
+        friend class Range;
+        friend struct BasicBlock;
 
     private:
-        GenTree** m_firstNodeSlot;
-        GenTree** m_lastNodeSlot;
-        bool m_isSimpleRange;      // A simple range provides its own storage: instead of holding
-                                   // pointers to the first and last node tracked by some other
-                                   // container, `m_firstNodeSlot` and `m_lastNodeSlot` hold pointers
-                                   // to the first and last node in the range, respectively.
+        GenTree* m_firstNode;
+        GenTree* m_lastNode;
 
-        Range(GenTree** firstNodeSlot, GenTree** lastNodeSlot);
-        Range(GenTree* firstNode, GenTree* lastNode);
+        ReadOnlyRange(GenTree* firstNode, GenTree* lastNode);
 
-        GenTree*& FirstNode() const;
-        GenTree*& LastNode() const;
-
-        Range GetMarkedRange(unsigned markCount, GenTree* start, bool* isClosed, unsigned* sideEffects) const;
+        ReadOnlyRange(const ReadOnlyRange& other) = delete;
+        ReadOnlyRange& operator=(const ReadOnlyRange& other) = delete;
 
     public:
         class Iterator
         {
-            friend class Range;
+            friend class ReadOnlyRange;
 
             GenTree* m_node;
 
@@ -145,7 +162,7 @@ public:
 
         class ReverseIterator
         {
-            friend class Range;
+            friend class ReadOnlyRange;
 
             GenTree* m_node;
 
@@ -186,12 +203,14 @@ public:
                 return *this;
             }
         };
+ 
+        ReadOnlyRange();
+        ReadOnlyRange(ReadOnlyRange&& other);
 
-        Range();
+        GenTree* FirstNode() const;
+        GenTree* LastNode() const;
 
-        GenTree* Begin() const;
-        GenTree* End() const;
-        GenTree* EndExclusive() const;
+        bool IsEmpty() const;
 
         Iterator begin() const;
         Iterator end() const;
@@ -199,79 +218,80 @@ public:
         ReverseIterator rbegin() const;
         ReverseIterator rend() const;
 
-        bool IsValid() const;
-        bool IsEmpty() const;
-        bool IsSubRange() const;
+#ifdef DEBUG
+        bool Contains(GenTree* node) const;
+#endif
+    };
 
+    //------------------------------------------------------------------------
+    // LIR::Range:
+    //
+    // Represents a contiguous range of LIR nodes. Provides a variety of
+    // variety of utilites that modify the LIR contained in the range. Unlike
+    // `ReadOnlyRange`, values of this type may be edited.
+    //
+    // Because it is not a final class, it is possible to slice values of this
+    // type; this is especially dangerous when the Range value is actually of
+    // type `BasicBlock`. As a result, this type is not copyable and it is
+    // not possible to view a `BasicBlock` as anything other than a `Range&`.
+    //
+    class Range : public ReadOnlyRange
+    {
+        friend class LIR;
+        friend struct BasicBlock;
+
+    private:
+        Range(GenTree* firstNode, GenTree* lastNode);
+
+        Range(const Range& other) = delete;
+        Range& operator=(const Range& other) = delete;
+
+        ReadOnlyRange GetMarkedRange(unsigned markCount, GenTree* start, bool* isClosed, unsigned* sideEffects) const;
+
+    public:
+        Range();
+        Range(Range&& other);
+
+        GenTree* LastPhiNode() const;
         GenTree* FirstNonPhiNode() const;
         GenTree* FirstNonPhiOrCatchArgNode() const;
+
+        ReadOnlyRange PhiNodes() const;
+        ReadOnlyRange NonPhiNodes() const;
 
         void InsertBefore(GenTree* node, GenTree* insertionPoint);
         void InsertAfter(GenTree* node, GenTree* insertionPoint);
 
-        void InsertBefore(const Range& range, GenTree* insertionPoint);
-        void InsertAfter(const Range& range, GenTree* insertionPoint);
+        void InsertBefore(Range&& range, GenTree* insertionPoint);
+        void InsertAfter(Range&& range, GenTree* insertionPoint);
 
         void InsertAtBeginning(GenTree* node);
         void InsertAtEnd(GenTree* node);
 
-        void InsertAtBeginning(const Range& range);
-        void InsertAtEnd(const Range& range);
+        void InsertAtBeginning(Range&& range);
+        void InsertAtEnd(Range&& range);
 
         void Remove(GenTree* node);
-        void Remove(const Range& range);
+        Range Remove(GenTree* firstNode, GenTree* lastNode);
+        Range Remove(ReadOnlyRange&& range);
 
         bool TryGetUse(GenTree* node, Use* use);
 
-        Range GetTreeRange(GenTree* root, bool* isClosed) const;
-        Range GetTreeRange(GenTree* root, bool* isClosed, unsigned* sideEffects) const;
-        Range GetRangeOfOperandTrees(GenTree* root, bool* isClosed, unsigned* sideEffects) const;
+        ReadOnlyRange GetTreeRange(GenTree* root, bool* isClosed) const;
+        ReadOnlyRange GetTreeRange(GenTree* root, bool* isClosed, unsigned* sideEffects) const;
+        ReadOnlyRange GetRangeOfOperandTrees(GenTree* root, bool* isClosed, unsigned* sideEffects) const;
 
 #ifdef DEBUG
-        bool ContainsNode(GenTree* node) const;
         bool CheckLIR(Compiler* compiler, bool checkUnusedValues = false) const;
 #endif
     };
 
 public:
+    static Range& AsRange(BasicBlock* block);
+
     static Range EmptyRange();
-    static Range AsRange(GenTree* firstNode, GenTree* lastNode);
-    static Range AsRange(Compiler* compiler, GenTree* tree);
     static Range SeqTree(Compiler* compiler, GenTree* tree);
-    static void DecRefCnts(Compiler* compiler, BasicBlock* block, const Range& range);
-
-    //------------------------------------------------------------------------
-    // LIR::AsRange: Constructs and returns an LIR::Range value given a value
-    //               of a type that provides the storage for the first and
-    //               last nodes of the range.
-    //
-    // TContainer must implement the folliwing methods:
-    //    GenTree** TContainer::FirstLIRNodeSlot();
-    //    GenTree** TContainer::LastLIRNodeSlot();
-    //
-    // Arguments:
-    //    container - The value that will provide the storage for the range's
-    //                first and last nodes.
-    //
-    // Return Value: The newly constructed range.
-    //
-    template<typename TContainer>
-    static Range AsRange(TContainer& container)
-    {
-        return Range(container->FirstLIRNodeSlot(), container->LastLIRNodeSlot());
-    }
-
-    //------------------------------------------------------------------------
-    // LIR::AsRange: See the overload of AsRange() above. This overload
-    //               accepts a pointer-typed argument so that the `this`
-    //               parameter of a calling member method can be provided as
-    //               the argument to `container`.
-    //
-    template<typename TContainer>
-    static Range AsRange(TContainer* container)
-    {
-        return Range(container->FirstLIRNodeSlot(), container->LastLIRNodeSlot());
-    }
+    static void DecRefCnts(Compiler* compiler, BasicBlock* block, const ReadOnlyRange& range);
 };
 
 #endif // _LIR_H_

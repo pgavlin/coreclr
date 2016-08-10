@@ -24,6 +24,9 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 
 #include "jit.h"
 #include "opcode.h"
+#include "varset.h"
+#include "gentree.h"
+#include "lir.h"
 #include "block.h"
 #include "inline.h"
 #include "jiteh.h"
@@ -32,7 +35,6 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 #include "sm.h"
 #include "simplerhash.h"
 #include "cycletimer.h"
-#include "varset.h"
 #include "blockset.h"
 #include "jitstd.h"
 #include "arraystack.h"
@@ -58,8 +60,6 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 #include "emit.h"
 
 #include "simd.h"
-
-#include "lir.h"
 
 // This is only used locally in the JIT to indicate that 
 // a verification block should be inserted 
@@ -120,7 +120,6 @@ void * __cdecl operator new(size_t n, void* p, const jitstd::placement_t& syntax
 /* This is included here and not earlier as it needs the definition of "CSE"
  * which is defined in the section above */
 
-#include "gentree.h"
 
 /*****************************************************************************/
 

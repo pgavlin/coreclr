@@ -29,6 +29,10 @@ public:
     void DecomposeBlock(BasicBlock* block);
     
 private:
+    inline LIR::Range& BlockRange() const
+    {
+        return LIR::AsRange(m_block);
+    }
 
     // Driver functions
     GenTree* DecomposeNode(LIR::Use& use);
@@ -55,7 +59,6 @@ private:
     // Data
     Compiler* m_compiler;
     BasicBlock* m_block;
-    LIR::Range m_blockRange;
 };
 
 #endif // _DECOMPOSELONGS_H_

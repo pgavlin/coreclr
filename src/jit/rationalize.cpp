@@ -491,16 +491,16 @@ void Rationalizer::RewriteInitBlk(LIR::Use& use)
     store->gtType = simdType;
     store->gtOp.gtOp1 = simdNode;
     store->gtFlags |= ((simdNode->gtFlags & GTF_ALL_EFFECT) | GTF_ASG);
-    m_range.Remove(store);
+    BlockRange().Remove(store);
 
     // Insert the new nodes into the block
-    m_range.InsertAfter(simdNode, initVal);
-    m_range.InsertAfter(store, simdNode);
+    BlockRange().InsertAfter(simdNode, initVal);
+    BlockRange().InsertAfter(store, simdNode);
     use.ReplaceWith(comp, store);
 
     // Remove the old size and GT_INITBLK nodes.
-    m_range.Remove(sizeNode);
-    m_range.Remove(initBlk);
+    BlockRange().Remove(sizeNode);
+    BlockRange().Remove(initBlk);
 
     JITDUMP("After rewriting SIMD InitBlk:\n");
     DISPTREE(use.Def());
@@ -567,7 +567,7 @@ void Rationalizer::RewriteCopyBlk(LIR::Use& use)
     var_types simdType = comp->getSIMDTypeForSize((unsigned int) sizeNode->IconValue());
 
     // Remove 'size' from execution order
-    m_range.Remove(sizeNode);
+    BlockRange().Remove(sizeNode);
 
     // Is destination a lclVar which is not an arg?
     // If yes then we can turn it to a stlcl.var, otherwise turn into stind.
@@ -594,7 +594,7 @@ void Rationalizer::RewriteCopyBlk(LIR::Use& use)
     if ((srcAddr->OperGet() == GT_ADDR) && varTypeIsSIMD(srcAddr->gtGetOp1()))
     {
         // Get rid of parent node of GT_ADDR(..) if its child happens to be of a SIMD type.
-        m_range.Remove(srcAddr);
+        BlockRange().Remove(srcAddr);
         simdSrc = srcAddr->gtGetOp1();
     }
     else if (srcIsSIMDAddr && srcAddr->OperIsLocalAddr())
@@ -615,7 +615,7 @@ void Rationalizer::RewriteCopyBlk(LIR::Use& use)
         // but setting them to a reasonable value based on the logic in gtSetEvalOrder().
         GenTree* indir = comp->gtNewOperNode(GT_IND, simdType, srcAddr);
         indir->SetCosts(IND_COST_EX, 2);
-        m_range.InsertAfter(indir, srcAddr);
+        BlockRange().InsertAfter(indir, srcAddr);
         
         cpBlk->gtGetOp1()->gtOp.gtOp2 = indir;
         simdSrc = indir;
@@ -641,8 +641,8 @@ void Rationalizer::RewriteCopyBlk(LIR::Use& use)
         store->gtType = simdType;
         store->gtFlags |= ((simdSrc->gtFlags & GTF_ALL_EFFECT) | GTF_ASG);
 
-        m_range.Remove(simdDst);
-        m_range.InsertAfter(store, simdSrc);
+        BlockRange().Remove(simdDst);
+        BlockRange().InsertAfter(store, simdSrc);
     }
     else
     {
@@ -657,11 +657,11 @@ void Rationalizer::RewriteCopyBlk(LIR::Use& use)
         storeInd->gtOp1 = simdDst;
         storeInd->gtOp2 = simdSrc;
 
-        m_range.InsertBefore(storeInd, cpBlk);
+        BlockRange().InsertBefore(storeInd, cpBlk);
     } 
 
     use.ReplaceWith(comp, newNode);
-    m_range.Remove(cpBlk);
+    BlockRange().Remove(cpBlk);
 
     JITDUMP("After rewriting SIMD CopyBlk:\n");
     DISPTREE(use.Def());
@@ -707,7 +707,7 @@ void Rationalizer::RewriteObj(LIR::Use& use)
     GenTree* srcAddr = obj->gtGetOp1();
     if (srcAddr->OperIsLocalAddr() && comp->isAddrOfSIMDType(srcAddr))
     {
-        m_range.Remove(obj);
+        BlockRange().Remove(obj);
 
         srcAddr->SetOper(loadForm(srcAddr->OperGet()));
         srcAddr->gtType = simdType;
@@ -1038,7 +1038,7 @@ void Rationalizer::RewriteAssignment(LIR::Use& use)
     case GT_REG_VAR:
     case GT_PHI_ARG:
         RewriteAssignmentIntoStoreLclCore(assignment, location, value, locationOp);
-        m_range.Remove(location);
+        BlockRange().Remove(location);
         break;
 
     case GT_IND:
@@ -1058,10 +1058,10 @@ void Rationalizer::RewriteAssignment(LIR::Use& use)
             // TODO: JIT dump
 
             // Remove the GT_IND node and replace the assignment node with the store
-            m_range.Remove(location);
-            m_range.InsertBefore(store, assignment);
+            BlockRange().Remove(location);
+            BlockRange().InsertBefore(store, assignment);
             use.ReplaceWith(comp, store);
-            m_range.Remove(assignment);
+            BlockRange().Remove(assignment);
         }
         break;
 
@@ -1113,7 +1113,7 @@ void Rationalizer::RewriteAddress(LIR::Use& use)
         copyFlags(location, address, GTF_ALL_EFFECT);
 
         use.ReplaceWith(comp, location);
-        m_range.Remove(address);
+        BlockRange().Remove(address);
     }
     else if (locationOp == GT_CLS_VAR)
     {
@@ -1122,15 +1122,15 @@ void Rationalizer::RewriteAddress(LIR::Use& use)
         copyFlags(location, address, GTF_ALL_EFFECT);
 
         use.ReplaceWith(comp, location);
-        m_range.Remove(address);
+        BlockRange().Remove(address);
 
         JITDUMP("Rewriting GT_ADDR(GT_CLS_VAR) to GT_CLS_VAR_ADDR:\n");
     }
     else if (locationOp == GT_IND)
     {
         use.ReplaceWith(comp, location->gtGetOp1());
-        m_range.Remove(location);
-        m_range.Remove(address);
+        BlockRange().Remove(location);
+        BlockRange().Remove(address);
 
         JITDUMP("Rewriting GT_ADDR(GT_IND(X)) to X:\n");
     }
@@ -1151,24 +1151,24 @@ Compiler::fgWalkResult Rationalizer::RewriteNode(GenTree** useEdge, ArrayStack<G
     // NOTE: GT_LIST nodes that are used by block ops and phi nodes will in fact be visited.
     for (GenTree* prev = node->gtPrev; prev != nullptr && prev->OperGet() == GT_LIST; prev = node->gtPrev)
     {
-        m_range.Remove(prev);
+        BlockRange().Remove(prev);
     }
 
     // In addition, remove the current node if it is a GT_LIST node.
     if ((*useEdge)->OperGet() == GT_LIST)
     {
-        m_range.Remove(*useEdge);
+        BlockRange().Remove(*useEdge);
         return Compiler::WALK_CONTINUE;
     }
 
     LIR::Use use;
     if (parentStack.Height() < 2)
     {
-        use = LIR::Use::GetDummyUse(m_range, *useEdge);
+        use = LIR::Use::GetDummyUse(BlockRange(), *useEdge);
     }
     else
     {
-        use = LIR::Use(m_range, useEdge, parentStack.Index(1));
+        use = LIR::Use(BlockRange(), useEdge, parentStack.Index(1));
     }
 
     assert(node == use.Def());
@@ -1181,7 +1181,7 @@ Compiler::fgWalkResult Rationalizer::RewriteNode(GenTree** useEdge, ArrayStack<G
     case GT_BOX:
         // GT_BOX at this level just passes through so get rid of it
         use.ReplaceWith(comp, node->gtGetOp1());
-        m_range.Remove(node);
+        BlockRange().Remove(node);
         break;
 
     case GT_ADDR:
@@ -1195,7 +1195,7 @@ Compiler::fgWalkResult Rationalizer::RewriteNode(GenTree** useEdge, ArrayStack<G
         if (node->gtGetOp1() != nullptr)
         {
             use.ReplaceWith(comp, node->gtGetOp1());
-            m_range.Remove(node);
+            BlockRange().Remove(node);
         }
         break;
 
@@ -1207,14 +1207,14 @@ Compiler::fgWalkResult Rationalizer::RewriteNode(GenTree** useEdge, ArrayStack<G
                 // The LHS has no side effects. Remove it.
                 bool isClosed = false;
                 unsigned sideEffects = 0;
-                LIR::Range lhsRange = m_range.GetTreeRange(op1, &isClosed, &sideEffects);
+                LIR::ReadOnlyRange lhsRange = BlockRange().GetTreeRange(op1, &isClosed, &sideEffects);
 
                 // None of the transforms performed herein violate tree order, so these
                 // should always be true.
                 assert(isClosed);
                 assert((sideEffects & GTF_ALL_EFFECT) == 0);
 
-                m_range.Remove(lhsRange);
+                BlockRange().Remove(std::move(lhsRange));
 
                 LIR::DecRefCnts(comp, m_block, lhsRange);
             }
@@ -1232,20 +1232,20 @@ Compiler::fgWalkResult Rationalizer::RewriteNode(GenTree** useEdge, ArrayStack<G
                 {
                     bool isClosed = false;
                     unsigned sideEffects = 0;
-                    LIR::Range rhsRange = m_range.GetTreeRange(replacement, &isClosed, &sideEffects);
+                    LIR::ReadOnlyRange rhsRange = BlockRange().GetTreeRange(replacement, &isClosed, &sideEffects);
 
                     // None of the transforms performed herein violate tree order, so these
                     // should always be true.
                     assert(isClosed);
                     assert((sideEffects & GTF_ALL_EFFECT) == 0);
 
-                    m_range.Remove(rhsRange);
+                    BlockRange().Remove(std::move(rhsRange));
 
                     LIR::DecRefCnts(comp, m_block, rhsRange);
                 }
             }
 
-            m_range.Remove(node);
+            BlockRange().Remove(node);
         }
         break;
 
@@ -1253,7 +1253,7 @@ Compiler::fgWalkResult Rationalizer::RewriteNode(GenTree** useEdge, ArrayStack<G
         // Remove argplace and list nodes from the execution order.
         //
         // TODO: remove phi args and phi nodes as well?
-        m_range.Remove(node);
+        BlockRange().Remove(node);
         break;
 
 #ifdef _TARGET_XARCH_
@@ -1273,7 +1273,7 @@ Compiler::fgWalkResult Rationalizer::RewriteNode(GenTree** useEdge, ArrayStack<G
                 node->SetOper(GT_CLS_VAR_ADDR);
                 node->gtType = TYP_BYREF;
 
-                m_range.InsertAfter(ind, node);
+                BlockRange().InsertAfter(ind, node);
                 use.ReplaceWith(comp, ind);
 
                 // TODO: JIT dump
@@ -1360,10 +1360,10 @@ Compiler::fgWalkResult Rationalizer::RewriteNode(GenTree** useEdge, ArrayStack<G
                 address->CopyCosts(simdNode);
                 ind->CopyCosts(simdNode);
 
-                m_range.InsertBefore(address, simdNode);
-                m_range.InsertBefore(ind, simdNode);
+                BlockRange().InsertBefore(address, simdNode);
+                BlockRange().InsertBefore(ind, simdNode);
                 use.ReplaceWith(comp, ind);
-                m_range.Remove(simdNode);
+                BlockRange().Remove(simdNode);
 
                 //DISPTREE(tmpState->root);
                 //JITDUMP("\n");
@@ -1400,7 +1400,7 @@ Compiler::fgWalkResult Rationalizer::RewriteNode(GenTree** useEdge, ArrayStack<G
         assert((node->gtFlags & GTF_ALL_EFFECT) == 0);
 
         comp->lvaDecRefCnts(node);
-        m_range.Remove(node);
+        BlockRange().Remove(node);
     }
 
     return Compiler::WALK_CONTINUE;
@@ -1426,7 +1426,7 @@ void Rationalizer::DoPhase()
         if (firstStatement == nullptr)
         {
             // No statements in this block; skip it.
-            assert(block->bbLastNode == nullptr);
+            block->MakeLIR(nullptr, nullptr);
             continue;
         }
 
@@ -1481,11 +1481,9 @@ void Rationalizer::DoPhase()
             lastNodeInPreviousStatement = statement->gtStmtExpr;
         }
 
-        block->bbTreeList = firstStatement->gtStmtList;
-        block->bbLastNode = lastStatement->gtStmtExpr;
+        block->MakeLIR(firstStatement->gtStmtList, lastStatement->gtStmtExpr);
 
         // Rewrite HIR nodes into LIR nodes.
-        m_range = LIR::AsRange(block);
         for (GenTreeStmt* statement = firstStatement, *nextStatement; statement != nullptr; statement = nextStatement)
         {
             nextStatement = statement->getNextStmt();
@@ -1499,7 +1497,7 @@ void Rationalizer::DoPhase()
                 statement->gtNext = nullptr;
                 statement->gtPrev = nullptr;
 
-                m_range.InsertBefore(statement, statement->gtStmtList);
+                BlockRange().InsertBefore(statement, statement->gtStmtList);
             }
 
             m_statement = statement;
@@ -1512,7 +1510,7 @@ void Rationalizer::DoPhase()
                 true);
         }
 
-        assert(m_range.CheckLIR(comp));
+        assert(BlockRange().CheckLIR(comp));
     }
 
     comp->compRationalIRForm = true;

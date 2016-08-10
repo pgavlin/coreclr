@@ -257,10 +257,14 @@ private:
     // Checks for memory conflicts in the instructions between childNode and parentNode, and returns true if childNode can be contained.
     bool IsSafeToContainMem(GenTree* parentNode, GenTree* childNode);
 
+    inline LIR::Range& BlockRange() const
+    {
+        return LIR::AsRange(m_block);
+    }
+
     LinearScan* m_lsra;
     unsigned vtableCallTemp; // local variable we use as a temp for vtable calls
     BasicBlock* m_block;
-    LIR::Range m_blockRange;    // The range of nodes in the current block.
 };
 
 #endif // _LOWER_H_

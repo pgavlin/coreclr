@@ -133,8 +133,7 @@ bool LIR::Use::IsInitialized() const
 void LIR::Use::AssertIsValid() const
 {
     assert(IsInitialized());
-    assert(m_range->IsValid());
-    assert(m_range->ContainsNode(m_user));
+    assert(m_range->Contains(m_user));
     assert(Def() != nullptr);
 
     GenTree** useEdge = nullptr;
@@ -196,8 +195,8 @@ void LIR::Use::ReplaceWith(Compiler* compiler, GenTree* replacement)
     assert(IsInitialized());
     assert(compiler != nullptr);
     assert(replacement != nullptr);
-    assert(IsDummyUse() || m_range->ContainsNode(m_user));
-    assert(m_range->ContainsNode(replacement));
+    assert(IsDummyUse() || m_range->Contains(m_user));
+    assert(m_range->Contains(replacement));
 
     GenTree* replacedNode = *m_edge;
 
@@ -262,8 +261,8 @@ unsigned LIR::Use::ReplaceWithLclVar(Compiler* compiler, unsigned blockWeight, u
 {
     assert(IsInitialized());
     assert(compiler != nullptr);
-    assert(m_range->ContainsNode(m_user));
-    assert(m_range->ContainsNode(*m_edge));
+    assert(m_range->Contains(m_user));
+    assert(m_range->Contains(*m_edge));
 
     GenTree* node = *m_edge;
 
@@ -292,225 +291,201 @@ unsigned LIR::Use::ReplaceWithLclVar(Compiler* compiler, unsigned blockWeight, u
     return lclNum;
 }
 
-LIR::Range::Range()
-    : m_firstNodeSlot(nullptr)
-    , m_lastNodeSlot(nullptr)
+LIR::ReadOnlyRange::ReadOnlyRange()
+    : m_firstNode(nullptr)
+    , m_lastNode(nullptr)
 {
 }
 
+LIR::ReadOnlyRange::ReadOnlyRange(ReadOnlyRange&& other)
+    : m_firstNode(other.m_firstNode)
+    , m_lastNode(other.m_lastNode)
+{
+#ifdef DEBUG
+    other.m_firstNode = nullptr;
+    other.m_lastNode = nullptr;
+#endif
+}
+
 //------------------------------------------------------------------------
-// LIR::Range::Range: Creates a `Range` value given two locations that
-//                    store the first and last node in the range.
+// LIR::ReadOnlyRange::ReadOnlyRange:
+//    Creates a `ReadOnlyRange` value given the first and last node in
+//    the range.
 //
 // Arguments:
-//    firstNodeSlot - The storage for the first node in the range.
-//    lastNodeSlot  - The storage for the last node in the range.
+//    firstNode - The first node in the range.
+//    lastNode  - The last node in the range.
 //
-LIR::Range::Range(GenTree** firstNodeSlot, GenTree** lastNodeSlot)
-    : m_firstNodeSlot(firstNodeSlot)
-    , m_lastNodeSlot(lastNodeSlot)
-    , m_isSimpleRange(false)
+LIR::ReadOnlyRange::ReadOnlyRange(GenTree* firstNode, GenTree* lastNode)
+    : m_firstNode(firstNode)
+    , m_lastNode(lastNode)
 {
-    assert(firstNodeSlot != nullptr);
-    assert(lastNodeSlot != nullptr);
-    assert(firstNodeSlot != lastNodeSlot);
+    assert((m_firstNode == nullptr) == (m_lastNode == nullptr));
+    assert((m_firstNode == m_lastNode) || (Contains(m_lastNode)));
+}
 
-    assert((FirstNode() != nullptr) == (LastNode() != nullptr));
-    assert((FirstNode() == LastNode()) || ContainsNode(LastNode()));
+
+//------------------------------------------------------------------------
+// LIR::ReadOnlyRange::FirstNode: Returns the first node in the range.
+//
+GenTree* LIR::ReadOnlyRange::FirstNode() const
+{
+    return m_firstNode;
+}
+
+//------------------------------------------------------------------------
+// LIR::ReadOnlyRange::LastNode: Returns the last node in the range.
+//
+GenTree* LIR::ReadOnlyRange::LastNode() const
+{
+    return m_lastNode;
+}
+
+//------------------------------------------------------------------------
+// LIR::ReadOnlyRange::IsEmpty: Returns true if the range is empty; false
+//                              otherwise.
+//
+bool LIR::ReadOnlyRange::IsEmpty() const
+{
+    assert((m_firstNode == nullptr) == (m_lastNode == nullptr));
+    return m_firstNode == nullptr;
+}
+
+//------------------------------------------------------------------------
+// LIR::ReadOnlyRange::begin: Returns an iterator positioned at the first
+//                            node in the range.
+//
+LIR::ReadOnlyRange::Iterator LIR::ReadOnlyRange::begin() const
+{
+    return Iterator(m_firstNode);
+}
+
+//------------------------------------------------------------------------
+// LIR::ReadOnlyRange::end: Returns an iterator positioned after the last
+//                          node in the range.
+//
+LIR::ReadOnlyRange::Iterator LIR::ReadOnlyRange::end() const
+{
+    return Iterator(m_lastNode == nullptr ? nullptr : m_lastNode->gtNext);
+}
+
+//------------------------------------------------------------------------
+// LIR::ReadOnlyRange::rbegin: Returns an iterator positioned at the last
+//                             node in the range.
+//
+LIR::ReadOnlyRange::ReverseIterator LIR::ReadOnlyRange::rbegin() const
+{
+    return ReverseIterator(m_lastNode);
+}
+
+//------------------------------------------------------------------------
+// LIR::ReadOnlyRange::rend: Returns an iterator positioned before the first
+//                           node in the range.
+//
+LIR::ReadOnlyRange::ReverseIterator LIR::ReadOnlyRange::rend() const
+{
+    return ReverseIterator(m_firstNode == nullptr ? nullptr : m_firstNode->gtPrev);
+}
+
+#ifdef DEBUG
+
+//------------------------------------------------------------------------
+// LIR::ReadOnlyRange::Contains: Indicates whether or not this range
+//                               contains a given node.
+//
+// Arguments:
+//    node - The node to find.
+//
+// Return Value: True if this range contains the given node; false
+//               otherwise.
+//
+bool LIR::ReadOnlyRange::Contains(GenTree* node) const
+{
+    assert(node != nullptr);
+
+    // TODO(pdg): derive this from the # of nodes in the function as well as
+    // the debug level. Checking small functions is pretty cheap; checking
+    // large functions is not.
+    if (JitConfig.JitExpensiveDebugCheckLevel() < 2)
+    {
+        return true;
+    }
+
+    for (GenTree* n : *this)
+    {
+        if (n == node)
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+#endif
+
+LIR::Range::Range()
+    : ReadOnlyRange()
+{
+}
+
+LIR::Range::Range(Range&& other)
+    : ReadOnlyRange(std::move(other))
+{
 }
 
 //------------------------------------------------------------------------
 // LIR::Range::Range: Creates a `Range` value given the first and last
-//                    node in the range. When this constructor is called,
-//                    the Range itself will store the nodes.
+//                    node in the range.
 //
 // Arguments:
 //    firstNode - The first node in the range.
 //    lastNode  - The last node in the range.
 //
 LIR::Range::Range(GenTree* firstNode, GenTree* lastNode)
-    : m_firstNodeSlot(reinterpret_cast<GenTree**>(firstNode))
-    , m_lastNodeSlot(reinterpret_cast<GenTree**>(lastNode))
-    , m_isSimpleRange(true)
+    : ReadOnlyRange(firstNode, lastNode)
 {
-    assert((FirstNode() != nullptr) == (LastNode() != nullptr));
-    assert((FirstNode() == LastNode()) || ContainsNode(LastNode()));
 }
 
-
 //------------------------------------------------------------------------
-// LIR::Range::FirstNode: Returns a reference to the first node in the
-//                        range.
+// LIR::Range::LastPhiNode: Returns the last phi node in the range or
+//                          `nullptr` if no phis exist.
 //
-// Note: this method is private because it allows the caller to
-// subsequently modify the value stored in `m_firstNodeSlot`.
-//
-GenTree*& LIR::Range::FirstNode() const
+GenTree* LIR::Range::LastPhiNode() const
 {
-    assert(m_isSimpleRange || m_firstNodeSlot != nullptr);
-    if (!m_isSimpleRange)
+    GenTree* lastPhiNode = nullptr;
+    for (GenTree* node : *this)
     {
-        return *m_firstNodeSlot;
+        if (node->OperGet() == GT_PHI_ARG)
+        {
+            lastPhiNode = node;
+            continue;
+        }
+        else if (node->OperGet() == GT_PHI)
+        {
+            lastPhiNode = node;
+            continue;
+        }
+        else if (node->IsPhiDefn())
+        {
+            lastPhiNode = node;
+            continue;
+        }
+
+        break;
     }
 
-    return *reinterpret_cast<GenTree**>(&const_cast<Range*>(this)->m_firstNodeSlot);
-}
-
-//------------------------------------------------------------------------
-// LIR::Range::LastNode: Returns a reference to the last node in the
-//                       range.
-// Note: this method is private because it allows the caller to
-// subsequently modify the value stored in `m_lastNodeSlot`.
-//
-GenTree*& LIR::Range::LastNode() const
-{
-    assert(m_isSimpleRange || m_lastNodeSlot != nullptr);
-    if (!m_isSimpleRange)
-    {
-        return *m_lastNodeSlot;
-    }
-
-    return *reinterpret_cast<GenTree**>(&const_cast<Range*>(this)->m_lastNodeSlot);
-}
-
-//------------------------------------------------------------------------
-// LIR::Range::IsValid: Returns true if the `Range` value is valid.
-//
-// A `Range` is considered valid for the purposes of this method if its
-// storage has been initialized and it is either empty or has non-null
-// values for its first and last node. This method does not check whether
-// or not the first and last nodes actually define a range.
-//
-// Arguments:
-//     None.
-//
-// Return Value:
-//     'true' if the Range is valid.
-//
-bool LIR::Range::IsValid() const
-{
-    if ((m_firstNodeSlot == nullptr) || (m_lastNodeSlot == nullptr))
-    {
-        return false;
-    }
-
-    if (IsEmpty())
-    {
-        return true;
-    }
-
-    if ((FirstNode() == nullptr) || (LastNode() == nullptr))
-    {
-        return false;
-    }
-
-    return true;
-}
-
-//------------------------------------------------------------------------
-// LIR::Range::IsEmpty: Returns true if the range is empty; false
-//                      otherwise.
-//
-bool LIR::Range::IsEmpty() const
-{
-    if (FirstNode() == nullptr)
-    {
-        assert(LastNode() == nullptr);
-        return true;
-    }
-    else
-    {
-        return false;
-    }
-}
-
-//------------------------------------------------------------------------
-// LIR::Range::IsSubRange: Returns true if the range is a subsequence of
-//                         another range; false otherwise.
-//
-bool LIR::Range::IsSubRange() const
-{
-    return !IsEmpty() && ((FirstNode()->gtPrev != nullptr) || (LastNode()->gtNext != nullptr));
-}
-
-//------------------------------------------------------------------------
-// LIR::Range::Begin: Returns the first node in the range.
-//
-GenTree* LIR::Range::Begin() const
-{
-    return FirstNode();
-}
-
-//------------------------------------------------------------------------
-// LIR::Range::End: Returns a value that can be used during iteration to
-//                  find the end of the range. Note that this value is not
-//                  the last node in the range; rather, it is the node
-//                  that follows the last node or null.
-//
-GenTree* LIR::Range::End() const
-{
-    return IsEmpty() ? nullptr : LastNode()->gtNext;
-}
-
-
-//------------------------------------------------------------------------
-// LIR::Range::EndExclusive: Returns a value that can be used during iteration to
-//                  find the end of the range, but exclusive of the last element
-//                  of the range (that is, the last element will not be included
-//                  in the iteration).
-//
-GenTree* LIR::Range::EndExclusive() const
-{
-    return IsEmpty() ? nullptr : LastNode();
-}
-
-//------------------------------------------------------------------------
-// LIR::Range::begin: Returns an iterator positioned at the first node in
-//                    the range.
-//
-LIR::Range::Iterator LIR::Range::begin() const
-{
-    return Iterator(Begin());
-}
-
-//------------------------------------------------------------------------
-// LIR::Range::end: Returns an iterator positioned at the last node in the
-//                  range.
-//
-LIR::Range::Iterator LIR::Range::end() const
-{
-    return Iterator(End());
-}
-
-//------------------------------------------------------------------------
-// LIR::Range::rbegin: Returns an iterator positioned at the last node in
-//                    the range.
-//
-LIR::Range::ReverseIterator LIR::Range::rbegin() const
-{
-    return ReverseIterator(EndExclusive());
-}
-
-//------------------------------------------------------------------------
-// LIR::Range::rend: Returns an iterator positioned at the first node in the
-//                  range.
-//
-LIR::Range::ReverseIterator LIR::Range::rend() const
-{
-    GenTree* theEnd = IsEmpty() ? nullptr : Begin()->gtPrev;
-    return ReverseIterator(theEnd);
+    return lastPhiNode;
 }
 
 //------------------------------------------------------------------------
 // LIR::Range::FirstNonPhiNode: Returns the first non-phi node in the
-//                              range.
+//                              range or `nullptr` if no non-phi nodes
+//                              exist.
 //
 GenTree* LIR::Range::FirstNonPhiNode() const
 {
-    assert(IsValid());
-
-    GenTree* node, *end;
-    for (node = Begin(), end = End(); node != end; node = node->gtNext)
+    for (GenTree* node : *this)
     {
         if (node->OperGet() == GT_PHI_ARG)
         {
@@ -525,10 +500,10 @@ GenTree* LIR::Range::FirstNonPhiNode() const
             continue;
         }
 
-        break;
+        return node;
     }
 
-    return node;
+    return nullptr;
 }
 
 //------------------------------------------------------------------------
@@ -538,10 +513,7 @@ GenTree* LIR::Range::FirstNonPhiNode() const
 //
 GenTree* LIR::Range::FirstNonPhiOrCatchArgNode() const
 {
-    assert(IsValid());
-
-    GenTree* node, *end;
-    for (node = FirstNonPhiNode(), end = End(); node != end; node = node->gtNext)
+    for (GenTree* node : NonPhiNodes())
     {
         if (node->OperGet() == GT_CATCH_ARG)
         {
@@ -552,10 +524,39 @@ GenTree* LIR::Range::FirstNonPhiOrCatchArgNode() const
             continue;
         }
 
-        break;
+        return node;
     }
 
-    return node;
+    return nullptr;
+}
+
+//------------------------------------------------------------------------
+// LIR::Range::PhiNodes: Returns the range of phi nodes inside this range.
+//
+LIR::ReadOnlyRange LIR::Range::PhiNodes() const
+{
+    GenTree* lastPhiNode = LastPhiNode();
+    if (lastPhiNode == nullptr)
+    {
+        return ReadOnlyRange();
+    }
+
+    return ReadOnlyRange(m_firstNode, lastPhiNode);
+}
+
+//------------------------------------------------------------------------
+// LIR::Range::PhiNodes: Returns the range of non-phi nodes inside this
+//                       range.
+//
+LIR::ReadOnlyRange LIR::Range::NonPhiNodes() const
+{
+    GenTree* firstNonPhiNode = FirstNonPhiNode();
+    if (firstNonPhiNode == nullptr)
+    {
+        return ReadOnlyRange();
+    }
+
+    return ReadOnlyRange(firstNonPhiNode, m_lastNode);
 }
 
 //------------------------------------------------------------------------
@@ -578,15 +579,14 @@ void LIR::Range::InsertBefore(GenTree* node, GenTree* insertionPoint)
 
     if (insertionPoint == nullptr)
     {
-        assert(FirstNode() == nullptr);
-        assert(LastNode() == nullptr);
+        assert(IsEmpty());
 
-        FirstNode() = node;
-        LastNode() = node;
+        m_firstNode = node;
+        m_lastNode = node;
         return;
     }
 
-    assert(ContainsNode(insertionPoint));
+    assert(Contains(insertionPoint));
 
     node->gtPrev = insertionPoint->gtPrev;
     if (node->gtPrev != nullptr)
@@ -595,8 +595,8 @@ void LIR::Range::InsertBefore(GenTree* node, GenTree* insertionPoint)
     }
     else
     {
-        assert(insertionPoint == FirstNode());
-        FirstNode() = node;
+        assert(insertionPoint == m_firstNode);
+        m_firstNode = node;
     }
 
     node->gtNext = insertionPoint;
@@ -623,15 +623,14 @@ void LIR::Range::InsertAfter(GenTree* node, GenTree* insertionPoint)
 
     if (insertionPoint == nullptr)
     {
-        assert(FirstNode() == nullptr);
-        assert(LastNode() == nullptr);
+        assert(IsEmpty());
 
-        FirstNode() = node;
-        LastNode() = node;
+        m_firstNode = node;
+        m_lastNode = node;
         return;
     }
 
-    assert(ContainsNode(insertionPoint));
+    assert(Contains(insertionPoint));
 
     node->gtNext = insertionPoint->gtNext;
     if (node->gtNext != nullptr)
@@ -640,8 +639,8 @@ void LIR::Range::InsertAfter(GenTree* node, GenTree* insertionPoint)
     }
     else
     {
-        assert(insertionPoint == LastNode());
-        LastNode() = node;
+        assert(insertionPoint == m_lastNode);
+        m_lastNode = node;
     }
 
     node->gtPrev = insertionPoint;
@@ -660,36 +659,34 @@ void LIR::Range::InsertAfter(GenTree* node, GenTree* insertionPoint)
 //                     the contents of `this` range will be set to those of
 //                     `range`.
 //
-void LIR::Range::InsertBefore(const Range& range, GenTree* insertionPoint)
+void LIR::Range::InsertBefore(Range&& range, GenTree* insertionPoint)
 {
     assert(!range.IsEmpty());
-    assert(!range.IsSubRange());
 
     if (insertionPoint == nullptr)
     {
-        assert(FirstNode() == nullptr);
-        assert(LastNode() == nullptr);
+        assert(IsEmpty());
 
-        FirstNode() = range.FirstNode();
-        LastNode() = range.LastNode();
+        m_firstNode = range.m_firstNode;
+        m_lastNode = range.m_lastNode;
         return;
     }
 
-    assert(ContainsNode(insertionPoint));
+    assert(Contains(insertionPoint));
 
     if (insertionPoint->gtPrev == nullptr)
     {
-        assert(insertionPoint == FirstNode());
-        FirstNode() = range.FirstNode();
+        assert(insertionPoint == m_firstNode);
+        m_firstNode = range.m_firstNode;
     }
     else
     {
-        range.FirstNode()->gtPrev = insertionPoint->gtPrev;
-        range.FirstNode()->gtPrev->gtNext = range.FirstNode();
+        range.m_firstNode->gtPrev = insertionPoint->gtPrev;
+        range.m_firstNode->gtPrev->gtNext = range.m_firstNode;
     }
 
-    range.LastNode()->gtNext = insertionPoint;
-    insertionPoint->gtPrev = range.LastNode();
+    range.m_lastNode->gtNext = insertionPoint;
+    insertionPoint->gtPrev = range.m_lastNode;
 }
 
 //------------------------------------------------------------------------
@@ -704,36 +701,35 @@ void LIR::Range::InsertBefore(const Range& range, GenTree* insertionPoint)
 //                     the contents of `this` range will be set to those of
 //                     `range`.
 //
-void LIR::Range::InsertAfter(const Range& range, GenTree* insertionPoint)
+void LIR::Range::InsertAfter(Range&& range, GenTree* insertionPoint)
 {
     assert(!range.IsEmpty());
-    assert(!range.IsSubRange());
 
     if (insertionPoint == nullptr)
     {
-        assert(FirstNode() == nullptr);
-        assert(LastNode() == nullptr);
+        assert(m_firstNode == nullptr);
+        assert(m_lastNode == nullptr);
 
-        FirstNode() = range.FirstNode();
-        LastNode() = range.LastNode();
+        m_firstNode = range.m_firstNode;
+        m_lastNode = range.m_lastNode;
         return;
     }
 
-    assert(ContainsNode(insertionPoint));
+    assert(Contains(insertionPoint));
 
     if (insertionPoint->gtNext == nullptr)
     {
-        assert(insertionPoint == LastNode());
-        LastNode() = range.LastNode();
+        assert(insertionPoint == m_lastNode);
+        m_lastNode = range.m_lastNode;
     }
     else
     {
-        range.LastNode()->gtNext = insertionPoint->gtNext;
-        range.LastNode()->gtNext->gtPrev = range.LastNode();
+        range.m_lastNode->gtNext = insertionPoint->gtNext;
+        range.m_lastNode->gtNext->gtPrev = range.m_lastNode;
     }
 
-    range.FirstNode()->gtPrev = insertionPoint;
-    insertionPoint->gtNext = range.FirstNode();
+    range.m_firstNode->gtPrev = insertionPoint;
+    insertionPoint->gtNext = range.m_firstNode;
 }
 
 //------------------------------------------------------------------------
@@ -744,7 +740,7 @@ void LIR::Range::InsertAfter(const Range& range, GenTree* insertionPoint)
 //
 void LIR::Range::InsertAtBeginning(GenTree* node)
 {
-    InsertBefore(node, FirstNode());
+    InsertBefore(node, m_firstNode);
 }
 
 //------------------------------------------------------------------------
@@ -755,7 +751,7 @@ void LIR::Range::InsertAtBeginning(GenTree* node)
 //
 void LIR::Range::InsertAtEnd(GenTree* node)
 {
-    InsertAfter(node, LastNode());
+    InsertAfter(node, m_lastNode);
 }
 
 //------------------------------------------------------------------------
@@ -764,9 +760,9 @@ void LIR::Range::InsertAtEnd(GenTree* node)
 // Arguments:
 //    range - The range to splice in.
 //
-void LIR::Range::InsertAtBeginning(const Range& range)
+void LIR::Range::InsertAtBeginning(Range&& range)
 {
-    InsertBefore(range, FirstNode());
+    InsertBefore(std::move(range), m_firstNode);
 }
 
 //------------------------------------------------------------------------
@@ -775,9 +771,9 @@ void LIR::Range::InsertAtBeginning(const Range& range)
 // Arguments:
 //    range - The range to splice in.
 //
-void LIR::Range::InsertAtEnd(const Range& range)
+void LIR::Range::InsertAtEnd(Range&& range)
 {
-    InsertAfter(range, LastNode());
+    InsertAfter(std::move(range), m_lastNode);
 }
 
 
@@ -790,7 +786,7 @@ void LIR::Range::InsertAtEnd(const Range& range)
 void LIR::Range::Remove(GenTree* node)
 {
     assert(node != nullptr);
-    assert(ContainsNode(node));
+    assert(Contains(node));
 
     GenTree* prev = node->gtPrev;
     GenTree* next = node->gtNext;
@@ -801,8 +797,8 @@ void LIR::Range::Remove(GenTree* node)
     }
     else
     {
-        assert(node == FirstNode());
-        FirstNode() = next;
+        assert(node == m_firstNode);
+        m_firstNode = next;
     }
 
     if (next != nullptr)
@@ -811,8 +807,8 @@ void LIR::Range::Remove(GenTree* node)
     }
     else
     {
-        assert(node == LastNode());
-        LastNode() = prev;
+        assert(node == m_lastNode);
+        m_lastNode = prev;
     }
 
     node->gtPrev = nullptr;
@@ -822,16 +818,24 @@ void LIR::Range::Remove(GenTree* node)
 //------------------------------------------------------------------------
 // LIR::Range::Remove: Removes a subrange from this range.
 //
-// Arguments:
-//    range - The subrange to remove. Must be part of this range.
+// Both the start and the end of the subrange must be part of this range.
 //
-void LIR::Range::Remove(const Range& range)
+// Arguments:
+//    firstNode - The first node in the subrange.
+//    lastNode - The last node in the subrange.
+//
+// Returns:
+//    A mutable range containing the removed nodes.
+//
+LIR::Range LIR::Range::Remove(GenTree* firstNode, GenTree* lastNode)
 {
-    assert(!range.IsEmpty());
-    assert(ContainsNode(range.FirstNode()));
+    assert(firstNode != nullptr);
+    assert(lastNode != nullptr);
+    assert(Contains(firstNode));
+    assert((firstNode == lastNode) || firstNode->Precedes(lastNode));
 
-    GenTree* prev = range.FirstNode()->gtPrev;
-    GenTree* next = range.LastNode()->gtNext;
+    GenTree* prev = firstNode->gtPrev;
+    GenTree* next = lastNode->gtNext;
 
     if (prev != nullptr)
     {
@@ -839,8 +843,8 @@ void LIR::Range::Remove(const Range& range)
     }
     else
     {
-        assert(range.FirstNode() == FirstNode());
-        FirstNode() = next;
+        assert(firstNode == m_firstNode);
+        m_firstNode = next;
     }
 
     if (next != nullptr)
@@ -849,12 +853,28 @@ void LIR::Range::Remove(const Range& range)
     }
     else
     {
-        assert(range.LastNode() == LastNode());
-        LastNode() = prev;
+        assert(lastNode == m_lastNode);
+        m_lastNode = prev;
     }
 
-    range.FirstNode()->gtPrev = nullptr;
-    range.LastNode()->gtNext = nullptr;
+    firstNode->gtPrev = nullptr;
+    lastNode->gtNext = nullptr;
+
+    return Range(firstNode, lastNode);
+}
+
+//------------------------------------------------------------------------
+// LIR::Range::Remove: Removes a subrange from this range.
+//
+// Arguments:
+//    range - The subrange to remove. Must be part of this range.
+//
+// Returns:
+//    A mutable range containing the removed nodes.
+//
+LIR::Range LIR::Range::Remove(ReadOnlyRange&& range)
+{
+    return Remove(range.m_firstNode, range.m_lastNode);
 }
 
 //------------------------------------------------------------------------
@@ -871,14 +891,14 @@ bool LIR::Range::TryGetUse(GenTree* node, Use* use)
 {
     assert(node != nullptr);
     assert(use != nullptr);
-    assert(ContainsNode(node));
+    assert(Contains(node));
 
     // Don't bother looking for uses of nodes that are not values.
     // If the node is the last node, we won't find a use (and we would
     // end up creating an illegal range if we tried).
-    if (node->IsValue() && (node != EndExclusive()))
+    if (node->IsValue() && (node != LastNode()))
     {
-        for (GenTree* n : LIR::AsRange(node->gtNext, EndExclusive()))
+        for (GenTree* n : ReadOnlyRange(node->gtNext, m_lastNode))
         {
             GenTree** edge;
             if (n->TryGetUse(node, &edge))
@@ -935,7 +955,7 @@ bool LIR::Range::TryGetUse(GenTree* node, Use* use)
 // Returns:
 //    The computed subrange.
 //
-LIR::Range LIR::Range::GetMarkedRange(unsigned markCount, GenTree* start, bool* isClosed, unsigned* sideEffects) const
+LIR::ReadOnlyRange LIR::Range::GetMarkedRange(unsigned markCount, GenTree* start, bool* isClosed, unsigned* sideEffects) const
 {
     assert(markCount != 0);
     assert(start != nullptr);
@@ -1001,10 +1021,23 @@ LIR::Range LIR::Range::GetMarkedRange(unsigned markCount, GenTree* start, bool* 
 
     *isClosed = !sawUnmarkedNode;
     *sideEffects = sideEffectsInRange;
-    return LIR::Range(firstNode, lastNode);
+    return ReadOnlyRange(firstNode, lastNode);
 }
 
-LIR::Range LIR::Range::GetTreeRange(GenTree* root, bool* isClosed) const
+//------------------------------------------------------------------------
+// LIR::Range::GetTreeRange: Computes the subrange that includes all nodes
+//                           in the dataflow tree rooted at a particular
+//                           node.
+//
+// Arguments:
+//    root        - The root of the dataflow tree.
+//    isClosed    - An output parameter that is set to true if the returned
+//                  range contains only nodes in the dataflow tree and false
+//                  otherwise.
+//
+// Returns:
+//    The computed subrange.
+LIR::ReadOnlyRange LIR::Range::GetTreeRange(GenTree* root, bool* isClosed) const
 {
     unsigned unused;
     return GetTreeRange(root, isClosed, &unused);
@@ -1025,7 +1058,7 @@ LIR::Range LIR::Range::GetTreeRange(GenTree* root, bool* isClosed) const
 //
 // Returns:
 //    The computed subrange.
-LIR::Range LIR::Range::GetTreeRange(GenTree* root, bool* isClosed, unsigned* sideEffects) const
+LIR::ReadOnlyRange LIR::Range::GetTreeRange(GenTree* root, bool* isClosed, unsigned* sideEffects) const
 {
     assert(root != nullptr);
 
@@ -1036,7 +1069,23 @@ LIR::Range LIR::Range::GetTreeRange(GenTree* root, bool* isClosed, unsigned* sid
     return GetMarkedRange(markCount, root, isClosed, sideEffects);
 }
 
-LIR::Range LIR::Range::GetRangeOfOperandTrees(GenTree* root, bool* isClosed, unsigned* sideEffects) const
+//------------------------------------------------------------------------
+// LIR::Range::GetTreeRange: Computes the subrange that includes all nodes
+//                           in the dataflow trees rooted by the operands
+//                           to a particular node.
+//
+// Arguments:
+//    root        - The root of the dataflow tree.
+//    isClosed    - An output parameter that is set to true if the returned
+//                  range contains only nodes in the dataflow tree and false
+//                  otherwise.
+//    sideEffects - An output parameter that summarizes the side effects
+//                  contained in the returned range.
+//
+// Returns:
+//    The computed subrange.
+//
+LIR::ReadOnlyRange LIR::Range::GetRangeOfOperandTrees(GenTree* root, bool* isClosed, unsigned* sideEffects) const
 {
     assert(root != nullptr);
     assert(isClosed != nullptr);
@@ -1054,46 +1103,13 @@ LIR::Range LIR::Range::GetRangeOfOperandTrees(GenTree* root, bool* isClosed, uns
     {
         *isClosed = true;
         *sideEffects = 0;
-        return LIR::EmptyRange();
+        return ReadOnlyRange();
     }
 
     return GetMarkedRange(markCount, root, isClosed, sideEffects);
 }
 
 #ifdef DEBUG
-
-//------------------------------------------------------------------------
-// LIR::Range::ContainsNode: Indicates whether or not this range contains
-//                           a given node.
-//
-// Arguments:
-//    node - The node to find.
-//
-// Return Value: True if this range contains the given node; false
-//               otherwise.
-//
-bool LIR::Range::ContainsNode(GenTree* node) const
-{
-    assert(node != nullptr);
-
-    // TODO(pdg): derive this from the # of nodes in the function as well as
-    // the debug level. Checking small functions is pretty cheap; checking
-    // large functions is not.
-    if (JitConfig.JitExpensiveDebugCheckLevel() < 2)
-    {
-        return true;
-    }
-
-    for (GenTree* n : *this)
-    {
-        if (n == node)
-        {
-            return true;
-        }
-    }
-
-    return false;
-}
 
 //------------------------------------------------------------------------
 // LIR::Range::CheckLIR: Performs a set of correctness checks on the LIR
@@ -1120,13 +1136,6 @@ bool LIR::Range::ContainsNode(GenTree* node) const
 //
 bool LIR::Range::CheckLIR(Compiler* compiler, bool checkUnusedValues) const
 {
-    // Make sure the range itself is valid.
-    assert(IsValid());
-
-    // The check that uses are correctly linked into this range may fail
-    // erroneously if this range is a sub-range.
-    assert(!IsSubRange());
-
     if (IsEmpty())
     {
         // Nothing more to check.
@@ -1138,7 +1147,7 @@ bool LIR::Range::CheckLIR(Compiler* compiler, bool checkUnusedValues) const
     //
     // To detect circularity, use the "tortoise and hare" 2-pointer algorithm.
 
-    GenTree* slowNode = Begin();
+    GenTree* slowNode = FirstNode();
     assert(slowNode != nullptr);    // because it's a non-empty range
     GenTree* fastNode1 = nullptr;
     GenTree* fastNode2 = slowNode;
@@ -1242,7 +1251,7 @@ bool LIR::Range::CheckLIR(Compiler* compiler, bool checkUnusedValues) const
         }
     }
 
-    assert(prev == LastNode());
+    assert(prev == m_lastNode);
 
     // At this point the unusedDefs map should contain only unused values.
     if (checkUnusedValues)
@@ -1260,38 +1269,20 @@ bool LIR::Range::CheckLIR(Compiler* compiler, bool checkUnusedValues) const
 #endif // DEBUG
 
 //------------------------------------------------------------------------
+// LIR::AsRange: Returns an LIR view of the given basic block.
+//
+LIR::Range& LIR::AsRange(BasicBlock* block)
+{
+    return *static_cast<Range*>(block);
+}
+
+//------------------------------------------------------------------------
 // LIR::EmptyRange: Constructs and returns an empty range.
 //
 // static
 LIR::Range LIR::EmptyRange()
 {
-    return Range(static_cast<GenTree*>(nullptr), static_cast<GenTree*>(nullptr));
-}
-
-//------------------------------------------------------------------------
-// LIR::AsRange: Constructs and returns a range given a first and last
-//               node.
-//
-// Arguments:
-//    firstNode - The first node in the range. Must precede lastNode.
-//    lastNode - The last node in the range. Must follow firstNode.
-//
-// static
-LIR::Range LIR::AsRange(GenTree* firstNode, GenTree* lastNode)
-{
-    return Range(firstNode, lastNode);
-}
-
-//------------------------------------------------------------------------
-// LIR::AsRange: Constructs and returns a range given a sequenced HIR tree.
-//
-// Arguments:
-//    tree - The sequenced HIR tree.
-//
-// static
-LIR::Range LIR::AsRange(Compiler* compiler, GenTree* tree)
-{
-    return Range(compiler->fgGetFirstNode(tree), tree);
+    return Range(nullptr, nullptr);
 }
 
 //------------------------------------------------------------------------
@@ -1309,12 +1300,16 @@ LIR::Range LIR::AsRange(Compiler* compiler, GenTree* tree)
 // static
 LIR::Range LIR::SeqTree(Compiler* compiler, GenTree* tree)
 {
+    // TODO(pdg): it would be great to assert that the node has not already been
+    // threaded into an order, but I'm not sure that will be practical at this
+    // point.
+
     compiler->gtSetEvalOrder(tree);
-    return AsRange(compiler->fgSetTreeSeq(tree, nullptr, true), tree);
+    return Range(compiler->fgSetTreeSeq(tree, nullptr, true), tree);
 }
 
-// TODO(pdg): this should probably just be folded into LIR::Range::Remove(const Range& range);
-void LIR::DecRefCnts(Compiler* compiler, BasicBlock* block, const Range& range)
+// TODO(pdg): this should probably just be folded into LIR::Range::Remove(ReadOnlyRange& range);
+void LIR::DecRefCnts(Compiler* compiler, BasicBlock* block, const ReadOnlyRange& range)
 {
     for (GenTree* node : range)
     {
