@@ -1,5 +1,4 @@
-
-        // Licensed to the .NET Foundation under one or more agreements.
+// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for more information.
 
@@ -2087,11 +2086,12 @@ GenTree* Lowering::LowerDelegateInvoke(GenTreeCall* call)
                                                              nullptr,
                                                              0,
                                                              comp->eeGetEEInfo()->offsetOfDelegateInstance);
-    BlockRange().InsertAfter(originalThisExpr, newThisAddr);
 
     GenTree* newThis = comp->gtNewOperNode(GT_IND, TYP_REF, newThisAddr);
     newThis->SetCosts(IND_COST_EX, 2);
-    BlockRange().InsertAfter(newThisAddr, newThis);
+
+    BlockRange().InsertAfter(originalThisExpr, newThisAddr, newThis);
+
     thisArgNode->gtOp.gtOp1 = newThis;
 
     // the control target is
@@ -3528,8 +3528,7 @@ GenTree* Lowering::LowerArrElem(GenTree* node)
         // We do the address arithmetic in TYP_I_IMPL, though note that the lower bounds and lengths in memory are TYP_INT
         GenTreePtr scaleNode = new(comp, GT_CNS_INT) GenTreeIntCon(TYP_I_IMPL, scale);
         GenTreePtr mulNode = new(comp, GT_MUL) GenTreeOp(GT_MUL, TYP_I_IMPL, leaIndexNode, scaleNode); 
-        BlockRange().InsertBefore(insertionPoint, scaleNode);
-        BlockRange().InsertBefore(insertionPoint, mulNode);
+        BlockRange().InsertBefore(insertionPoint, scaleNode, mulNode);
         leaIndexNode = mulNode;
         scale = 1;
     }

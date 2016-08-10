@@ -9032,8 +9032,7 @@ void Compiler::fgSimpleLowering()
                         add->gtNext = tree;
                         tree->gtPrev = add;
 #else
-                        range.InsertAfter(arr, con);
-                        range.InsertAfter(con, add);
+                        range.InsertAfter(arr, con, add);
 #endif
                     }
 
@@ -13786,8 +13785,7 @@ bool Compiler::fgOptimizeSwitchBranches(BasicBlock* block)
 
         if (block->IsLIR())
         {
-            blockRange->InsertAfter(switchVal, zeroConstNode);
-            blockRange->InsertAfter(zeroConstNode, condNode);
+            blockRange->InsertAfter(switchVal, zeroConstNode, condNode);
         }
         else
         {

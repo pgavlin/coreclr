@@ -727,10 +727,7 @@ GenTree* DecomposeLongs::DecomposeStoreInd(LIR::Use& use)
 
     m_compiler->gtPrepareCost(storeIndHigh);
 
-    BlockRange().InsertAfter(storeIndLow, dataHigh);
-    BlockRange().InsertAfter(dataHigh, addrBaseHigh);
-    BlockRange().InsertAfter(addrBaseHigh, addrHigh);
-    BlockRange().InsertAfter(addrHigh, storeIndHigh);
+    BlockRange().InsertAfter(storeIndLow, dataHigh, addrBaseHigh, addrHigh, storeIndHigh);
 
     assert(BlockRange().CheckLIR(m_compiler));
 
@@ -810,10 +807,7 @@ GenTree* DecomposeLongs::DecomposeInd(LIR::Use& use)
 
     m_compiler->gtPrepareCost(indHigh);
 
-    // Insert the nodes into the block
-    BlockRange().InsertAfter(indLow, addrBaseHigh);
-    BlockRange().InsertAfter(addrBaseHigh, addrHigh);
-    BlockRange().InsertAfter(addrHigh, indHigh);
+    BlockRange().InsertAfter(indLow, addrBaseHigh, addrHigh, indHigh);
 
     return FinalizeDecomposition(use, indLow, indHigh);
 }
@@ -896,9 +890,7 @@ GenTree* DecomposeLongs::DecomposeNeg(LIR::Use& use)
     // Annotate new nodes with costs. This will re-cost the hiOp1 tree as well.
     m_compiler->gtPrepareCost(hiResult);
 
-    BlockRange().InsertAfter(loResult, zero);
-    BlockRange().InsertAfter(zero, hiAdjust);
-    BlockRange().InsertAfter(hiAdjust, hiResult);
+    BlockRange().InsertAfter(loResult, zero, hiAdjust, hiResult);
 
     return FinalizeDecomposition(use, loResult, hiResult);
 }
