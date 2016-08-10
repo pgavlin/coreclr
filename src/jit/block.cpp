@@ -504,6 +504,9 @@ void BasicBlock::CloneBlockState(Compiler* compiler, BasicBlock* to, const Basic
 // LIR helpers
 void BasicBlock::MakeLIR(GenTree* firstNode, GenTree* lastNode)
 {
+#ifdef LEGACY_BACKEND
+    unreached();
+#else // !LEGACY_BACKEND
     assert(!IsLIR());
     assert((firstNode == nullptr) == (lastNode == nullptr));
     assert((firstNode == lastNode) || firstNode->Precedes(lastNode));
@@ -511,13 +514,18 @@ void BasicBlock::MakeLIR(GenTree* firstNode, GenTree* lastNode)
     m_firstNode = firstNode;
     m_lastNode = lastNode;
     bbFlags |= BBF_IS_LIR;
+#endif // LEGACY_BACKEND
 }
 
 bool BasicBlock::IsLIR()
 {
+#ifdef LEGACY_BACKEND
+    return false;
+#else // !LEGACY_BACKEND
     const bool isLIR = (bbFlags & BBF_IS_LIR) != 0;
     assert((bbTreeList == nullptr) || ((isLIR) == !bbTreeList->IsStatement()));
     return isLIR;
+#endif // LEGACY_BACKEND
 }
 
 //------------------------------------------------------------------------

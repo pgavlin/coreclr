@@ -13365,10 +13365,12 @@ BasicBlock *        Compiler::bbNewBasicBlock(BBjumpKinds jumpKind)
         block->bbNum = ++fgBBNumMax;
     }
 
+#ifndef LEGACY_BACKEND
     if (compRationalIRForm)
     {
         block->bbFlags |= BBF_IS_LIR;
     }
+#endif // !LEGACY_BACKEND
 
     block->bbRefs     = 1;
     block->bbWeight   = BB_UNITY_WEIGHT;
