@@ -494,8 +494,8 @@ void Rationalizer::RewriteInitBlk(LIR::Use& use)
     BlockRange().Remove(store);
 
     // Insert the new nodes into the block
-    BlockRange().InsertAfter(simdNode, initVal);
-    BlockRange().InsertAfter(store, simdNode);
+    BlockRange().InsertAfter(initVal, simdNode);
+    BlockRange().InsertAfter(simdNode, store);
     use.ReplaceWith(comp, store);
 
     // Remove the old size and GT_INITBLK nodes.
@@ -615,7 +615,7 @@ void Rationalizer::RewriteCopyBlk(LIR::Use& use)
         // but setting them to a reasonable value based on the logic in gtSetEvalOrder().
         GenTree* indir = comp->gtNewOperNode(GT_IND, simdType, srcAddr);
         indir->SetCosts(IND_COST_EX, 2);
-        BlockRange().InsertAfter(indir, srcAddr);
+        BlockRange().InsertAfter(srcAddr, indir);
         
         cpBlk->gtGetOp1()->gtOp.gtOp2 = indir;
         simdSrc = indir;
@@ -642,7 +642,7 @@ void Rationalizer::RewriteCopyBlk(LIR::Use& use)
         store->gtFlags |= ((simdSrc->gtFlags & GTF_ALL_EFFECT) | GTF_ASG);
 
         BlockRange().Remove(simdDst);
-        BlockRange().InsertAfter(store, simdSrc);
+        BlockRange().InsertAfter(simdSrc, store);
     }
     else
     {
@@ -657,7 +657,7 @@ void Rationalizer::RewriteCopyBlk(LIR::Use& use)
         storeInd->gtOp1 = simdDst;
         storeInd->gtOp2 = simdSrc;
 
-        BlockRange().InsertBefore(storeInd, cpBlk);
+        BlockRange().InsertBefore(cpBlk, storeInd);
     } 
 
     use.ReplaceWith(comp, newNode);
@@ -1059,7 +1059,7 @@ void Rationalizer::RewriteAssignment(LIR::Use& use)
 
             // Remove the GT_IND node and replace the assignment node with the store
             BlockRange().Remove(location);
-            BlockRange().InsertBefore(store, assignment);
+            BlockRange().InsertBefore(assignment, store);
             use.ReplaceWith(comp, store);
             BlockRange().Remove(assignment);
         }
@@ -1273,7 +1273,7 @@ Compiler::fgWalkResult Rationalizer::RewriteNode(GenTree** useEdge, ArrayStack<G
                 node->SetOper(GT_CLS_VAR_ADDR);
                 node->gtType = TYP_BYREF;
 
-                BlockRange().InsertAfter(ind, node);
+                BlockRange().InsertAfter(node, ind);
                 use.ReplaceWith(comp, ind);
 
                 // TODO: JIT dump
@@ -1360,8 +1360,8 @@ Compiler::fgWalkResult Rationalizer::RewriteNode(GenTree** useEdge, ArrayStack<G
                 address->CopyCosts(simdNode);
                 ind->CopyCosts(simdNode);
 
-                BlockRange().InsertBefore(address, simdNode);
-                BlockRange().InsertBefore(ind, simdNode);
+                BlockRange().InsertBefore(simdNode, address);
+                BlockRange().InsertBefore(simdNode, ind);
                 use.ReplaceWith(comp, ind);
                 BlockRange().Remove(simdNode);
 
@@ -1497,7 +1497,7 @@ void Rationalizer::DoPhase()
                 statement->gtNext = nullptr;
                 statement->gtPrev = nullptr;
 
-                BlockRange().InsertBefore(statement, statement->gtStmtList);
+                BlockRange().InsertBefore(statement->gtStmtList, statement);
             }
 
             m_statement = statement;

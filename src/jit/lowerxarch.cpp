@@ -3312,7 +3312,7 @@ void Lowering::LowerCast(GenTree* tree)
 
         tree->gtFlags &= ~GTF_UNSIGNED;
         tree->gtOp.gtOp1 = tmp;
-        BlockRange().InsertAfter(tmp, op1);
+        BlockRange().InsertAfter(op1, tmp);
     }
 }
 
