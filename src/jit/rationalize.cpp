@@ -494,8 +494,7 @@ void Rationalizer::RewriteInitBlk(LIR::Use& use)
     BlockRange().Remove(store);
 
     // Insert the new nodes into the block
-    BlockRange().InsertAfter(initVal, simdNode);
-    BlockRange().InsertAfter(simdNode, store);
+    BlockRange().InsertAfter(initVal, simdNode, store);
     use.ReplaceWith(comp, store);
 
     // Remove the old size and GT_INITBLK nodes.

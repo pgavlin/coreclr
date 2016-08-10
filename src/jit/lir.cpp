@@ -277,11 +277,11 @@ unsigned LIR::Use::ReplaceWithLclVar(Compiler* compiler, unsigned blockWeight, u
 
     GenTreeLclVar* store = compiler->gtNewTempAssign(lclNum, node)->AsLclVar();
     store->CopyCosts(node);
-    m_range->InsertAfter(node, store);
 
     GenTree* load = new (compiler, GT_LCL_VAR) GenTreeLclVar(store->TypeGet(), store->AsLclVarCommon()->GetLclNum(), BAD_IL_OFFSET);
     compiler->gtPrepareCost(load);
-    m_range->InsertAfter(store, load);
+
+    m_range->InsertAfter(node, store, load);
 
     ReplaceWith(compiler, load);
 
@@ -645,6 +645,63 @@ void LIR::Range::InsertAfter(GenTree* insertionPoint, GenTree* node)
 
     node->gtPrev = insertionPoint;
     insertionPoint->gtNext = node;
+}
+
+//------------------------------------------------------------------------
+// LIR::Range::InsertAfter: Inserts 2 nodes after another node in this range.
+//
+// Arguments:
+//    insertionPoint - The node after which nodes will be inserted. Must be part of this range.
+//                     A null `insertionPoint` is allowed if the range is empty, in which case
+//                     the nodes will be inserted as the only nodes in the range.
+//    node1 - The first node to insert. Must not be part of any range.
+//    node2 - The second node to insert. Must not be part of any range. Inserted after node1.
+//
+void LIR::Range::InsertAfter(GenTree* insertionPoint, GenTree* node1, GenTree* node2)
+{
+    // TODO: Implement this directly, to avoid multiple updates to insertionPoint->gtNext->gtPrev.
+    InsertAfter(insertionPoint, node1);
+    InsertAfter(node1, node2);
+}
+
+//------------------------------------------------------------------------
+// LIR::Range::InsertAfter: Inserts 3 nodes after another node in this range.
+//
+// Arguments:
+//    insertionPoint - The node after which nodes will be inserted. Must be part of this range.
+//                     A null `insertionPoint` is allowed if the range is empty, in which case
+//                     the nodes will be inserted as the only nodes in the range.
+//    node1 - The first node to insert. Must not be part of any range.
+//    node2 - The second node to insert. Must not be part of any range. Inserted after node1.
+//    node3 - The third node to insert. Must not be part of any range. Inserted after node2.
+//
+void LIR::Range::InsertAfter(GenTree* insertionPoint, GenTree* node1, GenTree* node2, GenTree* node3)
+{
+    // TODO: Implement this directly, to avoid multiple updates to insertionPoint->gtNext->gtPrev.
+    InsertAfter(insertionPoint, node1);
+    InsertAfter(node1, node2);
+    InsertAfter(node2, node3);
+}
+
+//------------------------------------------------------------------------
+// LIR::Range::InsertAfter: Inserts 4 nodes after another node in this range.
+//
+// Arguments:
+//    insertionPoint - The node after which nodes will be inserted. Must be part of this range.
+//                     A null `insertionPoint` is allowed if the range is empty, in which case
+//                     the nodes will be inserted as the only nodes in the range.
+//    node1 - The first node to insert. Must not be part of any range.
+//    node2 - The second node to insert. Must not be part of any range. Inserted after node1.
+//    node3 - The third node to insert. Must not be part of any range. Inserted after node2.
+//    node4 - The fourth node to insert. Must not be part of any range. Inserted after node3.
+//
+void LIR::Range::InsertAfter(GenTree* insertionPoint, GenTree* node1, GenTree* node2, GenTree* node3, GenTree* node4)
+{
+    // TODO: Implement this directly, to avoid multiple updates to insertionPoint->gtNext->gtPrev.
+    InsertAfter(insertionPoint, node1);
+    InsertAfter(node1, node2);
+    InsertAfter(node2, node3);
+    InsertAfter(node3, node4);
 }
 
 //------------------------------------------------------------------------
