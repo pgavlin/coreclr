@@ -262,6 +262,10 @@ public:
         void InsertBefore(GenTree* insertionPoint, GenTree* node);
         void InsertAfter(GenTree* insertionPoint, GenTree* node);
 
+        void InsertBefore(GenTree* insertionPoint, GenTree* node1, GenTree* node2);
+        void InsertBefore(GenTree* insertionPoint, GenTree* node1, GenTree* node2, GenTree* node3);
+        void InsertBefore(GenTree* insertionPoint, GenTree* node1, GenTree* node2, GenTree* node3, GenTree* node4);
+
         void InsertAfter(GenTree* insertionPoint, GenTree* node1, GenTree* node2);
         void InsertAfter(GenTree* insertionPoint, GenTree* node1, GenTree* node2, GenTree* node3);
         void InsertAfter(GenTree* insertionPoint, GenTree* node1, GenTree* node2, GenTree* node3, GenTree* node4);

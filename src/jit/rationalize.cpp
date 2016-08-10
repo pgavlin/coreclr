@@ -1359,8 +1359,7 @@ Compiler::fgWalkResult Rationalizer::RewriteNode(GenTree** useEdge, ArrayStack<G
                 address->CopyCosts(simdNode);
                 ind->CopyCosts(simdNode);
 
-                BlockRange().InsertBefore(simdNode, address);
-                BlockRange().InsertBefore(simdNode, ind);
+                BlockRange().InsertBefore(simdNode, address, ind);
                 use.ReplaceWith(comp, ind);
                 BlockRange().Remove(simdNode);
 
