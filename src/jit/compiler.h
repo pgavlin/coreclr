@@ -2115,13 +2115,9 @@ public:
                                              IndentStack*           indentStack);
     void                    gtDispFieldSeq  (FieldSeqNode*          pfsn);
 
-    GenTreePtr              gtDispLinearTree(GenTreeStmt*           curStmt,
-                                             GenTreePtr             nextLinearNode,
-                                             GenTreePtr             tree,
-                                             IndentStack*           indentStack,
-                                             __in_opt const char*   msg = nullptr);
-    GenTreePtr              gtDispLinearStmt(GenTreeStmt*           stmt,
-                                             IndentStack*           indentStack = nullptr);
+    void                    gtDispRange     (LIR::ReadOnlyRange const & range);
+
+    void                    gtDispTreeRange (LIR::Range& containingRange, GenTree* tree);
 
     void                    gtDispLIRNode   (GenTree*               node);
 #endif

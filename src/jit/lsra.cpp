@@ -3913,7 +3913,6 @@ LinearScan::insertZeroInitRefPositions()
 
             GenTree * firstStmt = getNonEmptyBlock(compiler->fgFirstBB)->bbTreeList;
             JITDUMP("V%02u was live in\n", varNum);
-            DISPTREE(firstStmt);
             Interval * interval = getIntervalForLocalVar(varNum);
             RefPosition * pos = newRefPosition(interval, MinLocation, RefTypeZeroInit, firstStmt, 
                                                allRegs(interval->registerType));

@@ -501,7 +501,9 @@ void JitDump(const char* pcFormat, ...);
 #define JITLOG_THIS(t, x) { (t)->JitLogEE x; }
 #define DBEXEC(flg, expr) if (flg) {expr;}
 #define DISPNODE(t) if (JitTls::GetCompiler()->verbose) JitTls::GetCompiler()->gtDispTree(t, nullptr, nullptr, true);
-#define DISPTREE(x) if (JitTls::GetCompiler()->verbose) JitTls::GetCompiler()->gtDispTree(x)
+#define DISPTREE(t) if (JitTls::GetCompiler()->verbose) JitTls::GetCompiler()->gtDispTree(t);
+#define DISPRANGE(range) if (JitTls::GetCompiler()->verbose) JitTls::GetCompiler()->gtDispRange(range);
+#define DISPTREERANGE(range, t) if (JitTls::GetCompiler()->verbose) JitTls::GetCompiler()->gtDispTreeRange(range, t);
 #define VERBOSE JitTls::GetCompiler()->verbose
 #else // !DEBUG
 #define JITDUMP(...)

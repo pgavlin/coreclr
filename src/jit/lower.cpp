@@ -1153,7 +1153,7 @@ void Lowering::LowerCall(GenTree* node)
     GenTreeCall* call = node->AsCall();
 
     JITDUMP("lowering call (before):\n");
-    DISPTREE(call);
+    DISPTREERANGE(BlockRange(), call);
     JITDUMP("\n");
     
     LowerArgsForCall(call);
@@ -1230,7 +1230,7 @@ void Lowering::LowerCall(GenTree* node)
         LIR::Range resultRange = LIR::SeqTree(comp, result);
 
         JITDUMP("results of lowering call:\n");
-        DISPTREE(result);
+        DISPRANGE(resultRange);
 
         GenTree* insertionPoint = call;
         if (!call->IsTailCallViaHelper())
@@ -1273,7 +1273,7 @@ void Lowering::LowerCall(GenTree* node)
     }
 
     JITDUMP("lowering call (after):\n");
-    DISPTREE(call);
+    DISPTREERANGE(BlockRange(), call);
     JITDUMP("\n");
 }
 
@@ -1870,7 +1870,7 @@ void Lowering::LowerJmpMethod(GenTree* jmp)
     assert(jmp->OperGet() == GT_JMP);
 
     JITDUMP("lowering GT_JMP\n");
-    DISPTREE(jmp);
+    DISPNODE(jmp);
     JITDUMP("============");
 
     // If PInvokes are in-lined, we have to remember to execute PInvoke method epilog anywhere that
@@ -1887,7 +1887,7 @@ void Lowering::LowerRet(GenTree* ret)
     assert(ret->OperGet() == GT_RETURN);
 
     JITDUMP("lowering GT_RETURN\n");
-    DISPTREE(ret);
+    DISPNODE(ret);
     JITDUMP("============");
 
     // Method doing PInvokes has exactly one return block unless it has tail calls.
@@ -2329,7 +2329,7 @@ void Lowering::InsertPInvokeMethodProlog()
     comp->fgMorphTree(store);
     firstBlockRange.InsertBefore(insertionPoint, LIR::SeqTree(comp, store));
 
-    DISPTREE(store);
+    DISPTREERANGE(firstBlockRange, store);
 
 #ifndef _TARGET_X86_ // For x86, this step is done at the call site (due to stack pointer not being static in the function).
 
@@ -2343,7 +2343,7 @@ void Lowering::InsertPInvokeMethodProlog()
 
     firstBlockRange.InsertBefore(insertionPoint, LIR::SeqTree(comp, storeSP));
 
-    DISPTREE(storeSP);
+    DISPTREERANGE(firstBlockRange, storeSP);
 
 #endif // !_TARGET_X86_
 
@@ -2357,7 +2357,7 @@ void Lowering::InsertPInvokeMethodProlog()
 
     firstBlockRange.InsertBefore(insertionPoint, LIR::SeqTree(comp, storeFP));
 
-    DISPTREE(storeFP);
+    DISPTREERANGE(firstBlockRange, storeFP);
 
     // --------------------------------------------------------
 
@@ -2367,7 +2367,7 @@ void Lowering::InsertPInvokeMethodProlog()
         // The init routine sets InlinedCallFrame's m_pNext, so we just set the thead's top-of-stack
         GenTree* frameUpd = CreateFrameLinkUpdate(PushFrame);
         firstBlockRange.InsertBefore(insertionPoint, LIR::SeqTree(comp, frameUpd));
-        DISPTREE(frameUpd);
+        DISPTREERANGE(firstBlockRange, frameUpd);
     }
 }
 
@@ -3460,7 +3460,7 @@ GenTree* Lowering::LowerArrElem(GenTree* node)
 
     JITDUMP("Lowering ArrElem\n");
     JITDUMP("============\n");
-    DISPTREE(arrElem);
+    DISPTREERANGE(BlockRange(), arrElem);
     JITDUMP("\n");
 
     assert(arrElem->gtArrObj->TypeGet() == TYP_REF);
@@ -3550,7 +3550,7 @@ GenTree* Lowering::LowerArrElem(GenTree* node)
     BlockRange().Remove(arrElem);
 
     JITDUMP("Results of lowering ArrElem:\n");
-    DISPTREE(leaNode);
+    DISPTREERANGE(BlockRange(), leaNode);
     JITDUMP("\n\n");
 
     return leaNode;

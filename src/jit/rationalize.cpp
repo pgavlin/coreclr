@@ -8,52 +8,6 @@
 #pragma hdrstop
 #endif
 
-#ifdef DEBUG
-
-void dumpMethod()
-{
-    if (VERBOSE)
-        JitTls::GetCompiler()->fgDispBasicBlocks(true);
-}
-
-void dumpTreeStack(Compiler *comp, ArrayStack<GenTree *> *stack)
-{
-    printf("=TOS=================\n");
-    for (int i=0; i<stack->Height(); i++)
-    {
-        const bool isLIR = false;
-        comp->gtDispNode(stack->Index(i), 0, "", isLIR);
-        printf("\n");
-    }
-    printf("=====================\n");
-}
-
-void dumpArgTable(Compiler *comp, GenTree *call)
-{
-    noway_assert(call->IsCall());
-    fgArgInfoPtr argInfo = call->gtCall.fgArgInfo;
-    noway_assert(argInfo != NULL);
-
-    unsigned            argCount = argInfo->ArgCount();
-    fgArgTabEntryPtr *  argTable = argInfo->ArgTable();
-    fgArgTabEntryPtr    curArgTabEntry = NULL; 
-
-    JITDUMP("ARG TABLE for call ");
-    Compiler::printTreeID(call);
-    JITDUMP(":\n");
-    for (unsigned i=0; i < argCount; i++)
-    {
-        curArgTabEntry = argTable[i];
-        JITDUMP("entry %d\n", i);
-        DISPTREE(curArgTabEntry->node);
-    }
-    JITDUMP("--------------ARG TABLE END --------------\n");
-}
-
-#endif // DEBUG
-
-
-
 // state carried over the tree walk, to be used in making
 // a splitting decision.
 struct SplitData
@@ -167,7 +121,6 @@ void Compiler::fgFixupIfCallArg(ArrayStack<GenTree *> *parentStack,
     GenTree *parentCall = isNodeCallArg(parentStack);
     if (!parentCall) 
     {
-        DBEXEC(VERBOSE, dumpTreeStack(JitTls::GetCompiler(), parentStack));
         return;
     }
      
@@ -194,10 +147,10 @@ void Compiler::fgFixupArgTabEntryPtr(GenTreePtr parentCall,
     assert(newArg != nullptr);
 
     JITDUMP("parent call was :\n");
-    DISPTREE(parentCall);
+    DISPNODE(parentCall);
 
     JITDUMP("old child was :\n");
-    DISPTREE(oldArg);
+    DISPNODE(oldArg);
     
     if (oldArg->gtFlags & GTF_LATE_ARG)
     {
@@ -209,9 +162,6 @@ void Compiler::fgFixupArgTabEntryPtr(GenTreePtr parentCall,
         assert(fp->node == oldArg);
         fp->node = newArg;
     }
-
-    JITDUMP("parent call:\n");
-    DISPTREE(parentCall);
 }
 
 // Rewrite InitBlk involving SIMD vector into stlcl.var of a SIMD type.
@@ -256,7 +206,7 @@ void Rationalizer::RewriteInitBlk(LIR::Use& use)
     unsigned simdLocalSize = comp->getSIMDTypeSizeInBytes(typeHnd);
 
     JITDUMP("Rewriting SIMD InitBlk\n");
-    DISPTREE(initBlk);
+    DISPTREERANGE(BlockRange(), initBlk);
 
     assert((dstAddr->gtFlags & GTF_VAR_USEASG) == 0);
 
@@ -285,7 +235,7 @@ void Rationalizer::RewriteInitBlk(LIR::Use& use)
     BlockRange().Remove(initBlk);
 
     JITDUMP("After rewriting SIMD InitBlk:\n");
-    DISPTREE(use.Def());
+    DISPTREERANGE(BlockRange(), use.Def());
     JITDUMP("\n");
 #endif // FEATURE_SIMD
 }
@@ -342,7 +292,7 @@ void Rationalizer::RewriteCopyBlk(LIR::Use& use)
     // start transforming the original tree. Prior to this point do not perform
     // any modifications to the original tree.
     JITDUMP("\nRewriting SIMD CopyBlk\n");
-    DISPTREE(cpBlk);
+    DISPTREERANGE(BlockRange(), cpBlk);
 
     // There are currently only three sizes supported: 8 bytes, 12 bytes, 16 bytes or the vector register length.
     GenTreeIntConCommon* sizeNode = cpBlk->Size()->AsIntConCommon();
@@ -446,7 +396,7 @@ void Rationalizer::RewriteCopyBlk(LIR::Use& use)
     BlockRange().Remove(cpBlk);
 
     JITDUMP("After rewriting SIMD CopyBlk:\n");
-    DISPTREE(use.Def());
+    DISPTREERANGE(BlockRange(), use.Def());
     JITDUMP("\n");
 #endif // FEATURE_SIMD
 }
@@ -917,7 +867,7 @@ void Rationalizer::RewriteAddress(LIR::Use& use)
         JITDUMP("Rewriting GT_ADDR(GT_IND(X)) to X:\n");
     }
 
-    DISPTREE(use.Def());
+    DISPTREERANGE(BlockRange(), use.Def());
     JITDUMP("\n");
 }
 
@@ -1146,8 +1096,8 @@ Compiler::fgWalkResult Rationalizer::RewriteNode(GenTree** useEdge, ArrayStack<G
                 use.ReplaceWith(comp, ind);
                 BlockRange().Remove(simdNode);
 
-                //DISPTREE(tmpState->root);
-                //JITDUMP("\n");
+                DISPTREERANGE(BlockRange(), use.Def());
+                JITDUMP("\n");
             }
             else 
             {

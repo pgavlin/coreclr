@@ -2693,10 +2693,6 @@ bool Compiler::fgRemoveDeadStore(GenTree** pTree, LclVarDsc* varDsc, VARSET_TP l
 
             noway_assert(!VarSetOps::IsMember(this, life, varDsc->lvVarIndex));
 
-            JITDUMP("interior assign\n");
-            DISPTREE(asgNode);
-            JITDUMP("\n");
-
             if (rhsNode->gtFlags & GTF_SIDE_EFFECT)
             {
                 /* :-( we have side effects */
