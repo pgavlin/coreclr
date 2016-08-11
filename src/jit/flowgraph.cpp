@@ -8701,9 +8701,6 @@ BasicBlock* Compiler::fgSplitBlockAfterNode(BasicBlock* curr, GenTree* node)
         assert(curr->bbTreeList == nullptr); // if no node was given then it better be an empty block
     }
 
-    assert(LIR::AsRange(curr).CheckLIR(this));
-    assert(LIR::AsRange(newBlock).CheckLIR(this));
-
     return newBlock;
 }
 
@@ -9468,8 +9465,6 @@ void                Compiler::fgCompactBlocks(BasicBlock* block, BasicBlock* bNe
             LIR::Range nextNodes = nextRange.Remove(nextFirstNonPhi, nextRange.LastNode());
             blockRange.InsertAfter(blockRange.LastNode(), std::move(nextNodes));
         }
-
-        assert(blockRange.CheckLIR(this));
     }
     else
     {
@@ -15954,6 +15949,15 @@ REPEAT:;
         fgDispBasicBlocks(verboseTrees);
         fgDispHandlerTab();
     }
+
+    if (compRationalIRForm)
+    {
+        for (BasicBlock* block = fgFirstBB; block != nullptr; block = block->bbNext)
+        {
+            LIR::AsRange(block).CheckLIR(this);
+        }
+    }
+
     fgVerifyHandlerTab();
     // Make sure that the predecessor lists are accurate
     fgDebugCheckBBlist();
