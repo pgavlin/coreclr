@@ -964,10 +964,21 @@ GenTreePtr Lowering::NewPutArg(GenTreeCall* call, GenTreePtr arg, fgArgTabEntryP
     return putArg;
 }
 
-// lower one arg of a call
-// this currently entails splicing in a "putarg" node in between the arg evaluation and call
-// These are the point at which the source is consumed and the values transition from control
-// of the register allocator to the calling convention.
+
+//------------------------------------------------------------------------
+// LowerArg: Lower one argument of a call. This entails splicing a "putarg" node between
+// the argument evaluation and the call. This is the point at which the source is
+// consumed and the value transitions from control of the register allocator to the calling
+// convention.
+//
+// Arguments:
+//    call  - The call node
+//    ppArg - Pointer to the call argument pointer. We migth replace the call argument by
+//            changing *ppArg.
+//
+// Return Value:
+//    None.
+//
 void Lowering::LowerArg(GenTreeCall* call, GenTreePtr* ppArg)
 {
     GenTreePtr arg = *ppArg;
@@ -979,9 +990,9 @@ void Lowering::LowerArg(GenTreeCall* call, GenTreePtr* ppArg)
     assert(!arg->OperIsAssignment());
     assert(!arg->OperIsPutArgStk());
 
-    // assignments/stores at this level are not really placing an arg
-    // they are setting up temporary locals that will later be placed into
-    // outgoing regs or stack
+    // Assignments/stores at this level are not really placing an argument.
+    // They are setting up temporary locals that will later be placed into
+    // outgoing regs or stack.
     if (arg->OperIsStore() || arg->IsArgPlaceHolderNode() || arg->IsNothingNode() || arg->OperIsCopyBlkOp())
     {
         return;
@@ -1000,8 +1011,8 @@ void Lowering::LowerArg(GenTreeCall* call, GenTreePtr* ppArg)
 
     GenTreePtr putArg;
 
-    // if we hit this we are probably double-lowering
-    assert(arg->gtOper != GT_PUTARG_REG && arg->gtOper != GT_PUTARG_STK);
+    // If we hit this we are probably double-lowering.
+    assert(!arg->OperIsPutArg());
 
 #if !defined(_TARGET_64BIT_)
     if (varTypeIsLong(type))
@@ -1011,58 +1022,25 @@ void Lowering::LowerArg(GenTreeCall* call, GenTreePtr* ppArg)
             NYI("Lowering of long register argument");
         }
 
-        // For longs, we will create two PUTARG_STKs below the GT_LONG.
-        // This is because the lo/hi values will be marked localDefUse, and we need to ensure that
-        // they are pushed onto the stack as soon as they are created.
-        // We also need to reverse the order, since the hi argument needs to be pushed first.
+        // For longs, we will create two PUTARG_STKs below the GT_LONG. The hi argument needs to
+        // be pushed first, so the hi PUTARG_STK will precede the lo PUTARG_STK in execution order.
         noway_assert(arg->OperGet() == GT_LONG);
         GenTreePtr argLo = arg->gtGetOp1();
         GenTreePtr argHi = arg->gtGetOp2();
 
-        NYI_IF((argHi->OperGet() == GT_ADD_HI) ||
-               (argHi->OperGet() == GT_SUB_HI) ||
-               (argHi->OperGet() == GT_NEG), 
-               "Hi and Lo cannot be reordered");
-        
         GenTreePtr putArgLo = NewPutArg(call, argLo, info, type);
         GenTreePtr putArgHi = NewPutArg(call, argHi, info, type);
 
         arg->gtOp.gtOp1 = putArgLo;
         arg->gtOp.gtOp2 = putArgHi;
 
-        // TODO(pdg): the code below uses tree order to freely reorder the lo and hi pieces of
-        // a long-type argument. This needs to be fixed.
-        NYI("LIR: long arg lowering");
-
-        // Now, reorder the arguments and insert the putArg in the right place.
-
-        GenTreePtr argLoFirst = comp->fgGetFirstNode(argLo);
-        GenTreePtr argHiFirst = comp->fgGetFirstNode(argHi);
-        GenTreePtr argLoPrev = argLoFirst->gtPrev;
-        noway_assert(argHiFirst->gtPrev == argLo);
-        noway_assert(arg->gtPrev == argHi);
-
-        argHiFirst->gtPrev = argLoPrev;
-        if (argLoPrev != nullptr)
-        {
-            argLoPrev->gtNext = argHiFirst;
-        }
-        else
-        {
-            assert(comp->compCurStmt->gtStmt.gtStmtList == argLoFirst);
-            comp->compCurStmt->gtStmt.gtStmtList = argHiFirst;
-        }
-        argHi->gtNext = putArgHi;
-        putArgHi->gtPrev = argHi;
-        putArgHi->gtNext = argLoFirst;
-        argLoFirst->gtPrev = putArgHi;
-        argLo->gtNext = putArgLo;
-        putArgLo->gtPrev = argLo;
-        putArgLo->gtNext = arg;
-        arg->gtPrev = putArgLo;
+        BlockRange().InsertBefore(arg, putArgHi, putArgLo);
+            
+        // The execution order now looks like this:
+        // argLoPrev <-> argLoFirst ... argLo <-> argHiFirst ... argHi <-> putArgHi <-> putArgLo <-> arg(GT_LONG)
 
         assert((arg->gtFlags & GTF_REVERSE_OPS) == 0);
-        arg->gtFlags |= GTF_REVERSE_OPS;
+        arg->gtFlags |= GTF_REVERSE_OPS;    // We consume the high arg (op2) first.
     }
     else
 #endif // !defined(_TARGET_64BIT_)
