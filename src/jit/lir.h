@@ -248,6 +248,9 @@ public:
 
         ReadOnlyRange GetMarkedRange(unsigned markCount, GenTree* start, bool* isClosed, unsigned* sideEffects) const;
 
+        void FinishInsertBefore(GenTree* insertionPoint, GenTree* first, GenTree* last);
+        void FinishInsertAfter(GenTree* insertionPoint, GenTree* first, GenTree* last);
+
     public:
         Range();
         Range(Range&& other);
