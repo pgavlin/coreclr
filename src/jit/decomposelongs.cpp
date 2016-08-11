@@ -292,8 +292,6 @@ GenTree* DecomposeLongs::FinalizeDecomposition(LIR::Use& use, GenTree* loResult,
 
     use.ReplaceWith(m_compiler, gtLong);
 
-    assert(BlockRange().CheckLIR(m_compiler));
-
     return gtLong->gtNext;
 }
 
@@ -451,7 +449,6 @@ GenTree* DecomposeLongs::DecomposeStoreLclVar(LIR::Use& use)
     hiStore->CopyCosts(tree);
     BlockRange().InsertAfter(tree, hiStore);
 
-    assert(BlockRange().CheckLIR(m_compiler));
     return hiStore->gtNext;
 }
 
@@ -728,8 +725,6 @@ GenTree* DecomposeLongs::DecomposeStoreInd(LIR::Use& use)
     m_compiler->gtPrepareCost(storeIndHigh);
 
     BlockRange().InsertAfter(storeIndLow, dataHigh, addrBaseHigh, addrHigh, storeIndHigh);
-
-    assert(BlockRange().CheckLIR(m_compiler));
 
     return storeIndHigh;
 

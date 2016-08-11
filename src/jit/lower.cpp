@@ -1207,8 +1207,6 @@ void Lowering::LowerCall(GenTree* node)
             break;
         }
     }
-
-    assert(BlockRange().CheckLIR(comp));
     
     if (call->IsTailCallViaHelper())
     {
@@ -1268,8 +1266,6 @@ void Lowering::LowerCall(GenTree* node)
         call->gtControlExpr = result;
     }
 #endif //!_TARGET_ARM_
-
-    assert(BlockRange().CheckLIR(comp));
 
     if (comp->opts.IsJit64Compat())
     {
