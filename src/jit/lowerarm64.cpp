@@ -121,7 +121,6 @@ void Lowering::TreeNodeInfoInit(GenTree* stmt)
     LinearScan* l = m_lsra;
     Compiler* compiler = comp;
 
-    assert(stmt->gtStmt.gtStmtIsTopLevel());
     GenTree* tree = stmt->gtStmt.gtStmtList;
     
     while (tree)
@@ -1891,7 +1890,7 @@ void Lowering::LowerRotate(GenTreePtr tree)
         {
             GenTreePtr tmp = comp->gtNewOperNode(GT_NEG, genActualType(rotateLeftIndexNode->gtType),
                     rotateLeftIndexNode);
-            rotateLeftIndexNode->InsertAfterSelf(tmp);
+            BlockRange().InsertAfter(rotateLeftIndexNode, tmp);
             tree->gtOp.gtOp2 = tmp;
         }
         tree->ChangeOper(GT_ROR);

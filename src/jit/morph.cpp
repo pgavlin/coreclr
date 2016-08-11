@@ -7087,7 +7087,7 @@ void                Compiler::fgMorphTailCall(GenTreeCall* call)
 void Compiler::fgMorphRecursiveFastTailCallIntoLoop(BasicBlock* block, GenTreeCall* recursiveTailCall)
 {
     assert(recursiveTailCall->IsTailCallConvertibleToLoop());
-    GenTreePtr last = fgGetLastTopLevelStmt(block);
+    GenTreePtr last = block->lastStmt();
     assert(recursiveTailCall == last->gtStmt.gtStmtExpr);
 
     // Transform recursive tail call into a loop.

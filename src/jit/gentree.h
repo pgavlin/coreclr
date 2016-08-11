@@ -854,12 +854,6 @@ public:
 
     #define GTF_STMT_CMPADD     0x80000000  // GT_STMT    -- added by compiler
     #define GTF_STMT_HAS_CSE    0x40000000  // GT_STMT    -- CSE def or use was subsituted
-    // TODO: remove GTF_STMT_TOP_LEVEL when LIR removes embedded statements
-    #define GTF_STMT_TOP_LEVEL  0x20000000  // GT_STMT    -- Top-level statement - 
-                                            //               true iff gtStmtList->gtPrev == nullptr
-                                            //               True for all stmts when in FGOrderTree
-    // TODO: remove GTF_STMT_SKIP_LOWER when LIR is complete?
-    #define GTF_STMT_SKIP_LOWER 0x10000000  // GT_STMT    -- Skip lowering if we already lowered an embedded stmt.
 
     //----------------------------------------------------------------
 
@@ -1479,9 +1473,6 @@ public:
     // (<= 32 bit) constant.  If it returns true, it sets "*offset" to (one of the) constant value(s), and
     // "*addr" to the other argument.
     bool            IsAddWithI32Const(GenTreePtr* addr, int* offset);
-
-    // Insert 'node' after this node in execution order.
-    void            InsertAfterSelf(GenTree* node, GenTreeStmt* stmt = nullptr);
 
 public:
 
@@ -3907,44 +3898,6 @@ struct GenTreeStmt: public GenTree
     IL_OFFSET       gtStmtLastILoffs;// instr offset at end of stmt
 #endif
 
-    // TODO-LIR: remove function
-    bool            gtStmtIsTopLevel()
-    {
-        return (gtFlags & GTF_STMT_TOP_LEVEL) != 0;
-    }
-
-    // TODO-LIR: remove function
-    bool            gtStmtIsEmbedded()
-    {
-        return !gtStmtIsTopLevel();
-    }
-
-    // TODO-LIR: remove function
-    // Return the next statement, if it is embedded, otherwise nullptr
-    GenTreeStmt*    gtStmtNextIfEmbedded()
-    {
-        GenTree* nextStmt = gtNext;
-        if (nextStmt != nullptr && nextStmt->gtStmt.gtStmtIsEmbedded())
-        {
-            return nextStmt->AsStmt();
-        }
-        else
-        {
-            return nullptr;
-        }
-    }
-
-    // TODO-LIR: remove function
-    GenTree*    gtStmtNextTopLevelStmt()
-    {
-        GenTree* nextStmt = gtNext;
-        while (nextStmt != nullptr && nextStmt->gtStmt.gtStmtIsEmbedded())
-        {
-            nextStmt = nextStmt->gtNext;
-        }
-        return nextStmt;
-    }
-
     __declspec(property(get=getNextStmt))
     GenTreeStmt* gtNextStmt;
 
@@ -3981,8 +3934,6 @@ struct GenTreeStmt: public GenTree
     {
         // Statements can't have statements as part of their expression tree.
         assert(expr->gtOper != GT_STMT);
-
-        gtFlags |= GTF_STMT_TOP_LEVEL;
 
         // Set the statement to have the same costs as the top node of the tree.
         // This is used long before costs have been assigned, so we need to copy

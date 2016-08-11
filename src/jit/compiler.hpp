@@ -4876,19 +4876,6 @@ inline bool BasicBlock::endsWithTailCallConvertibleToLoop(Compiler* comp, GenTre
     return endsWithTailCall(comp, fastTailCallsOnly, tailCallsConvertibleToLoopOnly, tailCall);
 }
 
-// Returns the last top level stmt of a given basic block.
-// Returns nullptr if the block is empty.
-inline GenTreePtr Compiler::fgGetLastTopLevelStmt(BasicBlock *block)
-{
-    // Return if the block is empty
-    if (block->bbTreeList == nullptr)
-    {
-        return nullptr;
-    }
-
-    return fgFindTopLevelStmtBackwards(block->bbTreeList->gtPrev->AsStmt());
-}
-
 inline GenTreeBlkOp* Compiler::gtCloneCpObjNode(GenTreeCpObj* source)
 {
     GenTreeCpObj* result = new (this, GT_COPYOBJ) GenTreeCpObj(source->gtGcPtrCount,

@@ -1414,7 +1414,7 @@ void Lowering::CheckVSQuirkStackPaddingNeeded(GenTreeCall* call)
 // control expr |  +--*  const(h)  long   0x7ffe8e910e98 ftn REG NA
 //              \--*  call      void   System.Runtime.Remoting.Identity.RemoveAppNameOrAppGuidIfNecessary $VN.Void
 // 
-// In this case, the GT_PUTARG_REG src is a nested call. We need to put the embedded statement after that call
+// In this case, the GT_PUTARG_REG src is a nested call. We need to put the instructions after that call
 // (as shown). We assume that of all the GT_PUTARG_*, only the first one can have a nested call.
 //
 // Params:

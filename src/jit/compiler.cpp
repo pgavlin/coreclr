@@ -7972,16 +7972,6 @@ void        cBlockIR(Compiler* comp, BasicBlock* block)
     {
         for (GenTreeStmt* stmt = block->firstStmt(); stmt; stmt = stmt->gtNextStmt)
         {
-            // Skip embedded stmts. They should have already been dumped prior to the stmt 
-            // that they are embedded into.  Even though they appear on the stmt list
-            // after the stmt they are embedded into.  Don't understand the rationale for that
-            // but make the dataflow view look consistent.
-
-            if ((stmt->gtFlags & GTF_STMT_TOP_LEVEL) == 0)
-            {
-                continue;
-            }
-
             // Print current stmt.
 
             if (trees)
@@ -8713,14 +8703,6 @@ int cTreeFlagsIR(Compiler *comp, GenTree *tree)
             if (tree->gtFlags & GTF_STMT_HAS_CSE)
             {
                 chars += printf("[STMT_HAS_CSE]");
-            }
-            if (tree->gtFlags & GTF_STMT_TOP_LEVEL)
-            {
-                chars += printf("[STMT_TOP_LEVEL]");
-            }
-            if (tree->gtFlags & GTF_STMT_SKIP_LOWER)
-            {
-                chars += printf("[STMT_SKIP_LOWER]");
             }
             break;
 
