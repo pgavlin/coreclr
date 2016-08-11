@@ -580,9 +580,6 @@ void                Compiler::fgPerBlockLocalVarLiveness()
             {
                 noway_assert(stmt->gtOper == GT_STMT);
 
-                if (!stmt->gtStmt.gtStmtIsTopLevel())
-                    continue;
-
                 compCurStmt = stmt;
 
                 asgdLclVar = nullptr;
@@ -2675,13 +2672,6 @@ bool Compiler::fgRemoveDeadStore(GenTree** pTree, LclVarDsc* varDsc, VARSET_TP l
                         goto EXTRACT_SIDE_EFFECTS;
                 }
 
-                // If there is an embedded statement this could be tricky because we need to 
-                // walk them next, and we have already skipped over them because they were
-                // not top level (but will be if we delete the top level statement)
-                if (compCurStmt->gtStmt.gtNextStmt && 
-                    !compCurStmt->gtStmt.gtNextStmt->gtStmtIsTopLevel())
-                    return false;
-                
                 /* No side effects - remove the whole statement from the block->bbTreeList */
 
                 fgRemoveStmt(compCurBB, compCurStmt);
@@ -2784,15 +2774,6 @@ bool Compiler::fgRemoveDeadStore(GenTree** pTree, LclVarDsc* varDsc, VARSET_TP l
 
                 /* Change the assignment to a GT_NOP node */
 
-                if (compRationalIRForm)
-                {
-                    JITDUMP("deleting tree:\n");
-                    DISPTREE(rhsNode);
-                    fgDeleteTreeFromList(compCurStmt->AsStmt(), rhsNode);
-                    if (tree->gtOper == GT_STOREIND)
-                        fgDeleteTreeFromList(compCurStmt->AsStmt(), asgNode->gtOp.gtOp1);
-                }
-
                 asgNode->gtBashToNOP();
 
 #ifdef DEBUG
@@ -2802,17 +2783,14 @@ bool Compiler::fgRemoveDeadStore(GenTree** pTree, LclVarDsc* varDsc, VARSET_TP l
 
             /* Re-link the nodes for this statement - Do not update ordering! */
 
-            if (!compRationalIRForm)
-            {
-                // Do not update costs by calling gtSetStmtInfo. fgSetStmtSeq modifies
-                // the tree threading based on the new costs. Removing nodes could 
-                // cause a subtree to get evaluated first (earlier second) during the
-                // liveness walk. Instead just set a flag that costs are dirty and
-                // caller has to call gtSetStmtInfo.
-                *pStmtInfoDirty = true;
+            // Do not update costs by calling gtSetStmtInfo. fgSetStmtSeq modifies
+            // the tree threading based on the new costs. Removing nodes could 
+            // cause a subtree to get evaluated first (earlier second) during the
+            // liveness walk. Instead just set a flag that costs are dirty and
+            // caller has to call gtSetStmtInfo.
+            *pStmtInfoDirty = true;
 
-                fgSetStmtSeq(compCurStmt);
-            }
+            fgSetStmtSeq(compCurStmt);
 
             /* Continue analysis from this node */
 
@@ -3025,10 +3003,6 @@ void                Compiler::fgInterBlockLocalVarLiveness()
 
                 compCurStmt = nextStmt;
                               nextStmt = nextStmt->gtPrev;
-
-
-                if (!compCurStmt->gtStmt.gtStmtIsTopLevel())
-                    continue;
 
                 /* Compute the liveness for each tree node in the statement */
                 bool stmtInfoDirty = false;

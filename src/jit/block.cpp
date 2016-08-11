@@ -568,37 +568,6 @@ GenTreeStmt* BasicBlock::lastStmt()
     return result->AsStmt();
 }
 
-//------------------------------------------------------------------------
-// lastTopLevelStmt: Returns the last top-level statement in the block
-//
-// Arguments:
-//    None.
-//
-// Return Value:
-//    The last statement in the block's bbTreeList.
-//
-// Notes:
-//    The last statement may be an embedded statement, when in linear order,
-//    so this method is provided to obtain the last top-level statement, which
-//    will also contain the last tree nodes in execution order.
-
-GenTreeStmt* BasicBlock::lastTopLevelStmt()
-{
-    if (bbTreeList == nullptr)
-        return nullptr;
-
-    GenTreePtr stmt = lastStmt();
-
-#ifndef LEGACY_BACKEND
-    while ((stmt->gtFlags & GTF_STMT_TOP_LEVEL) == 0)
-    {
-        stmt = stmt->gtPrev;
-    }
-#endif // !LEGACY_BACKEND
-
-    return stmt->AsStmt();
-}
-
 // TODO(pdg): comments
 GenTree* BasicBlock::firstNode()
 {

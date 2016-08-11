@@ -623,7 +623,7 @@ GenTreeStmt*  Compiler::fgInsertStmtNearEnd(BasicBlock* block, GenTreePtr node)
 {
     GenTreeStmt* stmt;
     
-    // This routine is not aware of embedded stmts and can only be used when in tree order.
+    // This routine can only be used when in tree order.
     assert(fgOrder == FGOrderTree);
 
     if ((block->bbJumpKind == BBJ_COND)   ||
@@ -842,135 +842,6 @@ void                Compiler::fgRemoveReturnBlock(BasicBlock* block)
             retBlocks->next = retBlocks->next->next;
             return;
         }
-    }
-}
-
-// TODO-LIR: remove function, or rewrite?
-//------------------------------------------------------------------------
-// fgReplaceStmt: Replaces the top-level tree of 'stmt' with newTree
-//
-// Arguments:
-//    stmt    - the statement whose tree we're replacing
-//    newTree - the new top-level tree for 'stmt'
-//
-// Return Value:
-//    None.
-//
-// Operation:
-//    This method has two main modes of operation:
-//    a) In case we're in Tree Order or we're replacing a top-level statement
-//       we first append the replacing statement ahead of the statement to replace
-//       and then remove the latter from the CFG.
-//    b) If we're replacing an embedded statement (and this naturally assumes we're
-//       in linear order), we proceed to do that in-place, i.e. replace the expression
-//       inside the statement to replace with the expression contained in the
-//       replacing node.
-//
-// Assumptions:
-//    This method will "fixup" any embedded statements from the old tree
-//    to the new.  However, this will only work if the node which follows the
-//    embedded statement is preserved.  This will be true if the newTree
-//    reuses the constituent nodes of the old tree (e.g. in the case where a
-//    node is replaced by a helper call with the original arguments to the node,
-//    but will not be true for arbitrary tree replacement.)
-//
-// Notes:
-//    This is currently only used in FGOrderLinear.
-//    TODO-Cleanup: This should probably simply replace the tree so that the information
-//    (such as IL offsets) is preserved, but currently it creates a new statement.
-
-void                Compiler::fgReplaceStmt(BasicBlock* block, GenTreeStmt* stmt, GenTreePtr newTree)
-{
-    // fgNewStmtFromTree will sequence the nodes in newTree.  Thus, if we are in FGOrderLinear,
-    // we will need to fixup any embedded statements after this call.
-    GenTreeStmt* newStmt = fgNewStmtFromTree(newTree, block);
-
-    if (stmt->gtStmtIsTopLevel() || fgOrder == FGOrderTree)
-    {
-        assert(stmt->gtStmtIsTopLevel());
-        fgInsertStmtAfter(block, stmt, newStmt);
-
-        // Remove the old statement now we've inserted the new one.
-        fgRemoveStmt(block, stmt, false);
-
-        if (fgOrder == FGOrderLinear)
-        {
-            // Because we are now in linear mode, we may have an embedded statement in the execution
-            // stream.  It is too complex to try to sequence the new tree in an ad-hoc fashion,
-            // but we can't use the normal sequencing without bypassing the embedded statements.
-            // So, we fix them up now that we're done with the new tree.
-            // We preserve the order of the embedded statement relative to its gtNext.
-            // This is because the new tree may have a different order for its args than the
-            // block node did, and statements become embedded because they need to be ordered
-            // BEFORE something (not after).
-            // TODO-Cleanup: Consider finding an alternate approach to this - it seems risky
-
-            for (GenTreeStmt* embeddedStmt = newStmt->gtNextStmt;
-                 embeddedStmt != nullptr && embeddedStmt->gtStmtIsEmbedded();
-                 embeddedStmt = embeddedStmt->gtNextStmt)
-            {
-                GenTreePtr firstEmbeddedNode = embeddedStmt->gtStmtList;
-                GenTreePtr lastEmbeddedNode  = embeddedStmt->gtStmtExpr;
-                GenTreePtr nextNode = lastEmbeddedNode->gtNext;
-                GenTreePtr prevNode = nextNode->gtPrev;
-                assert(nextNode != nullptr);
-                if (prevNode == nullptr)
-                {
-                    // We've reordered the nodes such that the embedded statement is now first.
-                    // Extract it.
-                    firstEmbeddedNode->gtPrev = nullptr;
-                    lastEmbeddedNode->gtNext = nullptr;
-                    fgRemoveStmt(block, embeddedStmt);
-                    fgInsertStmtBefore(block, stmt, embeddedStmt);
-                    embeddedStmt->gtFlags |= GTF_STMT_TOP_LEVEL;
-                }
-                else
-                {
-                    prevNode->gtNext = firstEmbeddedNode;
-                    firstEmbeddedNode->gtPrev = prevNode;
-                    nextNode->gtPrev = lastEmbeddedNode;
-                    lastEmbeddedNode->gtNext = nextNode;
-                }
-            }
-        }
-    }
-    else
-    {
-        assert(fgOrder == FGOrderLinear);
-
-        GenTreePtr stmtExpr = stmt->gtStmtExpr;
-        GenTreePtr stmtList = stmt->gtStmtList;
-
-        // First, proceed to wire the first node in
-        // execution order
-        if (stmtList->gtPrev != nullptr)
-        {
-            stmtList->gtPrev->gtNext = newStmt->gtStmtList;
-        }
-        newStmt->gtStmtList->gtPrev = stmtList->gtPrev;
-
-        // Now, in order to wire the last execution order node
-        // in a statement, in case it's embedded, we have a special case
-        // since it *cannot* be null, its gtNext is connected to the
-        // 'resuming' next node in the containing statement.
-        // For this, we have to search for the last node in the
-        // newly created statement and wire it in accordingly to the
-        // rule just mentioned.
-
-        assert(newStmt->gtStmtExpr->gtNext == nullptr);
-
-        if (stmtExpr->gtNext != nullptr)
-        {
-            stmtExpr->gtNext->gtPrev = newStmt->gtStmtExpr;
-        }
-        newStmt->gtStmtExpr->gtNext = stmtExpr->gtNext;
-
-        stmt->gtStmtExpr = newStmt->gtStmtExpr;
-        stmt->gtStmtList = newStmt->gtStmtList;
-
-#ifdef DEBUG
-        fgDebugCheckNodeLinks(compCurBB, stmt);
-#endif // DEBUG
     }
 }
 
@@ -9270,205 +9141,6 @@ AGAIN:
 #endif // DEBUG
 }
 
-// TODO-LIR: remove function, or rewrite?
-/*****************************************************************************
- * fgRemoveLinearOrderDependencies --
- *
- *   Remove stmt dependencies before removing the stmt itself.
- *
- * If called on a top level statement,
- *
- * All the first level (in a breadth-first order) embedded statements now become top
- * level statements. In a comma world, it is analogous to retaining the exprs
- * within the commas of a statement.
- *
- * If called on an embedded statement,
- *
- * Then the statement rooting the embedded statement's next links are
- * correctly updated to point to any nested embedded statement nodes or
- * the sibling embedded nodes and their prev links are updated to the
- * rooting statement. Also the nodes of the embedded statement on which
- * we are called are dropped from the list.
- *
- * Assumptions:
- * "stmt" should be detached from the bbTreeList after the call.
- *
- */
-void Compiler::fgRemoveLinearOrderDependencies(GenTreePtr tree)
-{
-    assert(fgOrder == FGOrderLinear);
-    GenTreeStmt* stmt = tree->AsStmt();
-    
-    // No embedded statements.
-    if (stmt->gtStmtIsTopLevel() &&
-        (stmt->gtNext == nullptr || stmt->gtNextStmt->gtStmtIsTopLevel()))
-    {
-        return;
-    }
-    // stmt is last embedded statement, assume we have a tree order: prevStmt->stmt->nextStmt.
-    // We are dropping "stmt". So fix the next link for "prevStmt" and prev link for "nextStmt".
-    if (stmt->gtStmtIsEmbedded() &&
-            (stmt->gtNext == nullptr || stmt->gtNextStmt->gtStmtIsTopLevel()))
-    {
-        if (stmt->gtStmtList->gtPrev)
-        {
-            stmt->gtStmtList->gtPrev->gtNext = stmt->gtStmtExpr->gtNext;
-        }
-        if (stmt->gtStmtExpr->gtNext)
-        {
-            stmt->gtStmtExpr->gtNext->gtPrev = stmt->gtStmtList->gtPrev;
-        }
-        return;
-    }
-
-    //
-    // Walk the tree list, and define current statement as
-    // the immediate statement (embedded or top) in which
-    // the tree resides.
-    //
-    // Initially, next = stmt, cur is empty.
-    //
-    // While walking the tree list, we expect to see:
-    // 1. next stmt's list
-    // 2. or current stmt's expr
-    //
-    // If current stmt's expr is seen, pop to previous
-    // next and call it current.
-    // If next stmt's list is seen, then next becomes current.
-    //
-
-    ArrayStack<GenTreePtr> stack(this);
-
-    // Consider this example:
-    //
-    // In stmt order:
-    // (top (stmt (emb2, emb3) ) ) where "top" embeds "stmt" and "stmt"
-    // nests "emb2" and "emb3". Now we are removing "stmt."
-    //
-    // In the end we should obtain:
-    // (top (emb2, emb3) ). Callers should fix bbTreeList. We only fix tree order.
-    // 
-    // So in tree order:
-    // BEFORE: top:t1 -> stmt:t1 -> emb2:t1 -> stmt:t2 -> emb3:t1 -> stmt:t3 -> top:t2
-    // AFTER : top:t1 ->            emb2:t1 ->            emb3:t1 ->            top:t2
-    //
-    GenTreePtr lastNestEmbedNode = stmt->gtStmtList->gtPrev; // In the example, top:t1.
-
-    GenTreePtr next = stmt;
-    GenTreePtr node = stmt->gtStmtList;
-    while (node != stmt->gtStmtExpr->gtNext)
-    {
-        // We are encountering a new stmt. Push it into the stack. It is now current.
-        if (next != nullptr && node == next->gtStmt.gtStmtList)
-        {
-            stack.Push(next);
-            next = next->gtNext;
-
-            // Since stack height is 2, we are entering the next level embedded statement
-            // from stmt's level which is 1. Reminder: stmt is being removed.
-            //
-            // If stmt is top level, all level 2 stmts will become top level.
-            // So don't fix their prev next links.
-            if (stmt->gtStmtIsEmbedded() && stack.Height() == 2)
-            {
-                // clang-format off
-                // Two cases:
-                // Case 1 (Initial case -- we are discovering the first embedded stmt):
-                // Before:
-                // topList -> stmtList -> emb2List -> emb2Expr -> ... -> stmtExpr -> topExpr
-                // Currently: "node" is emb2List and "lastNestEmbedNode" is topList. We started the iteration from stmtList.
-                // After:
-                // topList ->             emb2List -> emb2Expr -> ... -> stmtExpr -> topExpr.
-                //
-                // Case 2 (We already discovered an embedded stmt):
-                // Before: 
-                // ... -> emb2List -> emb2Expr -> stmtNode -> stmtNode -> emb3List -> emb3Expr -> stmtNode -> ... -> stmtExpr
-                // Currently, "node" is emb3List and "lastNestEmbedNode" is emb2Expr.
-                // After:
-                // ... -> emb2List -> emb2Expr ->                      -> emb3List -> emb3Expr -> stmtNode -> ... -> stmtExpr
-                // clang-format on
-
-                // Drop stmtNodes that occur between emb2Expr and emb3List. 
-                if (lastNestEmbedNode)
-                {
-                    lastNestEmbedNode->gtNext = node;
-                }
-                node->gtPrev = lastNestEmbedNode;
-            }
-        }
-        GenTreePtr cur = stack.Top();
-        if (node == cur->gtStmt.gtStmtExpr)
-        {
-            // A stmt goes out of being current.
-            stack.Pop();
-
-            // Keep track of the last nested embedded stmt node. In the example, record emb2Expr or emb3Expr.
-            if (stack.Height() == 1)
-            {
-                lastNestEmbedNode = node;
-            }
-
-            // Are we called on a top level statement?
-            if (stmt->gtStmtIsTopLevel() && stack.Height() == 1)
-            {
-                // We are just done visiting the last node of a first level embedded stmt.
-
-                // Before: 
-                // stmtList -> emb2List -> emb2Expr -> stmtNode -> stmtNode -> emb3List -> emb3Expr -> stmtNode -> ... -> stmtExpr
-                // "stmt" is top level.
-                // 
-                // Currently, "node" is emb2Expr and "lastNestEmbedNode" is "don't care".
-                //
-                // After:
-                // node =                             stmtNode -> stmtNode -> emb3List -> emb3Expr -> stmtNode -> ... -> stmtExpr
-                // nullptr <- emb2List -> emb2Expr -> nullptr
-                //
-                // stmtList -> emb2List -> emb2Expr -> ...
-                // This is inconsistent for stmt, as there is no first level embedded statement now, but since callers
-                // are supposed to remove stmt, we don't care.
-                //
-
-                // Advance node to next, so we don't set node->next to nullptr below.
-                node = node->gtNext;
-
-                noway_assert(cur->gtStmt.gtStmtIsEmbedded());
-
-                // This embedded stmt is now top level since the original top level stmt
-                // is going to be removed.
-                cur->gtFlags |= GTF_STMT_TOP_LEVEL;
-
-                cur->gtStmt.gtStmtList->gtPrev = nullptr;
-                cur->gtStmt.gtStmtExpr->gtNext = nullptr;
-
-                // Don't bother updating stmt's pointers, as we are removing it.
-                continue;
-            }
-        }
-        node = node->gtNext;
-    }
-
-    // Are we called on an embedded stmt?
-    if (stmt->gtStmtIsEmbedded())
-    {
-        //
-        // Before: 
-        // ... -> emb2List -> emb2Expr -> stmtNode -> stmtNode -> emb3List -> emb3Expr -> stmtNode -> ... -> stmtExpr -> topNode
-        // 
-        // Currently, "node" is topNode (i.e., stmtExpr->gtNext) and "lastNestEmbedNode" is emb3Expr.
-        //
-        // After:
-        // ... -> emb2List -> emb2Expr ->                      -> emb3List -> emb3Expr ->                             -> topNode
-        //
-        if (node)
-        {
-            node->gtPrev = lastNestEmbedNode;
-        }
-        if (lastNestEmbedNode)
-        {
-            lastNestEmbedNode->gtNext = node;
-        }
-    }
-}
 
 /*****************************************************************************
  *
@@ -9483,6 +9155,7 @@ void                Compiler::fgRemoveStmt(BasicBlock*     block,
                                            bool updateRefCount)
 {
     noway_assert(node);
+    assert(fgOrder == FGOrderTree);
 
     GenTreeStmt*    tree = block->firstStmt();
     GenTreeStmt*    stmt = node->AsStmt();
@@ -9505,11 +9178,6 @@ void                Compiler::fgRemoveStmt(BasicBlock*     block,
            statement boundaries. Or should we leave a GT_NO_OP in its place? */
     }
 
-    if (fgOrder == FGOrderLinear)
-    {
-        fgRemoveLinearOrderDependencies(stmt);
-    }
-    
     /* Is it the first statement in the list? */
 
     GenTreeStmt* firstStmt = block->firstStmt();
@@ -10308,7 +9976,7 @@ void                Compiler::fgRemoveJTrue(BasicBlock *block)
     }
     else
     {
-        GenTreeStmt* test = block->lastTopLevelStmt();
+        GenTreeStmt* test = block->lastStmt();
         GenTree* tree = test->gtStmtExpr;
 
         noway_assert(tree->gtOper == GT_JTRUE);
@@ -13632,7 +13300,7 @@ bool Compiler::fgOptimizeSwitchBranches(BasicBlock* block)
     }
     else
     {
-        switchStmt = block->lastTopLevelStmt();
+        switchStmt = block->lastStmt();
         switchTree = switchStmt->gtStmtExpr;
 
         assert(switchTree->OperGet() == GT_SWITCH);
@@ -13814,7 +13482,7 @@ bool Compiler::fgBlockEndFavorsTailDuplication(BasicBlock *block)
     if (block->isRunRarely())
         return false;
 
-    if (!block->lastTopLevelStmt())
+    if (!block->lastStmt())
         return false;
     else
     {
@@ -13823,7 +13491,7 @@ bool Compiler::fgBlockEndFavorsTailDuplication(BasicBlock *block)
         // This is because these statements produce information about values
         // that would otherwise be lost at the upcoming merge point.  
 
-        GenTreeStmt* lastStmt = block->lastTopLevelStmt();
+        GenTreeStmt* lastStmt = block->lastStmt();
         GenTree* tree = lastStmt->gtStmtExpr;
         if (tree->gtOper != GT_ASG)
             return false;
@@ -14045,7 +13713,7 @@ bool Compiler::fgOptimizeBranchToNext(BasicBlock* block, BasicBlock* bNext, Basi
         }
         else
         {
-            GenTreeStmt* cond = block->lastTopLevelStmt();
+            GenTreeStmt* cond = block->lastStmt();
             noway_assert(cond->gtStmtExpr->gtOper == GT_JTRUE);
 
             /* check for SIDE_EFFECTS */
@@ -18334,7 +18002,6 @@ void                Compiler::fgSetStmtSeq(GenTreePtr tree)
                                      // It's located in front of the first node in the list
 
     noway_assert(tree->gtOper == GT_STMT);
-    noway_assert(tree->gtNext == nullptr || tree->gtNext->gtFlags & GTF_STMT_TOP_LEVEL);
 
     /* Assign numbers and next/prev links for this tree */
 
@@ -18534,29 +18201,6 @@ void            Compiler::fgOrderBlockOps(GenTreePtr   tree,
 #endif // LEGACY_BACKEND
 
 //------------------------------------------------------------------------
-// fgFindTopLevelStmtBackwards: Find the nearest top-level statement to 'stmt', walking the gtPrev links.
-//      The nearest one might be 'stmt' itself.
-//
-// Arguments:
-//    stmt - The statement to start the search with.
-//
-// Return Value:
-//    The nearest top-level statement, walking backwards.
-//
-// Assumptions:
-//    We will find one!
-
-/* static */
-GenTreeStmt* Compiler::fgFindTopLevelStmtBackwards(GenTreeStmt* stmt)
-{
-    while (!stmt->gtStmtIsTopLevel())
-    {
-        stmt = stmt->gtPrev->AsStmt();
-    }
-    return stmt;
-}
-
-//------------------------------------------------------------------------
 // fgGetFirstNode: Get the first node in the tree, in execution order
 //
 // Arguments:
@@ -18586,319 +18230,6 @@ GenTreePtr Compiler::fgGetFirstNode(GenTreePtr tree)
         }
     }
     return child;
-}
-
-// TODO-LIR: remove function (use LIR::Range::Remove() instead)
-//------------------------------------------------------------------------
-// fgSnipNode: Remove a single tree node (and not its children, if any) from the execution order.
-//
-// Arguments:
-//    'stmt'    - The statement which currently contains 'node'
-//    'node'    - The tree node to be removed
-//
-// Return Value:
-//    None.
-//
-// Assumptions:
-//    'stmt' must be non-null.
-//
-// Notes:
-//    The node may be any node in the statement, including the first or last node in the statement.
-//    This is similar to fgDeleteTreeFromList(), but it removes just a single node, not a whole tree.
-
-void Compiler::fgSnipNode(GenTreeStmt* stmt, GenTreePtr node)
-{
-    assert(stmt != nullptr);
-    assert(node != nullptr);
-    assert(stmt->gtOper == GT_STMT);
-    assert(node->gtOper != GT_STMT);
-    assert(fgTreeIsInStmt(node, stmt));
-
-    GenTreePtr prevNode = node->gtPrev;
-    GenTreePtr nextNode = node->gtNext;
-
-    if (prevNode != nullptr)
-    {
-        prevNode->gtNext = nextNode;
-    }
-    else
-    {
-        // The node is the first in the statement in execution order.
-        assert(stmt->gtStmtList == node);
-    }
-
-    // Note that the node may be first but also have a prevNode (if it is embedded)
-    if (stmt->gtStmtList == node)
-    {
-        stmt->gtStmtList = nextNode;
-    }
-
-    if (nextNode != nullptr)
-    {
-        nextNode->gtPrev = prevNode;
-    }
-    else
-    {
-        // The node is the last in the statement in execution order.
-        assert(stmt->gtStmtExpr == node);
-        stmt->gtStmtExpr = prevNode;
-    }
-}
-
-// TODO-LIR: remove function (use LIR::Range::Remove() instead)
-//------------------------------------------------------------------------
-// fgSnipInnerNode: Remove a single tree node (and not its children, if any) from the execution order.
-//
-// Arguments:
-//    'node'    - The tree node to be removed
-//
-// Return Value:
-//    None.
-//
-// Assumptions:
-//    The node may not be the first or last node in the statement. In those cases, fgSnipNode() must be used,
-//    which gets passed the parent GT_STMT node and can update gtStmtList and gtStmtExpr, respectively.
-
-/* static */
-void Compiler::fgSnipInnerNode(GenTreePtr node)
-{
-    assert(node != nullptr);
-    assert(node->gtOper != GT_STMT);
-
-    GenTreePtr prevNode = node->gtPrev;
-    GenTreePtr nextNode = node->gtNext;
-    assert(prevNode != nullptr);
-    assert(nextNode != nullptr);
-    prevNode->gtNext = nextNode;
-    nextNode->gtPrev = prevNode;
-}
-
-// TODO-LIR: remove function. Use LIR::Range::Remove with a range?
-//------------------------------------------------------------------------
-// fgDeleteTreeFromList: Remove an entire tree from the execution order.
-//
-// Arguments:
-//    'stmt'    - The statement which currently contains 'tree'
-//    'tree'    - The tree to be removed
-//
-// Return Value:
-//    None.
-//
-// Assumptions:
-//    'tree' is in the execution order list for 'stmt'
-//
-// Notes:
-//    This is similar to fgSnipNode(), but it removes a whole tree, not just a single node.
-
-void Compiler::fgDeleteTreeFromList(GenTreeStmt* stmt, GenTreePtr tree)
-{
-    assert(stmt != nullptr);
-    assert(tree != nullptr);
-    assert(stmt->gtOper == GT_STMT);
-    assert(tree->gtOper != GT_STMT);
-    assert(fgTreeIsInStmt(tree, stmt));
-
-    GenTreePtr firstNode = fgGetFirstNode(tree);
-    GenTreePtr prevNode = firstNode->gtPrev;
-    GenTreePtr nextNode = tree->gtNext;
-
-    if (prevNode != nullptr)
-    {
-        prevNode->gtNext = nextNode;
-    }
-    else
-    {
-        // The first node in the tree is the first in the statement in execution order.
-        assert(stmt->gtStmtList == firstNode);
-        stmt->gtStmtList = nextNode;
-    }
-
-    if (nextNode != nullptr)
-    {
-        nextNode->gtPrev = prevNode;
-    }
-    else
-    {
-        // The last node in the tree is the last in the statement in execution order.
-        assert(stmt->gtStmtExpr == tree);
-        stmt->gtStmtExpr = prevNode;
-    }
-}
-
-
-//------------------------------------------------------------------------
-// fgTreeIsInStmt: return 'true' if 'tree' is in the execution order list of statement 'stmt'.
-// This works for a single node or an entire tree, assuming a well-formed tree, where the entire
-// tree's set of nodes are in the statement execution order list.
-//
-/* static */
-bool Compiler::fgTreeIsInStmt(GenTree* tree, GenTreeStmt* stmt)
-{
-    assert(tree != nullptr);
-    assert(stmt != nullptr);
-    assert(tree->gtOper != GT_STMT);
-    assert(stmt->gtOper == GT_STMT);
-    for (GenTree* curr = stmt->gtStmtList; curr != nullptr; curr = curr->gtNext)
-    {
-        if (tree == curr)
-            return true;
-    }
-    return false;
-}
-
-// TODO-LIR: remove function? Is it used in tree mode?
-//------------------------------------------------------------------------
-// fgInsertTreeInListAfter: Insert 'tree' in the execution order list before 'insertionPoint'.
-// 'stmt' is required, so we can insert before the first node in the statement.
-// Assumes that 'tree' and its children are disjoint from 'insertionPoint', and none of them are in 'stmt'.
-//
-/* static */
-void Compiler::fgInsertTreeInListBefore(GenTree* tree, GenTree* insertionPoint, GenTreeStmt* stmt)
-{
-    assert(tree != nullptr);
-    assert(insertionPoint != nullptr);
-    assert(stmt != nullptr);
-    assert(tree->gtOper != GT_STMT);
-    assert(insertionPoint->gtOper != GT_STMT);
-    assert(fgTreeIsInStmt(insertionPoint, stmt));
-    assert(!fgTreeIsInStmt(tree, stmt));
-
-    GenTree* beforeTree = insertionPoint->gtPrev;
-
-    insertionPoint->gtPrev = tree;
-    tree->gtNext = insertionPoint;
-
-    GenTree* first = fgGetFirstNode(tree);
-
-    first->gtPrev = beforeTree;
-
-    if (beforeTree != nullptr)
-    {
-        beforeTree->gtNext = first;
-
-        // If the insertionPoint is the gtStatementList,
-        // update the gtStatemenList to include the newly inserted tree.
-        if (stmt->gtStmtList == insertionPoint)
-        {
-            stmt->gtStmtList = first;
-        }
-    }
-    else
-    {
-        assert(stmt->gtStmtList == insertionPoint);
-        stmt->gtStmtList = first;
-    }
-}
-
-// TODO-LIR: remove function? Is it used in tree mode?
-//------------------------------------------------------------------------
-// fgInsertTreeInListAfter: Insert tree in execution order list after 'insertionPoint'.
-// 'stmt' is required, so we can insert after the last node in the statement.
-// Assumes that 'tree' and its children are disjoint from 'insertionPoint', and none of them are in 'stmt'.
-//
-/* static */
-void Compiler::fgInsertTreeInListAfter(GenTree* tree, GenTree* insertionPoint, GenTreeStmt* stmt)
-{
-    assert(tree != nullptr);
-    assert(insertionPoint != nullptr);
-    assert(stmt != nullptr);
-    assert(tree->gtOper != GT_STMT);
-    assert(insertionPoint->gtOper != GT_STMT);
-    assert(fgTreeIsInStmt(insertionPoint, stmt));
-    assert(!fgTreeIsInStmt(tree, stmt));
-
-    GenTree* afterTree = insertionPoint->gtNext;
-    GenTree* first = fgGetFirstNode(tree);
-
-    insertionPoint->gtNext = first;
-    first->gtPrev = insertionPoint;
-
-    tree->gtNext = afterTree;
-
-    if (afterTree != nullptr)
-    {
-        afterTree->gtPrev = tree;
-    }
-    else
-    {
-        assert(stmt->gtStmtExpr == insertionPoint);
-        stmt->gtStmtExpr = tree;
-    }
-}
-
-// TODO-LIR: remove function
-//------------------------------------------------------------------------
-// fgInsertTreeBeforeAsEmbedded: Insert a tree before 'insertionPoint' as an embedded statement under 'stmt'.
-//
-GenTreeStmt* Compiler::fgInsertTreeBeforeAsEmbedded(GenTree* tree, GenTree* insertionPoint, GenTreeStmt* stmt, BasicBlock* block)
-{
-    assert(tree->gtOper != GT_STMT);
-    assert(insertionPoint->gtOper != GT_STMT);
-    assert(stmt != nullptr);
-    assert(stmt->gtOper == GT_STMT);
-    assert(fgTreeIsInStmt(insertionPoint, stmt));
-    assert(!fgTreeIsInStmt(tree, stmt));
-
-    gtSetEvalOrder(tree);
-    fgSetTreeSeq(tree);
-    fgInsertTreeInListBefore(tree, insertionPoint, stmt);
-
-    // While inserting a statement as embedded, the parent specified has to be a top-level statement
-    // since we could be inserting it ahead of an already existing embedded statement
-    // in execution order.
-    GenTreeStmt* topStmt = fgFindTopLevelStmtBackwards(stmt);
-    GenTreeStmt* result = fgMakeEmbeddedStmt(block, tree, topStmt);
-
-    DBEXEC(true, fgDebugCheckNodeLinks(block, result));
-    return result;
-}
-
-// TODO-LIR: remove function
-//------------------------------------------------------------------------
-// fgInsertTreeAfterAsEmbedded: Insert a tree after 'insertionPoint' as an embedded statement under 'stmt'.
-// If it is inserted after all nodes in the given tree, just make it a new statement.
-GenTreeStmt* Compiler::fgInsertTreeAfterAsEmbedded(GenTree* tree, GenTree* insertionPoint, GenTreeStmt* stmt, BasicBlock* block)
-{
-    assert(tree->gtOper != GT_STMT);
-    assert(insertionPoint->gtOper != GT_STMT);
-    assert(stmt != nullptr);
-    assert(stmt->gtOper == GT_STMT);
-    assert(fgTreeIsInStmt(insertionPoint, stmt));
-    assert(!fgTreeIsInStmt(tree, stmt));
-
-    GenTreeStmt* result;
-
-    if (insertionPoint->gtNext == nullptr)
-    {
-        // We're just going to make it a new top-level statement, not an embedded statement,
-        // since we're inserting it at the end of the statement list's execution order.
-
-        // we better have been given the right stmt
-        assert(insertionPoint == stmt->gtStmtExpr);
-
-        // this sets the sequence
-        result = fgNewStmtFromTree(tree, block);
-
-        // Skip all the embedded statements within 'stmt' (which immediately follow 'stmt' in the statement list).
-        // Insert after the last such embedded statement.
-        GenTreeStmt* stmtAfter = stmt;
-        while ((stmtAfter->gtNext != nullptr) && stmtAfter->gtNextStmt->gtStmtIsEmbedded())
-        {
-            stmtAfter = stmtAfter->gtNextStmt;
-        }
-
-        fgInsertStmtAfter(block, stmtAfter, result);
-    }
-    else
-    {
-        gtSetEvalOrder(tree);
-        fgSetTreeSeq(tree);
-        fgInsertTreeInListAfter(tree, insertionPoint, stmt);
-        result = fgMakeEmbeddedStmt(block, tree, stmt);
-    }
-
-    DBEXEC(true, fgDebugCheckNodeLinks(block, result));
-    return result;
 }
 
 
@@ -20166,8 +19497,7 @@ void                Compiler::fgDumpStmtTree(GenTreePtr stmt, unsigned blkNum)
 {
     compCurStmtNum++;  // Increment the current stmtNum
 
-    printf("\n***** BB%02u, stmt %d (%s)\n", blkNum, compCurStmtNum,
-           stmt->gtFlags & GTF_STMT_TOP_LEVEL ? "top level" : "embedded");
+    printf("\n***** BB%02u, stmt %d\n", blkNum, compCurStmtNum);
 
     if (fgOrder == FGOrderLinear || opts.compDbgInfo)
     {
@@ -20364,7 +19694,7 @@ void                Compiler::fgDebugCheckBBlist(bool checkBBNum  /* = false */,
                           block->lastNode()->gtOper == GT_SWITCH_TABLE));
 #else // LEGACY_BACKEND
             noway_assert(block->lastStmt()->gtNext == NULL &&
-                         block->lastTopLevelStmt()->gtStmtExpr->gtOper == GT_SWITCH);
+                         block->lastStmt()->gtStmtExpr->gtOper == GT_SWITCH);
 #endif // LEGACY_BACKEND
         }
         else if (!(   block->bbJumpKind == BBJ_ALWAYS
@@ -21080,6 +20410,7 @@ void Compiler::fgDebugCheckNodeLinks(BasicBlock* block, GenTree* node)
     }
 }
 
+// TODO-LIR: remove?
 //------------------------------------------------------------------------
 // fgDebugCheckLinearTree: Counts the nodes in a tree by doing a tree traversal,
 //    and validates that GT_CATCH_ARG causes GTF_ORDER_SIDEEFF to be set on
@@ -21167,13 +20498,6 @@ void Compiler::fgDebugCheckLinearNodeLinks(BasicBlock* block,
     assert(fgOrder == FGOrderLinear);
     assert(topLevelStmt->gtOper == GT_STMT);
 
-    // TODO-Cleanup: This is generally called for statements in order, so we'll skip the embedded ones.
-    // Consider whether we should do some alternate checking in that case (e.g. just validate
-    // the list is correct OR validate the corresponding top-level statement, which we probably
-    // just finished doing, OR fix all callees to check whether it's top-level before calling this).
-    if ((topLevelStmt->gtFlags & GTF_STMT_TOP_LEVEL) == 0)
-        return;
-
     // We're first going to traverse the statements in linear order, counting the nodes and ensuring that
     // the links are consistent.
     // We should be able to reach all the nodes by starting with topLevelStmt->gtStmt.gtStmtList.
@@ -21234,12 +20558,7 @@ void Compiler::fgDebugCheckLinearNodeLinks(BasicBlock* block,
         JITDUMP("\nNow checking tree-ordering:\n");
     }
 
-    do
-    {
-        treeNodeCount += fgDebugCheckLinearTree(block, stmt, stmt->gtStmtExpr, printNodes);
-        stmt = stmt->gtNextStmt;
-    } 
-    while (stmt != nullptr && (stmt->gtFlags & GTF_STMT_TOP_LEVEL) == 0);
+    treeNodeCount += fgDebugCheckLinearTree(block, stmt, stmt->gtStmtExpr, printNodes);
 
     if (treeNodeCount != linearNodeCount)
     {
@@ -21252,31 +20571,6 @@ void Compiler::fgDebugCheckLinearNodeLinks(BasicBlock* block,
     assert (treeNodeCount == linearNodeCount);
 }
 
-
-//------------------------------------------------------------------------
-// fgStmtContainsNode:
-//    Debugging method to check whether a tree is inside the given
-//    statement.
-//
-// Arguments:
-//    stmt - The statement whose tree is presumably contained inside
-//    tree - GenTree to be checked.
-//
-// Return Value:
-//    True in case 'tree' is contained inside statement 'stmt'
-//
-bool Compiler::fgStmtContainsNode(GenTreeStmt* stmt, GenTree* tree)
-{
-    GenTree* first = stmt->gtStmtList;
-    for (GenTree* actual = first;
-         actual != nullptr;
-         actual = actual->gtNext)
-    {
-        if (actual == tree)
-            return true;
-    }
-    return false;
-}
 
 /*****************************************************************************
  *
@@ -21429,86 +20723,6 @@ void Compiler::fgDebugCheckBlockLinks()
 /*****************************************************************************/
 #endif // DEBUG
 /*****************************************************************************/
-
-// TODO-LIR: remove function
-//------------------------------------------------------------------------
-// fgNodeContainsEmbeddedStatement:
-//    Predicate that verifies whether the given tree has an embedded statement
-//    in it.
-//
-// Arguments:
-//    tree     - GenTree to be checked.
-//    topLevel - The top-level statement where 'tree' lives.
-//
-// Assumptions:
-//    The given 'tree' must be contained inside 'topLevel' (i.e. is a descendant
-//    of topLevel.gtStmtExpr
-//
-// Return Value:
-//    True in case 'tree' contains an embedded statement.
-//
-bool Compiler::fgNodeContainsEmbeddedStatement(GenTree* tree, GenTreeStmt* topLevel)
-{
-    assert(fgStmtContainsNode(topLevel, tree));
-
-    for (GenTree* actual = fgGetFirstNode(tree);
-         actual != tree;
-         actual = actual->gtNext)
-    {
-        for (GenTree* curStmt = topLevel->gtNext;
-             curStmt != nullptr && curStmt->gtStmt.gtStmtIsEmbedded();
-             curStmt = curStmt->gtNext)
-        {
-            if (curStmt->gtStmt.gtStmtList == actual)
-                return true;
-        }
-    }
-    return false;
-}
-
-// TODO-LIR: remove function
-//------------------------------------------------------------------------
-// fgRemoveContainedEmbeddedStatements:
-//    If a tree contains a subtree, recursively remove all embedded
-//    statements "contained" in the subtree.
-//
-// Arguments:
-//    tree     - GenTree to be checked.
-//    stmt - The statement where 'tree' lives.
-//    block    - block where "topLevel" lives.
-//
-// Assumptions:
-//    The given 'tree' must be contained inside 'stmt' (i.e. is a descendant
-//    of stmt.gtStmtExpr and 'stmt' is in 'block'
-//
-// Return Value:
-//    None, but all embedded statements that the tree depends on are removed.
-//
-void Compiler::fgRemoveContainedEmbeddedStatements(GenTreePtr tree, GenTreeStmt* stmt, BasicBlock* block)
-{
-    assert(fgStmtContainsNode(stmt, tree));
-
-    GenTreePtr embCursor = stmt->gtNext;
-    // Get the first node that will be evaluated in the subtree,
-    // "tree" will be the last node to be evaluated.
-    for (GenTree* child = fgGetFirstNode(tree); child != tree; child = child->gtNext)
-    {
-        // Now check each following stmt to see if "tree"
-        // is actually the first node in its stmt list.
-        for (GenTreePtr cur = embCursor;
-             cur != nullptr && cur->gtStmt.gtStmtIsEmbedded();
-             cur = cur->gtNext)
-        {
-            if (cur->gtStmt.gtStmtList == child)
-            {
-                fgRemoveContainedEmbeddedStatements(cur->gtStmt.gtStmtExpr, cur->AsStmt(), block);
-                fgRemoveStmt(block, cur);
-                embCursor = cur->gtNext;
-                break;
-            }
-        }
-    }
-}
 
 //------------------------------------------------------------------------
 // fgCheckForInlineDepthAndRecursion: compute depth of the candidate, and

@@ -5137,48 +5137,6 @@ bool                GenTree::IsAddWithI32Const(GenTreePtr* addr, int* offset)
     return false;
 }
 
-//------------------------------------------------------------------------
-// InsertAfterSelf: Insert 'node' after this node in execution order.
-// If 'stmt' is not nullptr, then it is the parent statement of 'this', and we can insert at the
-// end of the statement list. If 'stmt' is nullptr, we can't insert at the end of the statement list.
-//
-// Arguments:
-//    'node' - The node to insert. We only insert a node, not a whole tree.
-//    'stmt' - Optional. If set, the parent statement of 'this'.
-//
-// Return Value:
-//    None.
-//
-// Assumptions:
-//    'node' is a single node to insert, not a tree to insert.
-//
-// Notes:
-//    Use Compiler::fgInsertTreeInListAfter() to insert a whole tree.
-
-void            GenTree::InsertAfterSelf(GenTree* node, GenTreeStmt* stmt /* = nullptr */)
-{
-    // statements have crazy requirements
-    assert(this->gtOper != GT_STMT);
-
-    node->gtNext = this->gtNext;
-    node->gtPrev = this;
-
-    // Insertion at beginning and end of block are special cases
-    // and require more context.
-    if (this->gtNext == nullptr)
-    {
-        assert(stmt != nullptr);
-        assert(stmt->gtOper == GT_STMT);
-        assert(stmt->gtStmtExpr == this);
-        stmt->gtStmtExpr = node;
-    }
-    else
-    {
-        this->gtNext->gtPrev = node;
-    }
-
-    this->gtNext = node;
-}
 
 //------------------------------------------------------------------------
 // gtGetChildPointer: If 'parent' is the parent of this node, return the pointer
@@ -8971,11 +8929,6 @@ DASH:
 
             if (tree->gtOper == GT_STMT)
             {
-                if (tree->gtFlags & GTF_STMT_TOP_LEVEL)
-                    printf("(top level) ");
-                else
-                    printf("(embedded) ");
-
                 if (opts.compDbgInfo)
                 {
                     IL_OFFSET endIL = tree->gtStmt.gtStmtLastILoffs;
@@ -10604,48 +10557,6 @@ GenTreePtr          Compiler::gtDispLinearTree(GenTreeStmt* curStmt,
     {
         printf("BROKEN LINEAR ORDER\n");
         nextLinearNode = tree;
-    }
-
-    // If we don't have a 'curStmt', we're only printing the local tree, so skip
-    // any embedded statements
-    if (curStmt != nullptr)
-    {
-        while (nextLinearNode != tree)
-        {
-            // Get the next statement, which had better be embedded
-            GenTreePtr nextStmt = curStmt->gtNext;
-            while (nextStmt != nullptr &&
-                   nextStmt->gtStmt.gtStmtIsEmbedded() &&
-                   nextStmt->gtStmt.gtStmtList != nextLinearNode)
-            {
-                nextStmt = nextStmt->gtNext;
-            }
-
-            if(nextStmt != nullptr && nextStmt->gtStmt.gtStmtList == nextLinearNode)
-            {
-                indentStack->Push(IIEmbedded);
-                nextLinearNode = gtDispLinearStmt(nextStmt->AsStmt(), indentStack);
-                indentStack->Pop();
-            }
-            else if (nextLinearNode != nullptr)
-            {
-                // If we have an inconsistency, attempt to print the rest of the broken tree, but don't assert,
-                // since we don't really want to have different asserts when dumping.
-                // The method should fail later with an assert in fgDebugCheckNodeLinks() the next time it's called.
-                // Print the next node in linear order, and eventually we will reach the end of the statement,
-                // or sync up to 'tree'
-                IndentInfo saveInfo = indentStack->Pop();
-                indentStack->Push(IIError);
-                gtDispTree(nextLinearNode, indentStack, msg, true /*topOnly*/);
-                nextLinearNode = nextLinearNode->gtNext;
-                indentStack->Pop();
-                indentStack->Push(saveInfo);
-            }
-            else
-            {
-                break;
-            }
-        }
     }
 
     // Now, get the right type of arc for this node

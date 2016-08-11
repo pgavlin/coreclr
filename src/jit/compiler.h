@@ -3427,12 +3427,7 @@ public :
     //  - In FGOrderTree, the dominant ordering is the tree order, and the nodes contained in
     //    each tree and sub-tree are contiguous, and can be traversed (in gtNext/gtPrev order)
     //    by traversing the tree according to the order of the operands.
-    //  - In FGOrderLinear, the dominant ordering is the linear order.  Each statement is either
-    //    a top-level statement (GTF_STMT_TOP_LEVEL), or its nodes are ordered within the previous
-    //    top-level statement.  It is an invariant that such nodes are FULLY embedded in the top-
-    //    level statement (i.e. both the first and last node, in execution order, for the top-level
-    //    statement DO NOT belong to one of the embedded trees).  It is possible that we will want
-    //    to relax this requirement, but it makes it easier to validate the order.
+    //  - In FGOrderLinear, the dominant ordering is the linear order.
 
     enum FlowGraphOrder { FGOrderTree, FGOrderLinear };
     FlowGraphOrder      fgOrder;
@@ -3531,8 +3526,6 @@ public :
     GenTreeStmt*        fgNewStmtFromTree       (GenTreePtr tree);
     GenTreeStmt*        fgNewStmtFromTree       (GenTreePtr tree, BasicBlock* block);
     GenTreeStmt*        fgNewStmtFromTree       (GenTreePtr tree, IL_OFFSETX offs);
-
-    GenTreePtr          fgGetLastTopLevelStmt(BasicBlock *block);
 
     GenTreePtr          fgGetTopLevelQmark      (GenTreePtr expr, GenTreePtr* ppDst = NULL);
     void                fgExpandQmarkForCastInstOf(BasicBlock* block, GenTreePtr stmt);
@@ -4144,8 +4137,6 @@ public:
 
     void                fgRemoveEmptyBlocks();
 
-    void                fgRemoveLinearOrderDependencies(GenTreePtr stmt);
-
     void                fgRemoveStmt      (BasicBlock * block,
                                            GenTreePtr   stmt,
                                            bool updateRefCnt = true);
@@ -4314,19 +4305,8 @@ public:
                                            regMaskTP  * regsPtr); // OUT
 #endif // LEGACY_BACKEND
 
-    static GenTreeStmt* fgFindTopLevelStmtBackwards(GenTreeStmt* stmt);
     static GenTreePtr   fgGetFirstNode      (GenTreePtr tree);
-    static void         fgSnipNode          (GenTreeStmt* stmt, GenTreePtr node);
-    static void         fgSnipInnerNode     (GenTreePtr node);
-    static void         fgDeleteTreeFromList(GenTreeStmt* stmt, GenTreePtr tree);
     static bool         fgTreeIsInStmt(GenTree* tree, GenTreeStmt* stmt);
-    static void         fgInsertTreeInListBefore(GenTree* tree, GenTree* insertionPoint, GenTreeStmt* stmt);
-    static void         fgInsertTreeInListAfter(GenTree* tree, GenTree* insertionPoint, GenTreeStmt* stmt);
-    GenTreeStmt*        fgInsertTreeBeforeAsEmbedded(GenTree* tree, GenTree* before, GenTreeStmt* stmt, BasicBlock* block);
-    GenTreeStmt*        fgInsertTreeAfterAsEmbedded(GenTree* tree, GenTree* before, GenTreeStmt* stmt, BasicBlock* block);
-    bool                fgNodeContainsEmbeddedStatement(GenTree* tree, GenTreeStmt* topLevel);
-    void                fgRemoveContainedEmbeddedStatements(GenTreePtr tree, GenTreeStmt* topLevel, BasicBlock* block);
-    bool                fgStmtContainsNode(GenTreeStmt* stmt, GenTree* tree);
 
     inline bool         fgIsInlining()  { return fgExpandInline; }
 
@@ -4494,9 +4474,6 @@ public:     // Used by linear scan register allocation
                                            GenTreePtr     insertionPoint,
                                            GenTreePtr     stmt
                                           );
-    void                fgReplaceStmt     (BasicBlock * block,  
-                                           GenTreeStmt*   stmt,
-                                           GenTreePtr newTree);
 
 private:
     GenTreePtr          fgInsertStmtListAfter(BasicBlock * block,  
@@ -4508,17 +4485,8 @@ private:
                                          GenTree *stmt,
                                          BasicBlock *blk);
 
-    //                  insert the given subtree as an embedded statement of parentStmt
-    GenTreeStmt*        fgMakeEmbeddedStmt(BasicBlock *block, GenTreePtr tree, GenTreePtr parentStmt);
-
-    //                  Insert the given single node before 'before'.
-    //                  Either the callee must ensure that 'before' is part of compCurStmt,
-    //                  or before->gtPrev must be non-null
-    void                fgInsertLinearNodeBefore(GenTreePtr newNode, GenTreePtr before);
-
     //                  Create a new temporary variable to hold the result of *ppTree,
     //                  and transform the graph accordingly.
-    GenTreeStmt*        fgInsertEmbeddedFormTemp(GenTree** ppTree, unsigned lvaNum=BAD_VAR_NUM);
     GenTree*            fgInsertCommaFormTemp   (GenTree** ppTree, CORINFO_CLASS_HANDLE structType = nullptr);
     GenTree*            fgMakeMultiUse          (GenTree** ppTree);
 
