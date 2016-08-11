@@ -15954,7 +15954,7 @@ REPEAT:;
     {
         for (BasicBlock* block = fgFirstBB; block != nullptr; block = block->bbNext)
         {
-            assert(LIR::AsRange(block).CheckLIR(this));
+            LIR::AsRange(block).CheckLIR(this);
         }
     }
 
