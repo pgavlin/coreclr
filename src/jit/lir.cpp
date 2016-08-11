@@ -639,10 +639,11 @@ void LIR::Range::InsertBefore(GenTree* insertionPoint, GenTree* node1, GenTree* 
     assert(node3->gtPrev == nullptr);
 
     node1->gtNext = node2;
+
+    node2->gtPrev = node1;
     node2->gtNext = node3;
 
     node3->gtPrev = node2;
-    node2->gtPrev = node1;
 
     FinishInsertBefore(insertionPoint, node1, node3);
 }
@@ -680,12 +681,14 @@ void LIR::Range::InsertBefore(GenTree* insertionPoint, GenTree* node1, GenTree* 
     assert(node4->gtPrev == nullptr);
 
     node1->gtNext = node2;
+
+    node2->gtPrev = node1;
     node2->gtNext = node3;
+
+    node3->gtPrev = node2;
     node3->gtNext = node4;
 
     node4->gtPrev = node3;
-    node3->gtPrev = node2;
-    node2->gtPrev = node1;
 
     FinishInsertBefore(insertionPoint, node1, node4);
 }
@@ -822,10 +825,11 @@ void LIR::Range::InsertAfter(GenTree* insertionPoint, GenTree* node1, GenTree* n
     assert(node3->gtPrev == nullptr);
 
     node1->gtNext = node2;
+
+    node2->gtPrev = node1;
     node2->gtNext = node3;
 
     node3->gtPrev = node2;
-    node2->gtPrev = node1;
 
     FinishInsertAfter(insertionPoint, node1, node3);
 }
@@ -863,12 +867,14 @@ void LIR::Range::InsertAfter(GenTree* insertionPoint, GenTree* node1, GenTree* n
     assert(node4->gtPrev == nullptr);
 
     node1->gtNext = node2;
+
+    node2->gtPrev = node1;
     node2->gtNext = node3;
+
+    node3->gtPrev = node2;
     node3->gtNext = node4;
 
     node4->gtPrev = node3;
-    node3->gtPrev = node2;
-    node2->gtPrev = node1;
 
     FinishInsertAfter(insertionPoint, node1, node4);
 }
@@ -921,8 +927,7 @@ void LIR::Range::FinishInsertAfter(GenTree* insertionPoint, GenTree* first, GenT
 }
 
 //------------------------------------------------------------------------
-// LIR::Range::InsertBefore: Inserts a range before another node in `this`
-//                           range.
+// LIR::Range::InsertBefore: Inserts a range before another node in `this` range.
 //
 // Arguments:
 //    insertionPoint - The node before which `range` will be inserted.
@@ -935,36 +940,11 @@ void LIR::Range::FinishInsertAfter(GenTree* insertionPoint, GenTree* first, GenT
 void LIR::Range::InsertBefore(GenTree* insertionPoint, Range&& range)
 {
     assert(!range.IsEmpty());
-
-    if (insertionPoint == nullptr)
-    {
-        assert(IsEmpty());
-
-        m_firstNode = range.m_firstNode;
-        m_lastNode = range.m_lastNode;
-        return;
-    }
-
-    assert(Contains(insertionPoint));
-
-    if (insertionPoint->gtPrev == nullptr)
-    {
-        assert(insertionPoint == m_firstNode);
-        m_firstNode = range.m_firstNode;
-    }
-    else
-    {
-        range.m_firstNode->gtPrev = insertionPoint->gtPrev;
-        range.m_firstNode->gtPrev->gtNext = range.m_firstNode;
-    }
-
-    range.m_lastNode->gtNext = insertionPoint;
-    insertionPoint->gtPrev = range.m_lastNode;
+    FinishInsertBefore(insertionPoint, range.m_firstNode, range.m_lastNode);
 }
 
 //------------------------------------------------------------------------
-// LIR::Range::InsertAfter: Inserts a range after another node in `this`
-//                          range.
+// LIR::Range::InsertAfter: Inserts a range after another node in `this` range.
 //
 // Arguments:
 //    insertionPoint - The node after which `range` will be inserted.
@@ -977,32 +957,7 @@ void LIR::Range::InsertBefore(GenTree* insertionPoint, Range&& range)
 void LIR::Range::InsertAfter(GenTree* insertionPoint, Range&& range)
 {
     assert(!range.IsEmpty());
-
-    if (insertionPoint == nullptr)
-    {
-        assert(m_firstNode == nullptr);
-        assert(m_lastNode == nullptr);
-
-        m_firstNode = range.m_firstNode;
-        m_lastNode = range.m_lastNode;
-        return;
-    }
-
-    assert(Contains(insertionPoint));
-
-    if (insertionPoint->gtNext == nullptr)
-    {
-        assert(insertionPoint == m_lastNode);
-        m_lastNode = range.m_lastNode;
-    }
-    else
-    {
-        range.m_lastNode->gtNext = insertionPoint->gtNext;
-        range.m_lastNode->gtNext->gtPrev = range.m_lastNode;
-    }
-
-    range.m_firstNode->gtPrev = insertionPoint;
-    insertionPoint->gtNext = range.m_firstNode;
+    FinishInsertAfter(insertionPoint, range.m_firstNode, range.m_lastNode);
 }
 
 //------------------------------------------------------------------------
