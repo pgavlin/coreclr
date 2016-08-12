@@ -8504,8 +8504,10 @@ GenTreeStmt* Compiler::fgNewStmtFromTree(GenTreePtr tree, IL_OFFSETX offs)
 
 IL_OFFSET Compiler::fgFindBlockILOffset(BasicBlock* block)
 {
-    // TODO(btf): make work for LIR
-    //
+    // This function searches for IL offsets in statement nodes, so it can't be used in LIR. We
+    // could have a similar function for LIR that searches for GT_IL_OFFSET nodes.
+    assert(!block->IsLIR());
+
 #if defined(DEBUGGING_SUPPORT) || defined(DEBUG)
     for (GenTree* stmt = block->bbTreeList; stmt != nullptr; stmt = stmt->gtNext)
     {
@@ -8610,6 +8612,8 @@ BasicBlock* Compiler::fgSplitBlockAtEnd(BasicBlock* curr)
 //------------------------------------------------------------------------------
 BasicBlock* Compiler::fgSplitBlockAfterStatement(BasicBlock* curr, GenTree* stmt)
 {
+    assert(!curr->IsLIR()); // No statements in LIR, so you can't use this function.
+
     BasicBlock* newBlock = fgSplitBlockAtEnd(curr);
 
     if (stmt)
