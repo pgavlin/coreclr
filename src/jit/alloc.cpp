@@ -52,10 +52,10 @@ enum
 {
     BLOCK_SIZE = 32,
 
-    MARK_BITS = 2,
-    MARK_START = 0x1,
+    MARK_BITS   = 2,
+    MARK_START  = 0x1,
     MARK_MARKED = 0x2,
-    MARK_MASK = MARK_START | MARK_MARKED,
+    MARK_MASK   = MARK_START | MARK_MARKED,
 };
 
 static size_t getBlockMapEntryCount(uintptr_t sizeInBytes)
@@ -69,8 +69,8 @@ static void getBlockMapMaxIndex(uintptr_t sizeInBytes, size_t* maxByteIndex, siz
     assert(maxBitIndex != nullptr);
 
     size_t entryCount = getBlockMapEntryCount(sizeInBytes);
-    *maxByteIndex = (MARK_BITS * entryCount) / 8;
-    *maxBitIndex = (MARK_BITS * entryCount) % 8;
+    *maxByteIndex     = (MARK_BITS * entryCount) / 8;
+    *maxBitIndex      = (MARK_BITS * entryCount) % 8;
 }
 
 static size_t getBlockMapSize(uintptr_t sizeInBytes)
@@ -117,11 +117,8 @@ size_t ArenaAllocator::getDefaultPageSize()
 // ArenaAllocator::ArenaAllocator:
 //    Default-constructs an arena allocator.
 ArenaAllocator::ArenaAllocator()
-    : m_memoryManager(nullptr)
-    , m_firstPage(nullptr)
-    , m_lastPage(nullptr)
-    , m_nextFreeByte(nullptr)
-    , m_lastFreeByte(nullptr)
+    : m_memoryManager(nullptr), m_firstPage(nullptr), m_lastPage(nullptr), m_nextFreeByte(nullptr),
+      m_lastFreeByte(nullptr)
 {
 }
 
@@ -133,11 +130,8 @@ ArenaAllocator::ArenaAllocator()
 //    memoryManager - The `IEEMemoryManager` instance that will be used to
 //                    allocate memory for arena pages.
 ArenaAllocator::ArenaAllocator(IEEMemoryManager* memoryManager)
-    : m_memoryManager(memoryManager)
-    , m_firstPage(nullptr)
-    , m_lastPage(nullptr)
-    , m_nextFreeByte(nullptr)
-    , m_lastFreeByte(nullptr)
+    : m_memoryManager(memoryManager), m_firstPage(nullptr), m_lastPage(nullptr), m_nextFreeByte(nullptr),
+      m_lastFreeByte(nullptr)
 {
     assert(getDefaultPageSize() != 0);
     assert(isInitialized());
@@ -241,7 +235,8 @@ void* ArenaAllocator::allocateNewPage(size_t size, bool canThrow)
 
 #if defined(DEBUG)
     // In debug mode, the first allocatable byte in the page must lie on a BLOCK_SIZE-byte boundary.
-    newPage->m_contents = reinterpret_cast<BYTE*>(roundUp(reinterpret_cast<uintptr_t>(newPage) + sizeof(*newPage), BLOCK_SIZE));
+    newPage->m_contents =
+        reinterpret_cast<BYTE*>(roundUp(reinterpret_cast<uintptr_t>(newPage) + sizeof(*newPage), BLOCK_SIZE));
 #endif
 
     if (m_lastPage != nullptr)
@@ -431,8 +426,8 @@ void ArenaAllocator::getBlockMapIndex(PageDescriptor* page, void* address, size_
     assert((reinterpret_cast<uintptr_t>(page->m_contents) % BLOCK_SIZE) == 0);
 
     size_t blockIndex = ((reinterpret_cast<BYTE*>(address) - page->m_contents) / BLOCK_SIZE) * MARK_BITS;
-    *byteIndex = blockIndex / 8;
-    *bitIndex = blockIndex % 8;
+    *byteIndex        = blockIndex / 8;
+    *bitIndex         = blockIndex % 8;
 }
 
 void ArenaAllocator::mark(uintptr_t address)
@@ -441,7 +436,7 @@ void ArenaAllocator::mark(uintptr_t address)
 
     // Check to see if the address points into any of this allocator's pages
     PageDescriptor* containingPage = nullptr;
-    uintptr_t pageEnd = 0;
+    uintptr_t       pageEnd        = 0;
     for (PageDescriptor* page = m_firstPage; page != nullptr; page = page->m_next)
     {
         pageEnd = reinterpret_cast<uintptr_t>(page) + page->m_usedBytes;
@@ -490,10 +485,12 @@ void ArenaAllocator::mark(uintptr_t address)
         }
 
         // Have we hit the end of the block map, a marked block, or the start of a new allocation?
-    } while ((byteIndex < maxByteIndex || bitIndex < maxBitIndex) && ((blockMap[byteIndex] & (MARK_MASK << bitIndex)) == 0));
+    } while ((byteIndex < maxByteIndex || bitIndex < maxBitIndex) &&
+             ((blockMap[byteIndex] & (MARK_MASK << bitIndex)) == 0));
 }
 
-static unsigned s_mortalityBuckets[] = { 50, 100, 150, 200, 250, 300, 350, 400, 450, 500, 550, 600, 650, 700, 750, 800, 850, 900, 950, 1000, 0 };
+static unsigned s_mortalityBuckets[] = {50,  100, 150, 200, 250, 300, 350, 400, 450,  500, 550,
+                                        600, 650, 700, 750, 800, 850, 900, 950, 1000, 0};
 static Histogram s_mortalityHistogram(HostAllocator::getHostAllocator(), s_mortalityBuckets);
 size_t ArenaAllocator::getTotalLiveBytes(size_t* deadBytes)
 {
@@ -514,14 +511,14 @@ size_t ArenaAllocator::getTotalLiveBytes(size_t* deadBytes)
 
     // Walk the blocks in each page, accumulate the total number of live bytes,
     // and unmark the live blocks.
-    size_t liveBytes = 0;
+    size_t liveBytes  = 0;
     size_t totalBytes = 0;
     for (PageDescriptor* page = m_firstPage; page != nullptr; page = page->m_next)
     {
-        BYTE* blockMap = page->m_contents;
+        BYTE*  blockMap = page->m_contents;
         size_t maxByteIndex, maxBitIndex;
         getBlockMapMaxIndex(page->m_usedBytes, &maxByteIndex, &maxBitIndex);
-        for (size_t byteIndex = 0, bitIndex = 0; byteIndex < maxByteIndex || bitIndex < maxBitIndex; )
+        for (size_t byteIndex = 0, bitIndex = 0; byteIndex < maxByteIndex || bitIndex < maxBitIndex;)
         {
             if ((blockMap[byteIndex] & (MARK_MARKED << bitIndex)) != 0)
             {
