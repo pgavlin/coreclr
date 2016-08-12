@@ -3591,7 +3591,7 @@ bool Lowering::SetStoreIndOpCountsIfRMWMemOp(GenTreePtr storeInd)
     if (!IsRMWMemOpRootedAtStoreInd(storeInd, &indirCandidate, &indirOpSource))
     {
         JITDUMP("Lower of StoreInd didn't mark the node as self contained for reason: %d\n", storeInd->AsStoreInd()->GetRMWStatus());
-        DISPTREE(storeInd);
+        DISPTREERANGE(BlockRange(), storeInd);
         return false;
     }
 
@@ -3632,7 +3632,7 @@ bool Lowering::SetStoreIndOpCountsIfRMWMemOp(GenTreePtr storeInd)
         JITDUMP("Lower succesfully detected an assignment of the form: *addrMode = UnaryOp(*addrMode)\n");
         info->srcCount = 0;
     }
-    DISPTREE(storeInd);
+    DISPTREERANGE(BlockRange(), storeInd);
     
     m_lsra->clearOperandCounts(indirSrc);
     m_lsra->clearOperandCounts(indirCandidate);

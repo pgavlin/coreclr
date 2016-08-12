@@ -286,7 +286,7 @@ unsigned LIR::Use::ReplaceWithLclVar(Compiler* compiler, unsigned blockWeight, u
     ReplaceWith(compiler, load);
 
     JITDUMP("ReplaceWithLclVar created store :\n");
-    DISPTREE(store);
+    DISPNODE(store);
 
     return lclNum;
 }

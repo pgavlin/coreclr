@@ -629,14 +629,14 @@ GenTree* DecomposeLongs::DecomposeStoreInd(LIR::Use& use)
     LIR::Use address(BlockRange(), &tree->gtOp.gtOp1, tree);
     address.ReplaceWithLclVar(m_compiler, blockWeight);
     JITDUMP("[DecomposeStoreInd]: Saving address tree to a temp var:\n");
-    DISPTREE(address.Def());
+    DISPTREERANGE(BlockRange(), address.Def());
 
     if (!gtLong->gtOp.gtOp1->OperIsLeaf())
     {
         LIR::Use op1(BlockRange(), &gtLong->gtOp.gtOp1, gtLong);
         op1.ReplaceWithLclVar(m_compiler, blockWeight);
         JITDUMP("[DecomposeStoreInd]: Saving low data tree to a temp var:\n");
-        DISPTREE(op1.Def());
+        DISPTREERANGE(BlockRange(), op1.Def());
     }
 
     if (!gtLong->gtOp.gtOp2->OperIsLeaf())
@@ -644,7 +644,7 @@ GenTree* DecomposeLongs::DecomposeStoreInd(LIR::Use& use)
         LIR::Use op2(BlockRange(), &gtLong->gtOp.gtOp2, gtLong);
         op2.ReplaceWithLclVar(m_compiler, blockWeight);
         JITDUMP("[DecomposeStoreInd]: Saving high data tree to a temp var:\n");
-        DISPTREE(op2.Def());
+        DISPTREERANGE(BlockRange(), op2.Def());
     }
 
     // Example trees after embedded statements for address and data are added.
@@ -788,7 +788,7 @@ GenTree* DecomposeLongs::DecomposeInd(LIR::Use& use)
     LIR::Use address(BlockRange(), &indLow->gtOp.gtOp1, indLow);
     address.ReplaceWithLclVar(m_compiler, m_block->getBBWeight(m_compiler));
     JITDUMP("[DecomposeInd]: Saving addr tree to a temp var:\n");
-    DISPTREE(address.Def());
+    DISPTREERANGE(BlockRange(), address.Def());
 
     // Change the type of lower ind.
     indLow->gtType = TYP_INT;

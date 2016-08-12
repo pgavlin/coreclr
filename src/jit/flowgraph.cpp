@@ -19532,10 +19532,7 @@ void                Compiler::fgDumpBlock(BasicBlock* block)
     }
     else
     {
-        for (GenTree* node = block->bbTreeList; node != nullptr; node = node->gtNext)
-        {
-            gtDispLIRNode(node);
-        }
+        gtDispRange(LIR::AsRange(block));
     }
 }
 

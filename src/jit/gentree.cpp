@@ -9656,19 +9656,6 @@ void                Compiler::gtDispTree(GenTreePtr             tree,
         return;
     }
 
-    if (fgOrder == FGOrderLinear && !topOnly)
-    {
-        if (tree->gtOper == GT_STMT)
-        {
-            (void) gtDispLinearStmt(tree->AsStmt());
-        }
-        else
-        {
-            gtDispLinearTree(nullptr, fgGetFirstNode(tree), tree, new (this, CMK_DebugOnly) IndentStack(this));
-        }
-        return;
-    }
-
     if (indentStack == nullptr)
     {
         indentStack = new (this, CMK_DebugOnly) IndentStack(this);
@@ -10086,8 +10073,8 @@ void                Compiler::gtDispTree(GenTreePtr             tree,
 //    call      - The call for which 'arg' is an argument
 //    arg       - The argument for which a message should be constructed
 //    argNum    - The ordinal number of the arg in the argument list
-//    listCount - When printing in Linear form this is the count for a multireg GT_LIST 
-//                or -1 if we are not printing in Linear form
+//    listCount - When printing in LIR form this is the count for a multireg GT_LIST 
+//                or -1 if we are not printing in LIR form
 //    bufp      - A pointer to the buffer into which the message is written
 //    bufLength - The length of the buffer pointed to by bufp
 //
@@ -10144,8 +10131,8 @@ void                Compiler::gtGetArgMsg(GenTreePtr        call,
 //    call         - The call for which 'arg' is an argument
 //    argx         - The argument for which a message should be constructed
 //    lateArgIndex - The ordinal number of the arg in the lastArg  list
-//    listCount    - When printing in Linear form this is the count for a multireg GT_LIST 
-//                   or -1 if we are not printing in Linear form
+//    listCount    - When printing in LIR form this is the count for a multireg GT_LIST 
+//                   or -1 if we are not printing in LIR form
 //    bufp         - A pointer to the buffer into which the message is written
 //    bufLength    - The length of the buffer pointed to by bufp
 //
@@ -10290,338 +10277,29 @@ void                Compiler::gtDispTreeList(GenTreePtr     tree,
     }
 }
 
-//------------------------------------------------------------------------
-// nextPrintable: Retrieves the next gtNode that can be dumped in linear order
-//
-// Arguments:
-//    next         - The call for which 'arg' is an argument
-//    tree         - the specification for the current level of indentation & arcs
-//
-// Return Value:
-//    The next node to be printed in linear order.
-//
-GenTree* nextPrintable(GenTree* next, GenTree* tree)
+// TODO(pdg): comment
+void Compiler::gtDispRange(LIR::ReadOnlyRange const & range)
 {
-    assert(next != nullptr);
-    assert(tree != nullptr);
-
-    // Skip any nodes that are in the linear order, but that we don't actually visit
-    while (next != tree && (next->IsList() || next->IsArgPlaceHolderNode()))
+    for (GenTree* node : range)
     {
-        next = next->gtNext;
+        gtDispLIRNode(node);
     }
-    return next;
 }
 
-//------------------------------------------------------------------------
-// gtDispLinearTree: Dump a tree in linear order
-//
-// Arguments:
-//    curStmt        - The current statement being dumped
-//    nextLinearNode - The next node to be printed
-//    tree           - The current tree being traversed
-//    indentStack    - the specification for the current level of indentation & arcs
-//    msg            - a contextual method (i.e. from the parent) to print
-//
-// Return Value:
-//    None.
-//
-// Assumptions:
-//    'tree' must be a GT_LIST node
-//
-// Notes:
-//     'nextLinearNode' tracks the node we should be printing next.
-//     In general, we should encounter it as we traverse the tree.  If not, we
-//     have an embedded statement, so that statement is then printed within
-//     the dump for this statement.
-
-GenTreePtr          Compiler::gtDispLinearTree(GenTreeStmt* curStmt,
-                                               GenTreePtr   nextLinearNode,
-                                               GenTreePtr   tree,
-                                               IndentStack* indentStack,
-                                               __in __in_z __in_opt const char * msg /* = nullptr  */)
+// TODO(pdg): comment
+void Compiler::gtDispTreeRange(LIR::Range& containingRange, GenTree* tree)
 {
-    const int  BufLength = 256;
-    char       buf[BufLength];
-    char *     bufp     = &buf[0];
-
-    // Determine what kind of arc to propagate
-    IndentInfo myArc = IINone;
-    if (indentStack->Depth() > 0)
-    {
-        myArc = indentStack->Pop();
-        if (myArc == IIArcBottom || myArc == IIArc)
-        {
-            indentStack->Push(IIArc);
-        }
-        else
-        {
-            assert(myArc == IIArcTop);
-            indentStack->Push(IINone);
-        }
-    }
-
-    // Visit children
-    unsigned childCount = tree->NumChildren();
-    GenTreePtr deferChild = nullptr;
-    for (unsigned i = 0;
-         i < childCount;
-         i++)
-    {
-        unsigned childIndex = i;
-        if (tree->OperIsBinary() && tree->IsReverseOp())
-        {
-            childIndex = (i == 0) ? 1 : 0;
-        }
-
-        GenTreePtr child = tree->GetChild(childIndex);
-        IndentInfo indentInfo = (i == 0) ? IIArcTop : IIArc;
-
-        if (tree->OperGet() == GT_COLON && i == 1)
-        {
-            deferChild = child;
-            continue;
-        }
-
-        unsigned listElemNum = 0;
-        const char* childMsg = nullptr;
-        if (tree->IsCall())
-        {
-            if (child == tree->gtCall.gtCallObjp)
-            {
-                if (child->gtOper == GT_ASG)
-                {
-                    sprintf_s(bufp, sizeof(buf), "this SETUP%c", 0);
-                }
-                else
-                {
-                    sprintf_s(bufp, sizeof(buf), "this in %s%c", compRegVarName(REG_ARG_0), 0);
-                }
-                childMsg = bufp;
-            }
-            else if (child == tree->gtCall.gtCallAddr)
-            {
-                childMsg = "calli tgt";
-            }
-            else if (child == tree->gtCall.gtControlExpr)
-            {
-                childMsg = "control expr";
-            }
-            else if (child == tree->gtCall.gtCallCookie)
-            {
-                childMsg = "cookie";
-            }
-            else if (child == tree->gtCall.gtCallArgs)
-            {
-                // List is handled below, but adjust listElemNum to account for "this" if necessary
-                if (tree->gtCall.gtCallObjp != nullptr)
-                    listElemNum = 1;
-            }
-            else
-            {
-                // Late args list is handled below
-                assert(child == tree->gtCall.gtCallLateArgs);
-            }
-        }
-
-        if (child->OperGet() == GT_LIST)
-        {
-            // For each list element
-            GenTreePtr nextList = nullptr;
-            if (child->gtOp.gtOp2 != nullptr
-                && child->gtOp.gtOp2->gtOper != GT_LIST)
-            {
-                // special case for child of initblk and cpblk
-                // op1 is dst, op2 is src, and op2 must show up first
-                assert(tree->OperIsBlkOp());
-                sprintf_s(bufp, sizeof(buf), "Source");
-                indentStack->Push(indentInfo);
-                nextLinearNode = gtDispLinearTree(curStmt, nextLinearNode, child->gtOp.gtOp2, indentStack, bufp);
-                indentStack->Pop();
-
-                indentInfo = IIArc;
-                sprintf_s(bufp, sizeof(buf), "Destination");
-                indentStack->Push(indentInfo);
-                nextLinearNode = gtDispLinearTree(curStmt, nextLinearNode, child->gtOp.gtOp1, indentStack, bufp);
-                indentStack->Pop();
-            }
-            else
-            {
-                // normal null-terminated list case
-
-                for (GenTreePtr list = child; list != nullptr; list = nextList)
-                {
-                    GenTreePtr listElem;
-                    if (list->gtOper == GT_LIST)
-                    {
-                        nextList = list->gtGetOp2();
-                        listElem = list->gtGetOp1();
-                    }
-                    else
-                    {
-                        // GT_LIST nodes (under initBlk, others?) can have a non-null op2 that's not a GT_LIST
-                        nextList = nullptr;
-                        listElem = list;
-                    }
-
-                    // get child msg
-                    if (tree->IsCall())
-                    {
-                        // If this is a call and the arg (listElem) is a GT_LIST (Unix LCL_FLD for passing a var in
-                        // multiple registers) print the nodes of the nested list and continue to the next argument.
-                        if (listElem->gtOper == GT_LIST)
-                        {
-                            int listCount = 0;
-                            GenTreePtr nextListNested = nullptr;
-                            for (GenTreePtr listNested = listElem; listNested != nullptr; listNested = nextListNested)
-                            {
-                                GenTreePtr listElemNested;
-                                if (listNested->gtOper == GT_LIST)
-                                {
-                                    nextListNested = listNested->MoveNext();
-                                    listElemNested = listNested->Current();
-                                }
-                                else
-                                {
-                                    // GT_LIST nodes (under initBlk, others?) can have a non-null op2 that's not a GT_LIST
-                                    nextListNested = nullptr;
-                                    listElemNested = listNested;
-                                }
-
-                                indentStack->Push(indentInfo);
-                                if (child == tree->gtCall.gtCallArgs)
-                                {
-                                    gtGetArgMsg(tree, listNested, listElemNum, listCount, bufp, BufLength);
-                                }
-                                else
-                                {
-                                    assert(child == tree->gtCall.gtCallLateArgs);
-                                    gtGetLateArgMsg(tree, listNested, listElemNum, listCount, bufp, BufLength);
-                                }
-                                listCount++;
-                                nextLinearNode = gtDispLinearTree(curStmt, nextLinearNode, listElemNested, indentStack, bufp);
-                                indentStack->Pop();
-                            }
-
-                            // Skip the GT_LIST nodes, as we do not print them, and the next node to print will occur
-                            // after the list.
-                            while (nextLinearNode != nullptr && nextLinearNode->OperGet() == GT_LIST)
-                            {
-                                nextLinearNode = nextLinearNode->gtNext;
-                            }
-
-                            listElemNum++;
-                            continue;
-                        }
-
-                        if (child == tree->gtCall.gtCallArgs)
-                        {
-                            gtGetArgMsg(tree, listElem, listElemNum, -1, bufp, BufLength);
-                        }
-                        else
-                        {
-                            assert(child == tree->gtCall.gtCallLateArgs);
-                            gtGetLateArgMsg(tree, listElem, listElemNum, -1, bufp, BufLength);
-                        }
-                    }
-                    else
-                    {
-                        sprintf_s(bufp, sizeof(buf), "List Item %d", listElemNum);
-                    }
-
-                    indentStack->Push(indentInfo);
-                    nextLinearNode = gtDispLinearTree(curStmt, nextLinearNode, listElem, indentStack, bufp);
-                    indentStack->Pop();
-                    indentInfo = IIArc;
-                    listElemNum++;
-                }
-            }
-                
-            // Skip the GT_LIST nodes, as we do not print them, and the next node to print will occur
-            // after the list.
-            while (nextLinearNode != nullptr && nextLinearNode->OperGet() == GT_LIST)
-            {
-                nextLinearNode = nextLinearNode->gtNext;
-            }
-        }
-        else
-        {
-            indentStack->Push(indentInfo);
-            nextLinearNode = gtDispLinearTree(curStmt, nextLinearNode, child, indentStack, childMsg);
-            indentStack->Pop();
-        }
-    }
-    // This sometimes gets called before nodes have been properly sequenced.
-    // TODO-Cleanup: Determine whether this needs to be hardened in some way.
-    if (nextLinearNode == nullptr)
-    {
-        printf("BROKEN LINEAR ORDER\n");
-        nextLinearNode = tree;
-    }
-
-    // Now, get the right type of arc for this node
-    if (myArc != IINone)
-    {
-        indentStack->Pop();
-        indentStack->Push(myArc);
-    }
-    gtDispTree(tree, indentStack, msg, true /*topOnly*/);
-    nextLinearNode = tree->gtNext;
-
-    if (deferChild != nullptr)
-    {
-        indentStack->Push(IIArcBottom);
-        nextLinearNode = gtDispLinearTree(curStmt, nextLinearNode, deferChild, indentStack);
-        indentStack->Pop();
-    }
-    
-    return nextLinearNode;
-}
-
-//------------------------------------------------------------------------
-// gtDispLinearStmt: Dump a statement in linear order
-//
-// Arguments:
-//    stmt           - The current statement being dumped
-//    indentStack    - the specification for the current level of indentation & arcs
-//
-// Return Value:
-//    A pointer to the tree that is next in the linear traversal.
-//    This will generally be null, except when this statement is embedded.
-//
-// Assumptions:
-//    'stmt' must be a GT_STMT node
-
-GenTreePtr            Compiler::gtDispLinearStmt(GenTreeStmt* stmt, IndentStack *indentStack /* = nullptr */)
-{
-    if (indentStack == nullptr)
-    {
-        indentStack = new (this, CMK_DebugOnly) IndentStack(this);
-    }
-    gtDispTree(stmt, indentStack, nullptr, true /*topOnly*/);
-    indentStack->Push(IIArcBottom);
-    GenTreePtr nextLinearNode = gtDispLinearTree(stmt, stmt->gtStmtList, stmt->gtStmtExpr, indentStack);
-    indentStack->Pop();
-    return nextLinearNode;
+    bool unused;
+    gtDispRange(containingRange.GetTreeRange(tree, &unused));
 }
 
 // TODO(pdg): comment
 void Compiler::gtDispLIRNode(GenTree* node)
 {
-    IndentStack indentStack(this);
-
-    // Visit nodes
-    IndentInfo operandArc = IIArcTop;
-    for (GenTree* operand : node->Operands())
+    auto displayOperand = [](GenTree* operand, const char* message, IndentInfo operandArc, IndentStack& indentStack)
     {
-        if (operand->IsArgPlaceHolderNode() || !operand->IsValue())
-        {
-            // Either of these situations may happen with calls.
-            continue;
-        }
-
-        // TODO(pdg): probably nice to have some special handling for call arguments
-        //            in order to generate the same "argN in rM" message as gtDispTree.
+        assert(operand != nullptr);
+        assert(message != nullptr);
 
         // 49 spaces for alignment
         printf("%-49s", "");
@@ -10631,7 +10309,106 @@ void Compiler::gtDispLIRNode(GenTree* node)
         indentStack.Pop();
         operandArc = IIArc;
 
-        printf("  t%d %-6s\n", operand->gtTreeID, varTypeName(operand->TypeGet()));
+        printf("  t%-5d %-6s %s\n", operand->gtTreeID, varTypeName(operand->TypeGet()), message);
+
+    };
+
+    IndentStack indentStack(this);
+
+    const int bufLength = 256;
+    char buf[bufLength];
+
+    const bool nodeIsCall = node->IsCall();
+
+    int numCallEarlyArgs = 0;
+    if (nodeIsCall)
+    {
+        GenTreeCall* call = node->AsCall();
+        for (GenTreeArgList* args = call->gtCallArgs; args != nullptr; args = args->Rest())
+        {
+            if (!args->Current()->IsArgPlaceHolderNode() && args->Current()->IsValue())
+            {
+                numCallEarlyArgs++;
+            }
+        }
+    }
+
+    // Visit operands
+    IndentInfo operandArc = IIArcTop;
+    int callArgNumber = 0;
+    const bool expandMultiRegArgs = false;
+    for (GenTree* operand : node->Operands(expandMultiRegArgs))
+    {
+        if (operand->IsArgPlaceHolderNode() || !operand->IsValue())
+        {
+            // Either of these situations may happen with calls.
+            //
+            // TODO(pdg): provide some sort of dump for on-stack args.
+            continue;
+        }
+
+        if (nodeIsCall)
+        {
+            GenTreeCall* call = node->AsCall();
+            if (operand == call->gtCallObjp)
+            {
+                sprintf_s(buf, sizeof(buf), "this in %s", compRegVarName(REG_ARG_0));
+                displayOperand(operand, buf, operandArc, indentStack);
+            }
+            else if (operand == call->gtCallAddr)
+            {
+                displayOperand(operand, "calli tgt", operandArc, indentStack);
+            }
+            else if (operand == call->gtControlExpr)
+            {
+                displayOperand(operand, "control expr", operandArc, indentStack);
+            }
+            else if (operand == call->gtCallCookie)
+            {
+                displayOperand(operand, "cookie", operandArc, indentStack);
+            }
+            else
+            {
+                int callLateArgNumber = callArgNumber - numCallEarlyArgs;
+                if (operand->OperGet() == GT_LIST)
+                {
+                    int listIndex = 0;
+                    for (GenTreeArgList* element = operand->AsArgList(); element != nullptr; element = element->Rest())
+                    {
+                        operand = element->Current();
+                        if (callLateArgNumber < 0)
+                        {
+                            gtGetArgMsg(call, operand, callArgNumber, listIndex, buf, sizeof(buf));
+                        }
+                        else
+                        {
+                            gtGetLateArgMsg(call, operand, callLateArgNumber, listIndex, buf, sizeof(buf));
+                        }
+
+                        displayOperand(operand, buf, operandArc, indentStack);
+                    }
+                }
+                else
+                {
+                    if (callLateArgNumber < 0)
+                    {
+                        gtGetArgMsg(call, operand, callArgNumber, -1, buf, sizeof(buf));
+                    }
+                    else
+                    {
+                        gtGetLateArgMsg(call, operand, callLateArgNumber, -1, buf, sizeof(buf));
+                    }
+
+                    displayOperand(operand, buf, operandArc, indentStack);
+                }
+
+                callArgNumber++;
+            }
+        }
+        else
+        {
+            displayOperand(operand, "", operandArc, indentStack);
+        }
     }
 
     // Visit the operator
