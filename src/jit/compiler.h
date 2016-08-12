@@ -1462,7 +1462,8 @@ public:
     CompAllocator(Compiler* comp, CompMemKind cmk)
         : m_comp(comp)
 #if MEASURE_MEM_ALLOC
-        , m_cmk(cmk)
+          ,
+          m_cmk(cmk)
 #endif
     {
     }
@@ -9029,7 +9030,7 @@ private:
     size_t compLiveBytesByPhase[PHASE_NUMBER_OF]; // Live bytes in the arena allocator per phase
     size_t compDeadBytesByPhase[PHASE_NUMBER_OF]; // Dead bytes in the arena allocator per phase
 #endif
-    inline void EndPhase(Phases phase);  // Indicate the end of the given phase.
+    inline void EndPhase(Phases phase); // Indicate the end of the given phase.
 
 #if MEASURE_CLRAPI_CALLS
     // Thin wrappers that call into JitTimer (if present).
@@ -9304,7 +9305,7 @@ inline LclVarDsc::LclVarDsc(Compiler* comp)
     lvRefBlks(BlockSetOps::UninitVal())
     ,
 #endif // ASSERTION_PROP
-    lvPerSsaData(comp->getAllocator())
+      lvPerSsaData(comp->getAllocator())
 {
 }
 
