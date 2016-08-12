@@ -2299,10 +2299,6 @@ void Lowering::InsertPInvokeMethodProlog()
     store->gtFlags |= GTF_VAR_DEF;
 
     GenTree* insertionPoint = firstBlockRange.FirstNonPhiOrCatchArgNode();
-    if (insertionPoint == nullptr)
-    {
-        insertionPoint = firstBlockRange.LastNode();
-    }
 
     comp->fgMorphTree(store);
     firstBlockRange.InsertBefore(insertionPoint, LIR::SeqTree(comp, store));
@@ -2319,7 +2315,14 @@ void Lowering::InsertPInvokeMethodProlog()
                                                     callFrameInfo.offsetOfCallSiteSP);
     storeSP->gtOp1 = PhysReg(REG_SPBASE);
 
-    firstBlockRange.InsertBefore(insertionPoint, LIR::SeqTree(comp, storeSP));
+    if (insertionPoint == nullptr)
+    {
+        firstBlockRange.InsertAtEnd(LIR::SeqTree(comp, storeSP));
+    }
+    else
+    {
+        firstBlockRange.InsertBefore(insertionPoint, LIR::SeqTree(comp, storeSP));
+    }
 
     DISPTREERANGE(firstBlockRange, storeSP);
 
@@ -2333,7 +2336,14 @@ void Lowering::InsertPInvokeMethodProlog()
                                                     callFrameInfo.offsetOfCalleeSavedFP);
     storeFP->gtOp1 = PhysReg(REG_FPBASE);
 
-    firstBlockRange.InsertBefore(insertionPoint, LIR::SeqTree(comp, storeFP));
+    if (insertionPoint == nullptr)
+    {
+        firstBlockRange.InsertAtEnd(LIR::SeqTree(comp, storeFP));
+    }
+    else
+    {
+        firstBlockRange.InsertBefore(insertionPoint, LIR::SeqTree(comp, storeFP));
+    }
 
     DISPTREERANGE(firstBlockRange, storeFP);
 
@@ -2344,7 +2354,14 @@ void Lowering::InsertPInvokeMethodProlog()
         // Push a frame - if we are NOT in an IL stub, this is done right before the call
         // The init routine sets InlinedCallFrame's m_pNext, so we just set the thead's top-of-stack
         GenTree* frameUpd = CreateFrameLinkUpdate(PushFrame);
-        firstBlockRange.InsertBefore(insertionPoint, LIR::SeqTree(comp, frameUpd));
+        if (insertionPoint == nullptr)
+        {
+            firstBlockRange.InsertAtEnd(LIR::SeqTree(comp, frameUpd));
+        }
+        else
+        {
+            firstBlockRange.InsertBefore(insertionPoint, LIR::SeqTree(comp, frameUpd));
+        }
         DISPTREERANGE(firstBlockRange, frameUpd);
     }
 }
