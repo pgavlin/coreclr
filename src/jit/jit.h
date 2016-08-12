@@ -511,7 +511,9 @@ void JitDump(const char* pcFormat, ...);
 #define JITLOG_THIS(t, x)
 #define DBEXEC(flg, expr)
 #define DISPNODE(t)
-#define DISPTREE(x)
+#define DISPTREE(t)
+#define DISPRANGE(range)
+#define DISPTREERANGE(range, t)
 #define VERBOSE 0
 #endif // !DEBUG
 
