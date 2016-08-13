@@ -121,7 +121,6 @@ void Lowering::TreeNodeInfoInit(GenTree* stmt)
     LinearScan* l        = m_lsra;
     Compiler*   compiler = comp;
 
-    assert(stmt->gtStmt.gtStmtIsTopLevel());
     GenTree* tree = stmt->gtStmt.gtStmtList;
 
     while (tree)
@@ -1829,9 +1828,8 @@ void Lowering::LowerCmp(GenTreePtr tree)
  * i) GT_CAST(float/double, int type with overflow detection)
  *
  */
-void Lowering::LowerCast(GenTreePtr* ppTree)
+void Lowering::LowerCast(GenTree* tree)
 {
-    GenTreePtr tree = *ppTree;
     assert(tree->OperGet() == GT_CAST);
 
     GenTreePtr op1     = tree->gtOp.gtOp1;
@@ -1869,7 +1867,7 @@ void Lowering::LowerCast(GenTreePtr* ppTree)
 
         tree->gtFlags &= ~GTF_UNSIGNED;
         tree->gtOp.gtOp1 = tmp;
-        op1->InsertAfterSelf(tmp);
+        BlockRange().InsertAfter(op1, tmp);
     }
 }
 
@@ -1892,7 +1890,7 @@ void Lowering::LowerRotate(GenTreePtr tree)
         {
             GenTreePtr tmp =
                 comp->gtNewOperNode(GT_NEG, genActualType(rotateLeftIndexNode->gtType), rotateLeftIndexNode);
-            rotateLeftIndexNode->InsertAfterSelf(tmp);
+            BlockRange().InsertAfter(rotateLeftIndexNode, tmp);
             tree->gtOp.gtOp2 = tmp;
         }
         tree->ChangeOper(GT_ROR);
