@@ -1419,9 +1419,8 @@ void CodeGen::genCodeForBBlist()
 
 #ifdef DEBUG
     genInterruptibleUsed = true;
-    unsigned stmtNum     = 0;
-    UINT64   totalCostEx = 0;
-    UINT64   totalCostSz = 0;
+    UINT64 totalCostEx   = 0;
+    UINT64 totalCostSz   = 0;
 
     // You have to be careful if you create basic blocks from now on
     compiler->fgSafeBasicBlockCreation = false;
@@ -1616,13 +1615,12 @@ void CodeGen::genCodeForBBlist()
 
         if (handlerGetsXcptnObj(block->bbCatchTyp))
         {
-            GenTreePtr firstStmt = block->FirstNonPhiDef();
-            if (firstStmt != NULL)
+            for (GenTree* node : LIR::AsRange(block))
             {
-                GenTreePtr firstTree = firstStmt->gtStmt.gtStmtExpr;
-                if (compiler->gtHasCatchArg(firstTree))
+                if (node->OperGet() == GT_CATCH_ARG)
                 {
                     gcInfo.gcMarkRegSetGCref(RBM_EXCEPTION_OBJECT);
+                    break;
                 }
             }
         }
@@ -1704,75 +1702,65 @@ void CodeGen::genCodeForBBlist()
             genReserveFuncletProlog(block);
         }
 
-        for (GenTreePtr stmt = block->FirstNonPhiDef(); stmt; stmt = stmt->gtNext)
+        // Clear compCurStmt and compCurLifeTree.
+        compiler->compCurStmt     = nullptr;
+        compiler->compCurLifeTree = nullptr;
+
+#ifdef DEBUG
+        bool pastProfileUpdate = false;
+#endif
+
+// Traverse the block in linear order, generating code for each node as we
+// as we encounter it.
+#ifdef DEBUGGING_SUPPORT
+        IL_OFFSETX currentILOffset = BAD_IL_OFFSET;
+#endif
+        for (GenTree* node : LIR::AsRange(block))
         {
-            noway_assert(stmt->gtOper == GT_STMT);
-
-            if (stmt->AsStmt()->gtStmtIsEmbedded())
-                continue;
-
-            /* Get hold of the statement tree */
-            GenTreePtr tree = stmt->gtStmt.gtStmtExpr;
-
-#if defined(DEBUGGING_SUPPORT)
-
-            /* Do we have a new IL-offset ? */
-
-            if (stmt->gtStmt.gtStmtILoffsx != BAD_IL_OFFSET)
+#ifdef DEBUGGING_SUPPORT
+            // Do we have a new IL offset?
+            if (node->OperGet() == GT_IL_OFFSET)
             {
-                /* Create and append a new IP-mapping entry */
-                genIPmappingAdd(stmt->gtStmt.gtStmt.gtStmtILoffsx, firstMapping);
+                genEnsureCodeEmitted(currentILOffset);
+
+                currentILOffset = node->gtStmt.gtStmtILoffsx;
+
+                genIPmappingAdd(currentILOffset, firstMapping);
                 firstMapping = false;
             }
-
 #endif // DEBUGGING_SUPPORT
 
 #ifdef DEBUG
-            noway_assert(stmt->gtStmt.gtStmtLastILoffs <= compiler->info.compILCodeSize ||
-                         stmt->gtStmt.gtStmtLastILoffs == BAD_IL_OFFSET);
-
-            if (compiler->opts.dspCode && compiler->opts.dspInstrs && stmt->gtStmt.gtStmtLastILoffs != BAD_IL_OFFSET)
+            if (node->OperGet() == GT_IL_OFFSET)
             {
-                while (genCurDispOffset <= stmt->gtStmt.gtStmtLastILoffs)
+                noway_assert(node->gtStmt.gtStmtLastILoffs <= compiler->info.compILCodeSize ||
+                             node->gtStmt.gtStmtLastILoffs == BAD_IL_OFFSET);
+
+                if (compiler->opts.dspCode && compiler->opts.dspInstrs &&
+                    node->gtStmt.gtStmtLastILoffs != BAD_IL_OFFSET)
                 {
-                    genCurDispOffset += dumpSingleInstr(compiler->info.compCode, genCurDispOffset, ">    ");
+                    while (genCurDispOffset <= node->gtStmt.gtStmtLastILoffs)
+                    {
+                        genCurDispOffset += dumpSingleInstr(compiler->info.compCode, genCurDispOffset, ">    ");
+                    }
                 }
             }
 
-            stmtNum++;
-            if (compiler->verbose)
-            {
-                printf("\nGenerating BB%02u, stmt %u\t\t", block->bbNum, stmtNum);
-                printf("Holding variables: ");
-                dspRegMask(regSet.rsMaskVars);
-                printf("\n\n");
-                if (compiler->verboseTrees)
-                {
-                    compiler->gtDispTree(compiler->opts.compDbgInfo ? stmt : tree);
-                    printf("\n");
-                }
-            }
-            totalCostEx += ((UINT64)stmt->gtCostEx * block->getBBWeight(compiler));
-            totalCostSz += (UINT64)stmt->gtCostSz;
+// TODO(pdg): JIT dump, cost accounting
+
 #endif // DEBUG
 
-            // Traverse the tree in linear order, generating code for each node in the
-            // tree as we encounter it
-
-            compiler->compCurLifeTree = NULL;
-            compiler->compCurStmt     = stmt;
-            for (GenTreePtr treeNode = stmt->gtStmt.gtStmtList; treeNode != NULL; treeNode = treeNode->gtNext)
+            genCodeForTreeNode(node);
+            if (node->gtHasReg() && node->gtLsraInfo.isLocalDefUse)
             {
-                genCodeForTreeNode(treeNode);
-                if (treeNode->gtHasReg() && treeNode->gtLsraInfo.isLocalDefUse)
-                {
-                    genConsumeReg(treeNode);
-                }
+                genConsumeReg(node);
             }
 
             regSet.rsSpillChk();
 
 #ifdef DEBUG
+            assert((node->gtFlags & GTF_SPILL) == 0);
+
             /* Make sure we didn't bungle pointer register tracking */
 
             regMaskTP ptrRegs       = (gcInfo.gcRegGCrefSetCur | gcInfo.gcRegByrefSetCur);
@@ -1783,26 +1771,27 @@ void CodeGen::genCodeForBBlist()
             // even though we might return a ref.  We can't use the compRetType
             // as the determiner because something we are tracking as a byref
             // might be used as a return value of a int function (which is legal)
-            if (tree->gtOper == GT_RETURN && (varTypeIsGC(compiler->info.compRetType) ||
-                                              (tree->gtOp.gtOp1 != 0 && varTypeIsGC(tree->gtOp.gtOp1->TypeGet()))))
+            if (node->gtOper == GT_RETURN && (varTypeIsGC(compiler->info.compRetType) ||
+                                              (node->gtOp.gtOp1 != 0 && varTypeIsGC(node->gtOp.gtOp1->TypeGet()))))
             {
                 nonVarPtrRegs &= ~RBM_INTRET;
             }
 
-            // When profiling, the first statement in a catch block will be the
-            // harmless "inc" instruction (does not interfere with the exception
-            // object).
-
-            if ((compiler->opts.eeFlags & CORJIT_FLG_BBINSTR) && (stmt == block->bbTreeList) &&
-                handlerGetsXcptnObj(block->bbCatchTyp))
+            // When profiling, the first few nodes in a catch block will be an update of
+            // the profile count (does not interfere with the exception object).
+            if (((compiler->opts.eeFlags & CORJIT_FLG_BBINSTR) != 0) && handlerGetsXcptnObj(block->bbCatchTyp))
             {
-                nonVarPtrRegs &= ~RBM_EXCEPTION_OBJECT;
+                pastProfileUpdate = pastProfileUpdate || node->OperGet() == GT_CATCH_ARG;
+                if (!pastProfileUpdate)
+                {
+                    nonVarPtrRegs &= ~RBM_EXCEPTION_OBJECT;
+                }
             }
 
             if (nonVarPtrRegs)
             {
-                printf("Regset after tree=");
-                compiler->printTreeID(tree);
+                printf("Regset after node=");
+                Compiler::printTreeID(node);
                 printf(" BB%02u gcr=", block->bbNum);
                 printRegMaskInt(gcInfo.gcRegGCrefSetCur & ~regSet.rsMaskVars);
                 compiler->getEmitter()->emitDispRegSet(gcInfo.gcRegGCrefSetCur & ~regSet.rsMaskVars);
@@ -1816,21 +1805,8 @@ void CodeGen::genCodeForBBlist()
             }
 
             noway_assert(nonVarPtrRegs == 0);
-
-            for (GenTree* node = stmt->gtStmt.gtStmtList; node; node = node->gtNext)
-            {
-                assert(!(node->gtFlags & GTF_SPILL));
-            }
-
 #endif // DEBUG
-
-            noway_assert(stmt->gtOper == GT_STMT);
-
-#ifdef DEBUGGING_SUPPORT
-            genEnsureCodeEmitted(stmt->gtStmt.gtStmtILoffsx);
-#endif
-
-        } //-------- END-FOR each statement-tree of the current block ---------
+        }
 
 #if defined(DEBUG) && defined(_TARGET_ARM64_)
         if (block->bbNext == nullptr)
@@ -3606,6 +3582,10 @@ void CodeGen::genCodeForTreeNode(GenTreePtr treeNode)
 
         case GT_CLS_VAR_ADDR:
             NYI("GT_CLS_VAR_ADDR");
+            break;
+
+        case GT_IL_OFFSET:
+            // Do nothing; these nodes are simply markers for debug info.
             break;
 
         default:
