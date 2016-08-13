@@ -2494,6 +2494,49 @@ void LinearScan::addRefsForPhysRegMask(regMaskTP mask, LsraLocation currentLoc, 
 //
 regMaskTP LinearScan::getKillSetForNode(GenTree* tree)
 {
+    regMaskTP killSet = getKillSetForNode(compiler, tree);
+
+#ifdef _TARGET_XARCH_
+    switch (tree->OperGet())
+    {
+        case GT_MOD:
+        case GT_DIV:
+        case GT_UMOD:
+        case GT_UDIV:
+            if (!varTypeIsFloating(tree->TypeGet()))
+            {
+                // RDX needs to be killed early, because it must not be used as a source register
+                // (unlike most cases, where the kill happens AFTER the uses).  So for this kill,
+                // we add the RefPosition at the tree loc (where the uses are located) instead of the
+                // usual kill location which is the same as the defs at tree loc+1.
+                // Note that we don't have to add interference for the live vars, because that
+                // will be done below, and is not sensitive to the precise location.
+                LsraLocation currentLoc = tree->gtLsraInfo.loc;
+                assert(currentLoc != 0);
+                addRefsForPhysRegMask(RBM_RDX, currentLoc, RefTypeKill, true);
+                assert(killSet == (RBM_RAX | RBM_RDX));
+            }
+            break;
+
+        default:
+            break;
+    }
+#endif
+
+    return killSet;
+}
+
+//------------------------------------------------------------------------
+// getKillSetForNode:   Return the registers killed by the given tree node.
+//
+// Arguments:
+//    compiler   - the compiler context to use
+//    tree       - the tree for which the kill set is needed.
+//
+// Return Value:    a register mask of the registers killed
+//
+regMaskTP LinearScan::getKillSetForNode(Compiler* compiler, GenTree* tree)
+{
     regMaskTP killMask = RBM_NONE;
     switch (tree->OperGet())
     {
@@ -2518,16 +2561,6 @@ regMaskTP LinearScan::getKillSetForNode(GenTree* tree)
         case GT_UDIV:
             if (!varTypeIsFloating(tree->TypeGet()))
             {
-                // RDX needs to be killed early, because it must not be used as a source register
-                // (unlike most cases, where the kill happens AFTER the uses).  So for this kill,
-                // we add the RefPosition at the tree loc (where the uses are located) instead of the
-                // usual kill location which is the same as the defs at tree loc+1.
-                // Note that we don't have to add interference for the live vars, because that
-                // will be done below, and is not sensitive to the precise location.
-                LsraLocation currentLoc = tree->gtLsraInfo.loc;
-                assert(currentLoc != 0);
-                addRefsForPhysRegMask(RBM_RDX, currentLoc, RefTypeKill, true);
-                // Both RAX and RDX are killed by the operation
                 killMask = RBM_RAX | RBM_RDX;
             }
             break;
@@ -3860,9 +3893,10 @@ void LinearScan::insertZeroInitRefPositions()
         if (!varDsc->lvIsParam && isCandidateVar(varDsc) &&
             (compiler->info.compInitMem || varTypeIsGC(varDsc->TypeGet())))
         {
+            // TODO(pdg): verify this for LIR.
+
             GenTree* firstStmt = getNonEmptyBlock(compiler->fgFirstBB)->bbTreeList;
             JITDUMP("V%02u was live in\n", varNum);
-            DISPTREE(firstStmt);
             Interval*    interval = getIntervalForLocalVar(varNum);
             RefPosition* pos =
                 newRefPosition(interval, MinLocation, RefTypeZeroInit, firstStmt, allRegs(interval->registerType));
@@ -4314,76 +4348,28 @@ void LinearScan::buildIntervals()
 
         VarSetOps::Assign(compiler, currentLiveVars, block->bbLiveIn);
 
-        for (GenTree* statement = block->FirstNonPhiDef(); statement; statement = statement->gtNext)
+        // TODO(pdg): insert nodes in rationalize to consume unused values
+        //
+        // Also: rethink ranges vs. subranges in order to ensure that first/last nodes
+        // are updated correctly when dealing in subranges.
+
+        LIR::Range& blockRange = LIR::AsRange(block);
+        for (GenTree* node : blockRange.NonPhiNodes())
         {
-            if (statement->gtStmt.gtStmtIsEmbedded())
-            {
-                continue;
-            }
+            assert(node->gtLsraInfo.loc >= currentLoc);
+            assert(((node->gtLIRFlags & LIR::Flags::IsUnusedValue) == 0) || node->gtLsraInfo.isLocalDefUse);
 
-            GenTree* treeNode;
-            int      dstCount = 0;
+            currentLoc = node->gtLsraInfo.loc;
+            buildRefPositionsForNode(node, block, listNodePool, operandToLocationInfoMap, currentLoc);
 
-            GenTree* stmtExpr = statement->gtStmt.gtStmtExpr;
-
-            // If we have a dead lclVar use, we have to generate a RefPosition for it,
-            // otherwise the dataflow won't match the allocations.
-            // TODO-Cleanup: Delete these dead lclVar uses before LSRA, and remove from the
-            // live sets as appropriate.
-            //
-            // Do this for the top level statement and all of its embedded statements.
-            // The embedded statements need to be traversed because otherwise we cannot
-            // identify a dead use.  We skip them in the outer loop because we need
-            // this data for the whole statement before we build refpositions.
-            GenTree* nextStmt = statement;
-            do
-            {
-                GenTree* nextStmtExpr = nextStmt->gtStmt.gtStmtExpr;
-                if (nextStmtExpr->gtLsraInfo.dstCount > 0)
-                {
-                    nextStmtExpr->gtLsraInfo.isLocalDefUse = true;
-                    nextStmtExpr->gtLsraInfo.dstCount      = 0;
-                }
-
-                nextStmt = nextStmt->gtNext;
-            } while (nextStmt && nextStmt->gtStmt.gtStmtIsEmbedded());
-
-            // Go through the statement nodes in execution order, and build RefPositions
-            foreach_treenode_execution_order(treeNode, statement)
-            {
-                assert(treeNode->gtLsraInfo.loc >= currentLoc);
-                currentLoc = treeNode->gtLsraInfo.loc;
-                dstCount   = treeNode->gtLsraInfo.dstCount;
-                buildRefPositionsForNode(treeNode, block, listNodePool, operandToLocationInfoMap, currentLoc);
 #ifdef DEBUG
-                if (currentLoc > maxNodeLocation)
-                {
-                    maxNodeLocation = currentLoc;
-                }
+            if (currentLoc > maxNodeLocation)
+            {
+                maxNodeLocation = currentLoc;
+            }
 #endif // DEBUG
-            }
-
-#ifdef DEBUG
-            // At this point the map should be empty, unless: we have a node that
-            // produces a result that's ignored, in which case the map should contain
-            // one element that maps to dstCount locations.
-            JITDUMP("map size after tree processed was %d\n", operandToLocationInfoMap.Count());
-
-            int locCount = 0;
-            for (auto kvp : operandToLocationInfoMap)
-            {
-                LocationInfoList defList = kvp.Value();
-                for (LocationInfoListNode *def = defList.Begin(), *end = defList.End(); def != end; def = def->Next())
-                {
-                    locCount++;
-                }
-            }
-
-            assert(locCount == dstCount);
-#endif
-
-            operandToLocationInfoMap.Clear();
         }
+
         // Increment the LsraLocation at this point, so that the dummy RefPositions
         // will not have the same LsraLocation as any "real" RefPosition.
         currentLoc += 2;
@@ -7297,8 +7283,10 @@ void LinearScan::allocateRegisters()
 // NICE: Consider tracking whether an Interval is always in the same location (register/stack)
 // in which case it will require no resolution.
 //
-void LinearScan::resolveLocalRef(GenTreePtr treeNode, RefPosition* currentRefPosition)
+void LinearScan::resolveLocalRef(BasicBlock* block, GenTreePtr treeNode, RefPosition* currentRefPosition)
 {
+    assert((block == nullptr) == (treeNode == nullptr));
+
     // Is this a tracked local?  Or just a register allocated for loading
     // a non-tracked one?
     Interval* interval = currentRefPosition->getInterval();
@@ -7448,6 +7436,7 @@ void LinearScan::resolveLocalRef(GenTreePtr treeNode, RefPosition* currentRefPos
             // currently lives.  For moveReg, the homeReg is the new register (as assigned above).
             // But for copyReg, the homeReg remains unchanged.
 
+            assert(treeNode != nullptr);
             treeNode->gtRegNum = interval->physReg;
 
             if (currentRefPosition->copyReg)
@@ -7462,7 +7451,7 @@ void LinearScan::resolveLocalRef(GenTreePtr treeNode, RefPosition* currentRefPos
             if (!currentRefPosition->isFixedRegRef || currentRefPosition->moveReg)
             {
                 // This is the second case, where we need to generate a copy
-                insertCopyOrReload(treeNode, currentRefPosition->getMultiRegIdx(), currentRefPosition);
+                insertCopyOrReload(block, treeNode, currentRefPosition->getMultiRegIdx(), currentRefPosition);
             }
         }
         else
@@ -7586,11 +7575,15 @@ void LinearScan::writeRegisters(RefPosition* currentRefPosition, GenTree* tree)
 // and the unspilling code automatically reuses the same register, and does the reload when it notices that flag
 // when considering a node's operands.
 //
-void LinearScan::insertCopyOrReload(GenTreePtr tree, unsigned multiRegIdx, RefPosition* refPosition)
+void LinearScan::insertCopyOrReload(BasicBlock* block, GenTreePtr tree, unsigned multiRegIdx, RefPosition* refPosition)
 {
-    GenTreePtr* parentChildPointer = nullptr;
-    GenTreePtr  parent             = tree->gtGetParent(&parentChildPointer);
-    noway_assert(parent != nullptr && parentChildPointer != nullptr);
+    LIR::Range& blockRange = LIR::AsRange(block);
+
+    LIR::Use treeUse;
+    bool     foundUse = blockRange.TryGetUse(tree, &treeUse);
+    assert(foundUse);
+
+    GenTree* parent = treeUse.User();
 
     genTreeOps oper;
     if (refPosition->reload)
@@ -7654,12 +7647,10 @@ void LinearScan::insertCopyOrReload(GenTreePtr tree, unsigned multiRegIdx, RefPo
             newNode->gtFlags |= GTF_VAR_DEATH;
         }
 
-        // Replace tree in the parent node.
-        *parentChildPointer = newNode;
-
-        // we insert this directly after the spilled node.  it does not reload at that point but
-        // just updates registers
-        tree->InsertAfterSelf(newNode);
+        // Insert the copy/reload after the spilled node and replace the use of the original node with a use
+        // of the copy/reload.
+        blockRange.InsertAfter(tree, newNode);
+        treeUse.ReplaceWith(compiler, newNode);
     }
 }
 
@@ -7691,21 +7682,7 @@ void LinearScan::insertUpperVectorSaveAndReload(GenTreePtr tree, RefPosition* re
     regNumber spillReg   = refPosition->assignedReg();
     bool      spillToMem = refPosition->spillAfter;
 
-    // We will insert the save before the statement containing 'tree', and the restore after it.
-    // They will each be inserted as embedded statements.
-    // In order to do this, we need to find the current statement.
-    // TODO-Througput: There's got to be a better way to do this.
-    GenTree* lastNodeInCurrentStatement = tree;
-    while (lastNodeInCurrentStatement->gtNext != nullptr)
-    {
-        lastNodeInCurrentStatement = lastNodeInCurrentStatement->gtNext;
-    }
-    GenTree* stmt = block->bbTreeList;
-    while (stmt != nullptr && stmt->gtStmt.gtStmtExpr != lastNodeInCurrentStatement)
-    {
-        stmt = stmt->gtNext;
-    }
-    noway_assert(stmt != nullptr);
+    LIR::Range& blockRange = LIR::AsRange(block);
 
     // First, insert the save as an embedded statement before the call.
 
@@ -7724,7 +7701,8 @@ void LinearScan::insertUpperVectorSaveAndReload(GenTreePtr tree, RefPosition* re
     {
         simdNode->gtFlags |= GTF_SPILL;
     }
-    compiler->fgInsertTreeBeforeAsEmbedded(simdNode, tree, stmt->AsStmt(), block);
+
+    blockRange.InsertBefore(tree, LIR::SeqTree(compiler, simdNode));
 
     // Now insert the restore after the call.
 
@@ -7743,7 +7721,7 @@ void LinearScan::insertUpperVectorSaveAndReload(GenTreePtr tree, RefPosition* re
         simdNode->gtFlags |= GTF_SPILLED;
     }
 
-    compiler->fgInsertTreeAfterAsEmbedded(simdNode, tree, stmt->AsStmt(), block);
+    blockRange.InsertAfter(tree, LIR::SeqTree(compiler, simdNode));
 }
 #endif // FEATURE_PARTIAL_SIMD_CALLEE_SAVE
 
@@ -7975,7 +7953,7 @@ void LinearScan::resolveRegisters()
     {
         Interval* interval = currentRefPosition->getInterval();
         assert(interval != nullptr && interval->isLocalVar);
-        resolveLocalRef(nullptr, currentRefPosition);
+        resolveLocalRef(nullptr, nullptr, currentRefPosition);
         regNumber reg      = REG_STK;
         int       varIndex = interval->getVarIndex(compiler);
 
@@ -7997,7 +7975,7 @@ void LinearScan::resolveRegisters()
     JITDUMP("------------------------\n");
 
     BasicBlock* insertionBlock = compiler->fgFirstBB;
-    GenTreePtr  insertionPoint = insertionBlock->FirstNonPhiDef();
+    GenTreePtr  insertionPoint = LIR::AsRange(insertionBlock).FirstNonPhiNode();
 
     // write back assignments
     for (block = startBlockSequence(); block != nullptr; block = moveToNextBlock())
@@ -8028,7 +8006,7 @@ void LinearScan::resolveRegisters()
             assert(currentRefPosition->isIntervalRef());
             // Don't mark dummy defs as reload
             currentRefPosition->reload = false;
-            resolveLocalRef(nullptr, currentRefPosition);
+            resolveLocalRef(nullptr, nullptr, currentRefPosition);
             regNumber reg;
             if (currentRefPosition->registerAssignment != RBM_NONE)
             {
@@ -8198,7 +8176,7 @@ void LinearScan::resolveRegisters()
 
                 if (treeNode->IsLocal() && currentRefPosition->getInterval()->isLocalVar)
                 {
-                    resolveLocalRef(treeNode, currentRefPosition);
+                    resolveLocalRef(block, treeNode, currentRefPosition);
                 }
 
                 // Mark spill locations on temps
@@ -8241,7 +8219,8 @@ void LinearScan::resolveRegisters()
                         {
                             if (nextRefPosition->assignedReg() != REG_NA)
                             {
-                                insertCopyOrReload(treeNode, currentRefPosition->getMultiRegIdx(), nextRefPosition);
+                                insertCopyOrReload(block, treeNode, currentRefPosition->getMultiRegIdx(),
+                                                   nextRefPosition);
                             }
                             else
                             {
@@ -8450,7 +8429,9 @@ void LinearScan::resolveRegisters()
         printf("Trees after linear scan register allocator (LSRA)\n");
         compiler->fgDispBasicBlocks(true);
     }
-    verifyFinalAllocation();
+
+// TODO(pdg): re-enable verification once it's moved to LIR, as it will almost certainly be useful.
+// verifyFinalAllocation();
 #endif // DEBUG
 
     compiler->raMarkStkVars();
@@ -8537,18 +8518,13 @@ void LinearScan::insertMove(
         top->gtLsraInfo.isLsraAdded   = true;
     }
     top->gtLsraInfo.isLocalDefUse = true;
-    GenTreePtr stmt               = compiler->gtNewStmt(top);
-    compiler->gtSetStmtInfo(stmt);
 
-    // The top-level node has no gtNext, and src has no gtPrev - they are set that way
-    // when created.
-    assert(top->gtNext == nullptr);
-    assert(src->gtPrev == nullptr);
-    stmt->gtStmt.gtStmtList = src;
+    LIR::Range  treeRange  = LIR::SeqTree(compiler, top);
+    LIR::Range& blockRange = LIR::AsRange(block);
 
     if (insertionPoint != nullptr)
     {
-        compiler->fgInsertStmtBefore(block, insertionPoint, stmt);
+        blockRange.InsertBefore(insertionPoint, std::move(treeRange));
     }
     else
     {
@@ -8556,29 +8532,18 @@ void LinearScan::insertMove(
         // If there's a branch, make an embedded statement that executes just prior to the branch
         if (block->bbJumpKind == BBJ_COND || block->bbJumpKind == BBJ_SWITCH)
         {
-            stmt->gtFlags &= ~GTF_STMT_TOP_LEVEL;
-            noway_assert(block->bbTreeList != nullptr);
-            GenTreePtr lastStmt   = block->lastStmt();
-            GenTreePtr branchStmt = block->lastTopLevelStmt();
-            GenTreePtr branch     = branchStmt->gtStmt.gtStmtExpr;
+            noway_assert(!blockRange.IsEmpty());
+
+            GenTree* branch = blockRange.LastNode();
             assert(branch->OperGet() == GT_JTRUE || branch->OperGet() == GT_SWITCH_TABLE ||
                    branch->OperGet() == GT_SWITCH);
 
-            GenTreePtr prev = branch->gtPrev;
-            prev->gtNext    = src;
-            src->gtPrev     = prev;
-            branch->gtPrev  = top;
-            top->gtNext     = branch;
-
-            stmt->gtNext              = nullptr;
-            stmt->gtPrev              = lastStmt;
-            lastStmt->gtNext          = stmt;
-            block->bbTreeList->gtPrev = stmt;
+            blockRange.InsertBefore(branch, std::move(treeRange));
         }
         else
         {
             assert(block->bbJumpKind == BBJ_NONE || block->bbJumpKind == BBJ_ALWAYS);
-            compiler->fgInsertStmtAtEnd(block, stmt);
+            blockRange.InsertAfter(blockRange.LastNode(), std::move(treeRange));
         }
     }
 }
@@ -8625,18 +8590,12 @@ void LinearScan::insertSwap(
     lcl2->gtNext = swap;
     swap->gtPrev = lcl2;
 
-    GenTreePtr stmt = compiler->gtNewStmt(swap);
-    compiler->gtSetStmtInfo(stmt);
-
-    // The top-level node has no gtNext, and lcl1 has no gtPrev - they are set that way
-    // when created.
-    assert(swap->gtNext == nullptr);
-    assert(lcl1->gtPrev == nullptr);
-    stmt->gtStmt.gtStmtList = lcl1;
+    LIR::Range  swapRange  = LIR::SeqTree(compiler, swap);
+    LIR::Range& blockRange = LIR::AsRange(block);
 
     if (insertionPoint != nullptr)
     {
-        compiler->fgInsertStmtBefore(block, insertionPoint, stmt);
+        blockRange.InsertBefore(insertionPoint, std::move(swapRange));
     }
     else
     {
@@ -8644,28 +8603,18 @@ void LinearScan::insertSwap(
         // If there's a branch, make an embedded statement that executes just prior to the branch
         if (block->bbJumpKind == BBJ_COND || block->bbJumpKind == BBJ_SWITCH)
         {
-            stmt->gtFlags &= ~GTF_STMT_TOP_LEVEL;
-            noway_assert(block->bbTreeList != nullptr);
-            GenTreePtr lastStmt   = block->lastStmt();
-            GenTreePtr branchStmt = block->lastTopLevelStmt();
-            GenTreePtr branch     = branchStmt->gtStmt.gtStmtExpr;
-            assert(branch->OperGet() == GT_JTRUE || branch->OperGet() == GT_SWITCH);
+            noway_assert(!blockRange.IsEmpty());
 
-            GenTreePtr prev = branch->gtPrev;
-            prev->gtNext    = lcl1;
-            lcl1->gtPrev    = prev;
-            branch->gtPrev  = swap;
-            swap->gtNext    = branch;
+            GenTree* branch = blockRange.LastNode();
+            assert(branch->OperGet() == GT_JTRUE || branch->OperGet() == GT_SWITCH_TABLE ||
+                   branch->OperGet() == GT_SWITCH);
 
-            stmt->gtNext              = nullptr;
-            stmt->gtPrev              = lastStmt;
-            lastStmt->gtNext          = stmt;
-            block->bbTreeList->gtPrev = stmt;
+            blockRange.InsertBefore(branch, std::move(swapRange));
         }
         else
         {
             assert(block->bbJumpKind == BBJ_NONE || block->bbJumpKind == BBJ_ALWAYS);
-            compiler->fgInsertStmtAtEnd(block, stmt);
+            blockRange.InsertAfter(blockRange.LastNode(), std::move(swapRange));
         }
     }
 }
@@ -8828,12 +8777,12 @@ void LinearScan::handleOutgoingCriticalEdges(BasicBlock* block)
     {
         // At this point, Lowering has transformed any non-switch-table blocks into
         // cascading ifs.
-        GenTree* lastStmt = block->lastStmt();
-        assert(lastStmt != nullptr && lastStmt->gtStmt.gtStmtExpr->gtOper == GT_SWITCH_TABLE);
-        GenTree* switchTable = lastStmt->gtStmt.gtStmtExpr;
-        switchRegs           = switchTable->gtRsvdRegs;
-        GenTree* op1         = switchTable->gtGetOp1();
-        GenTree* op2         = switchTable->gtGetOp2();
+        GenTree* switchTable = LIR::AsRange(block).LastNode();
+        assert(switchTable != nullptr && switchTable->OperGet() == GT_SWITCH_TABLE);
+
+        switchRegs   = switchTable->gtRsvdRegs;
+        GenTree* op1 = switchTable->gtGetOp1();
+        GenTree* op2 = switchTable->gtGetOp2();
         noway_assert(op1 != nullptr && op2 != nullptr);
         assert(op1->gtRegNum != REG_NA && op2->gtRegNum != REG_NA);
         switchRegs |= genRegMask(op1->gtRegNum);
@@ -9305,7 +9254,7 @@ void LinearScan::resolveEdge(BasicBlock*      fromBlock,
     GenTreePtr insertionPoint = nullptr;
     if (resolveType == ResolveSplit || resolveType == ResolveCritical)
     {
-        insertionPoint = block->FirstNonPhiDef();
+        insertionPoint = LIR::AsRange(block).FirstNonPhiNode();
     }
 
     // First:
@@ -10173,167 +10122,140 @@ void LinearScan::TupleStyleDump(LsraTupleDumpMode mode)
                    splitEdgeInfo.toBBNum);
         }
 
-        for (GenTree* statement = block->FirstNonPhiDef(); statement; statement = statement->gtNext)
+        for (GenTree* node : LIR::AsRange(block).NonPhiNodes())
         {
-            if ((statement->gtFlags & GTF_STMT_TOP_LEVEL) == 0)
+            // TODO(pdg): fix the dump below for LIR
+
+            GenTree* tree = node;
+
+            genTreeOps oper = tree->OperGet();
+            if (oper == GT_ARGPLACE)
             {
                 continue;
             }
-
-            for (GenTree *tree = statement->gtStmt.gtStmtList; tree; tree = tree->gtNext, currentLoc += 2)
+            TreeNodeInfo& info = tree->gtLsraInfo;
+            if (tree->gtLsraInfo.isLsraAdded)
             {
-                genTreeOps oper = tree->OperGet();
-                if (oper == GT_ARGPLACE)
-                {
-                    continue;
-                }
-                TreeNodeInfo& info = tree->gtLsraInfo;
-                if (tree->gtLsraInfo.isLsraAdded)
-                {
-                    // This must be one of the nodes that we add during LSRA
+                // This must be one of the nodes that we add during LSRA
 
-                    if (oper == GT_LCL_VAR)
-                    {
-                        info.srcCount = 0;
-                        info.dstCount = 1;
-                    }
-                    else if (oper == GT_RELOAD || oper == GT_COPY)
+                if (oper == GT_LCL_VAR)
+                {
+                    info.srcCount = 0;
+                    info.dstCount = 1;
+                }
+                else if (oper == GT_RELOAD || oper == GT_COPY)
+                {
+                    info.srcCount = 1;
+                    info.dstCount = 1;
+                }
+#ifdef FEATURE_SIMD
+                else if (oper == GT_SIMD)
+                {
+                    if (tree->gtSIMD.gtSIMDIntrinsicID == SIMDIntrinsicUpperSave)
                     {
                         info.srcCount = 1;
                         info.dstCount = 1;
                     }
-#ifdef FEATURE_SIMD
-                    else if (oper == GT_SIMD)
-                    {
-                        if (tree->gtSIMD.gtSIMDIntrinsicID == SIMDIntrinsicUpperSave)
-                        {
-                            info.srcCount = 1;
-                            info.dstCount = 1;
-                        }
-                        else
-                        {
-                            assert(tree->gtSIMD.gtSIMDIntrinsicID == SIMDIntrinsicUpperRestore);
-                            info.srcCount = 2;
-                            info.dstCount = 0;
-                        }
-                    }
-#endif // FEATURE_SIMD
                     else
                     {
-                        assert(oper == GT_SWAP);
+                        assert(tree->gtSIMD.gtSIMDIntrinsicID == SIMDIntrinsicUpperRestore);
                         info.srcCount = 2;
                         info.dstCount = 0;
                     }
-                    info.internalIntCount   = 0;
-                    info.internalFloatCount = 0;
                 }
-
-                int       consume   = info.srcCount;
-                int       produce   = info.dstCount;
-                regMaskTP killMask  = RBM_NONE;
-                regMaskTP fixedMask = RBM_NONE;
-
-                if (tree->OperGet() == GT_LIST)
-                {
-                    continue;
-                }
-
-                lsraDispNode(tree, mode, produce != 0 && mode != LSRA_DUMP_REFPOS);
-
-                if (mode != LSRA_DUMP_REFPOS)
-                {
-                    if (consume > stack.Height())
-                    {
-                        printf("about to consume %d, height is only %d\n", consume, stack.Height());
-                    }
-
-                    if (!(tree->gtFlags & GTF_REVERSE_OPS))
-                    {
-                        stack.ReverseTop(consume);
-                    }
-                    if (consume > 0)
-                    {
-                        printf("; ");
-                    }
-                    while (consume--)
-                    {
-                        lsraGetOperandString(stack.Pop(), mode, operandString, operandStringLength);
-                        printf("%s", operandString);
-                        if (consume)
-                        {
-                            printf(",");
-                        }
-                    }
-                    while (produce--)
-                    {
-                        stack.Push(tree);
-                    }
-                }
+#endif // FEATURE_SIMD
                 else
                 {
-                    // Print each RefPosition on a new line, but
-                    // printing all the kills for each node on a single line
-                    // and combining the fixed regs with their associated def or use
-                    bool         killPrinted        = false;
-                    RefPosition* lastFixedRegRefPos = nullptr;
-                    for (;
-                         currentRefPosition != refPositions.end() &&
-                         (currentRefPosition->refType == RefTypeUse || currentRefPosition->refType == RefTypeFixedReg ||
-                          currentRefPosition->refType == RefTypeKill || currentRefPosition->refType == RefTypeDef) &&
-                         (currentRefPosition->nodeLocation == tree->gtSeqNum ||
-                          currentRefPosition->nodeLocation == tree->gtSeqNum + 1);
-                         ++currentRefPosition)
+                    assert(oper == GT_SWAP);
+                    info.srcCount = 2;
+                    info.dstCount = 0;
+                }
+                info.internalIntCount   = 0;
+                info.internalFloatCount = 0;
+            }
+
+            int       consume   = info.srcCount;
+            int       produce   = info.dstCount;
+            regMaskTP killMask  = RBM_NONE;
+            regMaskTP fixedMask = RBM_NONE;
+
+            if (tree->OperGet() == GT_LIST)
+            {
+                continue;
+            }
+
+            lsraDispNode(tree, mode, produce != 0 && mode != LSRA_DUMP_REFPOS);
+
+            if (mode != LSRA_DUMP_REFPOS)
+            {
+                if (consume > stack.Height())
+                {
+                    printf("about to consume %d, height is only %d\n", consume, stack.Height());
+                }
+
+                if (!(tree->gtFlags & GTF_REVERSE_OPS))
+                {
+                    stack.ReverseTop(consume);
+                }
+                if (consume > 0)
+                {
+                    printf("; ");
+                }
+                while (consume--)
+                {
+                    lsraGetOperandString(stack.Pop(), mode, operandString, operandStringLength);
+                    printf("%s", operandString);
+                    if (consume)
                     {
-                        Interval* interval = nullptr;
-                        if (currentRefPosition->isIntervalRef())
-                        {
-                            interval = currentRefPosition->getInterval();
-                        }
-                        switch (currentRefPosition->refType)
-                        {
-                            case RefTypeUse:
-                                if (currentRefPosition->isPhysRegRef)
-                                {
-                                    printf("\n                               Use:R%d(#%d)",
-                                           currentRefPosition->getReg()->regNum, currentRefPosition->rpNum);
-                                }
-                                else
-                                {
-                                    assert(interval != nullptr);
-                                    printf("\n                               Use:");
-                                    interval->microDump();
-                                    printf("(#%d)", currentRefPosition->rpNum);
-                                    if (currentRefPosition->isFixedRegRef)
-                                    {
-                                        assert(genMaxOneBit(currentRefPosition->registerAssignment));
-                                        assert(lastFixedRegRefPos != nullptr);
-                                        printf(" Fixed:%s(#%d)", getRegName(currentRefPosition->assignedReg(),
-                                                                            isFloatRegType(interval->registerType)),
-                                               lastFixedRegRefPos->rpNum);
-                                        lastFixedRegRefPos = nullptr;
-                                    }
-                                    if (currentRefPosition->isLocalDefUse)
-                                    {
-                                        printf(" LocalDefUse");
-                                    }
-                                    if (currentRefPosition->lastUse)
-                                    {
-                                        printf(" *");
-                                    }
-                                }
-                                break;
-                            case RefTypeDef:
+                        printf(",");
+                    }
+                }
+                while (produce--)
+                {
+                    stack.Push(tree);
+                }
+            }
+            else
+            {
+                // Print each RefPosition on a new line, but
+                // printing all the kills for each node on a single line
+                // and combining the fixed regs with their associated def or use
+                bool         killPrinted        = false;
+                RefPosition* lastFixedRegRefPos = nullptr;
+                for (; currentRefPosition != refPositions.end() &&
+                       (currentRefPosition->refType == RefTypeUse || currentRefPosition->refType == RefTypeFixedReg ||
+                        currentRefPosition->refType == RefTypeKill || currentRefPosition->refType == RefTypeDef) &&
+                       (currentRefPosition->nodeLocation == tree->gtSeqNum ||
+                        currentRefPosition->nodeLocation == tree->gtSeqNum + 1);
+                     ++currentRefPosition)
+                {
+                    Interval* interval = nullptr;
+                    if (currentRefPosition->isIntervalRef())
+                    {
+                        interval = currentRefPosition->getInterval();
+                    }
+                    switch (currentRefPosition->refType)
+                    {
+                        case RefTypeUse:
+                            if (currentRefPosition->isPhysRegRef)
                             {
-                                // Print each def on a new line
+                                printf("\n                               Use:R%d(#%d)",
+                                       currentRefPosition->getReg()->regNum, currentRefPosition->rpNum);
+                            }
+                            else
+                            {
                                 assert(interval != nullptr);
-                                printf("\n        Def:");
+                                printf("\n                               Use:");
                                 interval->microDump();
                                 printf("(#%d)", currentRefPosition->rpNum);
                                 if (currentRefPosition->isFixedRegRef)
                                 {
                                     assert(genMaxOneBit(currentRefPosition->registerAssignment));
-                                    printf(" %s", getRegName(currentRefPosition->assignedReg(),
-                                                             isFloatRegType(interval->registerType)));
+                                    assert(lastFixedRegRefPos != nullptr);
+                                    printf(" Fixed:%s(#%d)", getRegName(currentRefPosition->assignedReg(),
+                                                                        isFloatRegType(interval->registerType)),
+                                           lastFixedRegRefPos->rpNum);
+                                    lastFixedRegRefPos = nullptr;
                                 }
                                 if (currentRefPosition->isLocalDefUse)
                                 {
@@ -10343,61 +10265,82 @@ void LinearScan::TupleStyleDump(LsraTupleDumpMode mode)
                                 {
                                     printf(" *");
                                 }
-                                if (interval->relatedInterval != nullptr)
-                                {
-                                    printf(" Pref:");
-                                    interval->relatedInterval->microDump();
-                                }
                             }
                             break;
-                            case RefTypeKill:
-                                if (!killPrinted)
-                                {
-                                    printf("\n        Kill: ");
-                                    killPrinted = true;
-                                }
-                                printf(getRegName(currentRefPosition->assignedReg(),
-                                                  isFloatRegType(currentRefPosition->getReg()->registerType)));
-                                printf(" ");
-                                break;
-                            case RefTypeFixedReg:
-                                lastFixedRegRefPos = currentRefPosition;
-                                break;
-                            default:
-                                printf("Unexpected RefPosition type at #%d\n", currentRefPosition->rpNum);
-                                break;
+                        case RefTypeDef:
+                        {
+                            // Print each def on a new line
+                            assert(interval != nullptr);
+                            printf("\n        Def:");
+                            interval->microDump();
+                            printf("(#%d)", currentRefPosition->rpNum);
+                            if (currentRefPosition->isFixedRegRef)
+                            {
+                                assert(genMaxOneBit(currentRefPosition->registerAssignment));
+                                printf(" %s", getRegName(currentRefPosition->assignedReg(),
+                                                         isFloatRegType(interval->registerType)));
+                            }
+                            if (currentRefPosition->isLocalDefUse)
+                            {
+                                printf(" LocalDefUse");
+                            }
+                            if (currentRefPosition->lastUse)
+                            {
+                                printf(" *");
+                            }
+                            if (interval->relatedInterval != nullptr)
+                            {
+                                printf(" Pref:");
+                                interval->relatedInterval->microDump();
+                            }
                         }
+                        break;
+                        case RefTypeKill:
+                            if (!killPrinted)
+                            {
+                                printf("\n        Kill: ");
+                                killPrinted = true;
+                            }
+                            printf(getRegName(currentRefPosition->assignedReg(),
+                                              isFloatRegType(currentRefPosition->getReg()->registerType)));
+                            printf(" ");
+                            break;
+                        case RefTypeFixedReg:
+                            lastFixedRegRefPos = currentRefPosition;
+                            break;
+                        default:
+                            printf("Unexpected RefPosition type at #%d\n", currentRefPosition->rpNum);
+                            break;
                     }
-                }
-                printf("\n");
-                if (info.internalIntCount != 0 && mode != LSRA_DUMP_REFPOS)
-                {
-                    printf("\tinternal (%d):\t", info.internalIntCount);
-                    if (mode == LSRA_DUMP_POST)
-                    {
-                        dumpRegMask(tree->gtRsvdRegs);
-                    }
-                    else if ((info.getInternalCandidates(this) & allRegs(TYP_INT)) != allRegs(TYP_INT))
-                    {
-                        dumpRegMask(info.getInternalCandidates(this) & allRegs(TYP_INT));
-                    }
-                    printf("\n");
-                }
-                if (info.internalFloatCount != 0 && mode != LSRA_DUMP_REFPOS)
-                {
-                    printf("\tinternal (%d):\t", info.internalFloatCount);
-                    if (mode == LSRA_DUMP_POST)
-                    {
-                        dumpRegMask(tree->gtRsvdRegs);
-                    }
-                    else if ((info.getInternalCandidates(this) & allRegs(TYP_INT)) != allRegs(TYP_INT))
-                    {
-                        dumpRegMask(info.getInternalCandidates(this) & allRegs(TYP_INT));
-                    }
-                    printf("\n");
                 }
             }
             printf("\n");
+            if (info.internalIntCount != 0 && mode != LSRA_DUMP_REFPOS)
+            {
+                printf("\tinternal (%d):\t", info.internalIntCount);
+                if (mode == LSRA_DUMP_POST)
+                {
+                    dumpRegMask(tree->gtRsvdRegs);
+                }
+                else if ((info.getInternalCandidates(this) & allRegs(TYP_INT)) != allRegs(TYP_INT))
+                {
+                    dumpRegMask(info.getInternalCandidates(this) & allRegs(TYP_INT));
+                }
+                printf("\n");
+            }
+            if (info.internalFloatCount != 0 && mode != LSRA_DUMP_REFPOS)
+            {
+                printf("\tinternal (%d):\t", info.internalFloatCount);
+                if (mode == LSRA_DUMP_POST)
+                {
+                    dumpRegMask(tree->gtRsvdRegs);
+                }
+                else if ((info.getInternalCandidates(this) & allRegs(TYP_INT)) != allRegs(TYP_INT))
+                {
+                    dumpRegMask(info.getInternalCandidates(this) & allRegs(TYP_INT));
+                }
+                printf("\n");
+            }
         }
         if (mode == LSRA_DUMP_POST)
         {
