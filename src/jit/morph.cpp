@@ -7155,7 +7155,7 @@ void Compiler::fgMorphTailCall(GenTreeCall* call)
 void Compiler::fgMorphRecursiveFastTailCallIntoLoop(BasicBlock* block, GenTreeCall* recursiveTailCall)
 {
     assert(recursiveTailCall->IsTailCallConvertibleToLoop());
-    GenTreePtr last = fgGetLastTopLevelStmt(block);
+    GenTreePtr last = block->lastStmt();
     assert(recursiveTailCall == last->gtStmt.gtStmtExpr);
 
     // Transform recursive tail call into a loop.
@@ -17410,9 +17410,7 @@ void Compiler::fgMarkAddressExposedLocals()
 
 bool Compiler::fgNodesMayInterfere(GenTree* write, GenTree* read)
 {
-    LclVarDsc* srcVar     = nullptr;
-    bool       srcAliased = false;
-    bool       dstAliased = false;
+    LclVarDsc* srcVar = nullptr;
 
     bool readIsIndir  = read->OperIsIndir() || read->OperIsImplicitIndir();
     bool writeIsIndir = write->OperIsIndir() || write->OperIsImplicitIndir();

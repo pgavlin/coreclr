@@ -824,9 +824,10 @@ void* GenTree::operator new(size_t sz, Compiler* comp, genTreeOps oper)
 // GenTree constructor
 inline GenTree::GenTree(genTreeOps oper, var_types type DEBUGARG(bool largeNode))
 {
-    gtOper  = oper;
-    gtType  = type;
-    gtFlags = 0;
+    gtOper     = oper;
+    gtType     = type;
+    gtFlags    = 0;
+    gtLIRFlags = 0;
 #ifdef DEBUG
     gtDebugFlags = 0;
 #endif // DEBUG
@@ -2768,7 +2769,29 @@ inline bool Compiler::fgIsThrowHlpBlk(BasicBlock* block)
         return false;
     }
 
-    GenTreePtr call = block->bbTreeList->gtStmt.gtStmtExpr;
+    GenTree* call = nullptr;
+    if (block->IsLIR())
+    {
+        // TODO(pdg): it would be nice if there was simply a bit on the block we could check.
+        LIR::Range& blockRange = LIR::AsRange(block);
+        call                   = blockRange.LastNode();
+
+#ifdef DEBUG
+        for (LIR::Range::ReverseIterator node = blockRange.rbegin(), end = blockRange.rend(); node != end; ++node)
+        {
+            if (node->OperGet() == GT_CALL)
+            {
+                assert(*node == call);
+                assert(node == blockRange.rbegin());
+                break;
+            }
+        }
+#endif
+    }
+    else
+    {
+        call = block->bbTreeList->gtStmt.gtStmtExpr;
+    }
 
     if (!call || (call->gtOper != GT_CALL))
     {
@@ -4569,9 +4592,9 @@ inline bool BasicBlock::endsWithJmpMethod(Compiler* comp)
 {
     if (comp->compJmpOpUsed && (bbJumpKind == BBJ_RETURN) && (bbFlags & BBF_HAS_JMP))
     {
-        GenTreePtr last = comp->fgGetLastTopLevelStmt(this);
-        assert(last != nullptr);
-        return last->gtStmt.gtStmtExpr->gtOper == GT_JMP;
+        GenTree* lastNode = this->lastNode();
+        assert(lastNode != nullptr);
+        return lastNode->OperGet() == GT_JMP;
     }
 
     return false;
@@ -4635,12 +4658,10 @@ inline bool BasicBlock::endsWithTailCall(Compiler* comp,
 
         if (result)
         {
-            GenTreePtr last = comp->fgGetLastTopLevelStmt(this);
-            assert(last != nullptr);
-            last = last->gtStmt.gtStmtExpr;
-            if (last->OperGet() == GT_CALL)
+            GenTree* lastNode = this->lastNode();
+            if (lastNode->OperGet() == GT_CALL)
             {
-                GenTreeCall* call = last->AsCall();
+                GenTreeCall* call = lastNode->AsCall();
                 if (tailCallsConvertibleToLoopOnly)
                 {
                     result = call->IsTailCallConvertibleToLoop();
@@ -4685,19 +4706,6 @@ inline bool BasicBlock::endsWithTailCallConvertibleToLoop(Compiler* comp, GenTre
     bool fastTailCallsOnly              = false;
     bool tailCallsConvertibleToLoopOnly = true;
     return endsWithTailCall(comp, fastTailCallsOnly, tailCallsConvertibleToLoopOnly, tailCall);
-}
-
-// Returns the last top level stmt of a given basic block.
-// Returns nullptr if the block is empty.
-inline GenTreePtr Compiler::fgGetLastTopLevelStmt(BasicBlock* block)
-{
-    // Return if the block is empty
-    if (block->bbTreeList == nullptr)
-    {
-        return nullptr;
-    }
-
-    return fgFindTopLevelStmtBackwards(block->bbTreeList->gtPrev->AsStmt());
 }
 
 inline GenTreeBlkOp* Compiler::gtCloneCpObjNode(GenTreeCpObj* source)
