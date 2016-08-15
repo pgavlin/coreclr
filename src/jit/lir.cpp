@@ -543,15 +543,11 @@ LIR::ReadOnlyRange LIR::Range::NonPhiNodes() const
 }
 
 //------------------------------------------------------------------------
-// LIR::Range::InsertBefore: Inserts a node before another node in this
-//                           range.
+// LIR::Range::InsertBefore: Inserts a node before another node in this range.
 //
 // Arguments:
-//    insertionPoint - The node before which `node` will be inserted.
-//                     Must be part of this range. A null `insertionPoint`
-//                     is allowed if the range is empty, in which case
-//                     the node will be inserted as the only node in the
-//                     range.
+//    insertionPoint - The node before which `node` will be inserted. If non-null, must be part
+//                     of this range. If null, insert at the end of the range.
 //    node - The node to insert. Must not be part of any range.
 //
 void LIR::Range::InsertBefore(GenTree* insertionPoint, GenTree* node)
@@ -567,9 +563,8 @@ void LIR::Range::InsertBefore(GenTree* insertionPoint, GenTree* node)
 // LIR::Range::InsertBefore: Inserts 2 nodes before another node in this range.
 //
 // Arguments:
-//    insertionPoint - The node before which nodes will be inserted. Must be part of this range.
-//                     A null `insertionPoint` is allowed if the range is empty, in which case
-//                     the nodes will be inserted as the only nodes in the range.
+//    insertionPoint - The node before which the nodes will be inserted. If non-null, must be part
+//                     of this range. If null, insert at the end of the range.
 //    node1 - The first node to insert. Must not be part of any range.
 //    node2 - The second node to insert. Must not be part of any range.
 //
@@ -597,9 +592,8 @@ void LIR::Range::InsertBefore(GenTree* insertionPoint, GenTree* node1, GenTree* 
 // LIR::Range::InsertBefore: Inserts 3 nodes before another node in this range.
 //
 // Arguments:
-//    insertionPoint - The node before which nodes will be inserted. Must be part of this range.
-//                     A null `insertionPoint` is allowed if the range is empty, in which case
-//                     the nodes will be inserted as the only nodes in the range.
+//    insertionPoint - The node before which the nodes will be inserted. If non-null, must be part
+//                     of this range. If null, insert at the end of the range.
 //    node1 - The first node to insert. Must not be part of any range.
 //    node2 - The second node to insert. Must not be part of any range.
 //    node3 - The third node to insert. Must not be part of any range.
@@ -635,9 +629,8 @@ void LIR::Range::InsertBefore(GenTree* insertionPoint, GenTree* node1, GenTree* 
 // LIR::Range::InsertBefore: Inserts 4 nodes before another node in this range.
 //
 // Arguments:
-//    insertionPoint - The node before which nodes will be inserted. Must be part of this range.
-//                     A null `insertionPoint` is allowed if the range is empty, in which case
-//                     the nodes will be inserted as the only nodes in the range.
+//    insertionPoint - The node before which the nodes will be inserted. If non-null, must be part
+//                     of this range. If null, insert at the end of the range.
 //    node1 - The first node to insert. Must not be part of any range.
 //    node2 - The second node to insert. Must not be part of any range.
 //    node3 - The third node to insert. Must not be part of any range.
@@ -677,13 +670,12 @@ void LIR::Range::InsertBefore(GenTree* insertionPoint, GenTree* node1, GenTree* 
 }
 
 //------------------------------------------------------------------------
-// LIR::Range::FinishInsertBefore: Helper function to finalize InsertBefore processing: link the range
-// to insertionPoint.
+// LIR::Range::FinishInsertBefore: Helper function to finalize InsertBefore processing: link the
+// range to insertionPoint. gtNext/gtPrev links between first and last are already set.
 //
 // Arguments:
-//    insertionPoint - The node before which `node` will be inserted. Must be part of this range.
-//                     A null `insertionPoint` is allowed if the range is empty, in which case
-//                     the node will be inserted as the only node in the range.
+//    insertionPoint - The node before which the nodes will be inserted. If non-null, must be part
+//                     of this range. If null, indicates to insert at the end of the range.
 //    first - The first node of the range to insert.
 //    last - The last node of the range to insert.
 //
@@ -700,39 +692,45 @@ void LIR::Range::FinishInsertBefore(GenTree* insertionPoint, GenTree* first, Gen
 
     if (insertionPoint == nullptr)
     {
-        assert(IsEmpty());
-        m_firstNode = first;
-        m_lastNode  = last;
-        return;
-    }
-
-    assert(Contains(insertionPoint));
-
-    first->gtPrev = insertionPoint->gtPrev;
-    if (first->gtPrev == nullptr)
-    {
-        assert(insertionPoint == m_firstNode);
-        m_firstNode = first;
+        if (m_firstNode == nullptr)
+        {
+            m_firstNode = first;
+        }
+        else
+        {
+            assert(m_lastNode != nullptr);
+            assert(m_lastNode->gtNext == nullptr);
+            m_lastNode->gtNext = first;
+            first->gtPrev = m_lastNode;
+        }
+        m_lastNode = last;
     }
     else
     {
-        first->gtPrev->gtNext = first;
-    }
+        assert(Contains(insertionPoint));
 
-    last->gtNext           = insertionPoint;
-    insertionPoint->gtPrev = last;
+        first->gtPrev = insertionPoint->gtPrev;
+        if (first->gtPrev == nullptr)
+        {
+            assert(insertionPoint == m_firstNode);
+            m_firstNode = first;
+        }
+        else
+        {
+            first->gtPrev->gtNext = first;
+        }
+
+        last->gtNext           = insertionPoint;
+        insertionPoint->gtPrev = last;
+    }
 }
 
 //------------------------------------------------------------------------
-// LIR::Range::InsertAfter: Inserts a node after another node in this
-//                          range.
+// LIR::Range::InsertAfter: Inserts a node after another node in this range.
 //
 // Arguments:
-//    insertionPoint - The node after which `node` will be inserted.
-//                     Must be part of this range. A null `insertionPoint`
-//                     is allowed if the range is empty, in which case
-//                     the node will be inserted as the only node in the
-//                     range.
+//    insertionPoint - The node after which `node` will be inserted. If non-null, must be part
+//                     of this range. If null, insert at the beginning of the range.
 //    node - The node to insert. Must not be part of any range.
 //
 // Notes:
@@ -753,9 +751,8 @@ void LIR::Range::InsertAfter(GenTree* insertionPoint, GenTree* node)
 // LIR::Range::InsertAfter: Inserts 2 nodes after another node in this range.
 //
 // Arguments:
-//    insertionPoint - The node after which nodes will be inserted. Must be part of this range.
-//                     A null `insertionPoint` is allowed if the range is empty, in which case
-//                     the nodes will be inserted as the only nodes in the range.
+//    insertionPoint - The node after which the nodes will be inserted. If non-null, must be part
+//                     of this range. If null, insert at the beginning of the range.
 //    node1 - The first node to insert. Must not be part of any range.
 //    node2 - The second node to insert. Must not be part of any range. Inserted after node1.
 //
@@ -783,9 +780,8 @@ void LIR::Range::InsertAfter(GenTree* insertionPoint, GenTree* node1, GenTree* n
 // LIR::Range::InsertAfter: Inserts 3 nodes after another node in this range.
 //
 // Arguments:
-//    insertionPoint - The node after which nodes will be inserted. Must be part of this range.
-//                     A null `insertionPoint` is allowed if the range is empty, in which case
-//                     the nodes will be inserted as the only nodes in the range.
+//    insertionPoint - The node after which the nodes will be inserted. If non-null, must be part
+//                     of this range. If null, insert at the beginning of the range.
 //    node1 - The first node to insert. Must not be part of any range.
 //    node2 - The second node to insert. Must not be part of any range. Inserted after node1.
 //    node3 - The third node to insert. Must not be part of any range. Inserted after node2.
@@ -821,9 +817,8 @@ void LIR::Range::InsertAfter(GenTree* insertionPoint, GenTree* node1, GenTree* n
 // LIR::Range::InsertAfter: Inserts 4 nodes after another node in this range.
 //
 // Arguments:
-//    insertionPoint - The node after which nodes will be inserted. Must be part of this range.
-//                     A null `insertionPoint` is allowed if the range is empty, in which case
-//                     the nodes will be inserted as the only nodes in the range.
+//    insertionPoint - The node after which the nodes will be inserted. If non-null, must be part
+//                     of this range. If null, insert at the beginning of the range.
 //    node1 - The first node to insert. Must not be part of any range.
 //    node2 - The second node to insert. Must not be part of any range. Inserted after node1.
 //    node3 - The third node to insert. Must not be part of any range. Inserted after node2.
@@ -863,13 +858,12 @@ void LIR::Range::InsertAfter(GenTree* insertionPoint, GenTree* node1, GenTree* n
 }
 
 //------------------------------------------------------------------------
-// LIR::Range::FinishInsertAfter: Helper function to finalize InsertAfter processing: link the range
-// to insertionPoint.
+// LIR::Range::FinishInsertAfter: Helper function to finalize InsertAfter processing: link the
+// range to insertionPoint. gtNext/gtPrev links between first and last are already set.
 //
 // Arguments:
-//    insertionPoint - The node after which nodes will be inserted. Must be part of this range.
-//                     A null `insertionPoint` is allowed if the range is empty, in which case
-//                     the nodes will be inserted as the only nodes in the range.
+//    insertionPoint - The node after which the nodes will be inserted. If non-null, must be part
+//                     of this range. If null, insert at the beginning of the range.
 //    first - The first node of the range to insert.
 //    last - The last node of the range to insert.
 //
@@ -886,38 +880,45 @@ void LIR::Range::FinishInsertAfter(GenTree* insertionPoint, GenTree* first, GenT
 
     if (insertionPoint == nullptr)
     {
-        assert(IsEmpty());
+        if (m_lastNode == nullptr)
+        {
+            m_lastNode = last;
+        }
+        else
+        {
+            assert(m_firstNode != nullptr);
+            assert(m_firstNode->gtPrev == nullptr);
+            m_firstNode->gtPrev = last;
+            last->gtNext = m_firstNode;
+        }
         m_firstNode = first;
-        m_lastNode  = last;
-        return;
-    }
-
-    assert(Contains(insertionPoint));
-
-    last->gtNext = insertionPoint->gtNext;
-    if (last->gtNext == nullptr)
-    {
-        assert(insertionPoint == m_lastNode);
-        m_lastNode = last;
     }
     else
     {
-        last->gtNext->gtPrev = last;
-    }
+        assert(Contains(insertionPoint));
 
-    first->gtPrev          = insertionPoint;
-    insertionPoint->gtNext = first;
+        last->gtNext = insertionPoint->gtNext;
+        if (last->gtNext == nullptr)
+        {
+            assert(insertionPoint == m_lastNode);
+            m_lastNode = last;
+        }
+        else
+        {
+            last->gtNext->gtPrev = last;
+        }
+
+        first->gtPrev          = insertionPoint;
+        insertionPoint->gtNext = first;
+    }
 }
 
 //------------------------------------------------------------------------
 // LIR::Range::InsertBefore: Inserts a range before another node in `this` range.
 //
 // Arguments:
-//    insertionPoint - The node before which `range` will be inserted.
-//                     Must be part of `this` range. A null `insertionPoint`
-//                     is allowed if the range is empty, in which case
-//                     the contents of `this` range will be set to those of
-//                     `range`.
+//    insertionPoint - The node before which the nodes will be inserted. If non-null, must be part
+//                     of this range. If null, insert at the end of the range.
 //    range - The range to splice in.
 //
 void LIR::Range::InsertBefore(GenTree* insertionPoint, Range&& range)
@@ -930,11 +931,8 @@ void LIR::Range::InsertBefore(GenTree* insertionPoint, Range&& range)
 // LIR::Range::InsertAfter: Inserts a range after another node in `this` range.
 //
 // Arguments:
-//    insertionPoint - The node after which `range` will be inserted.
-//                     Must be part of `this` range. A null `insertionPoint`
-//                     is allowed if the range is empty, in which case
-//                     the contents of `this` range will be set to those of
-//                     `range`.
+//    insertionPoint - The node after which the nodes will be inserted. If non-null, must be part
+//                     of this range. If null, insert at the beginning of the range.
 //    range - The range to splice in.
 //
 void LIR::Range::InsertAfter(GenTree* insertionPoint, Range&& range)
