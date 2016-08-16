@@ -759,6 +759,17 @@ void CodeGen::genCodeForBBlist()
 #endif // defined(DEBUG) && defined(LATE_DISASM) && defined(_TARGET_ARM64_)
 
 #ifdef DEBUGGING_SUPPORT
+        // It is possible to reach the end of the block without generating code for the current IL offset.
+        // For example, if the following IR ends the current block, no code will have been generated for
+        // offset 21:
+        //
+        //          (  0,  0) [000040] ------------                il_offset void   IL offset: 21
+        //
+        //     N001 (  0,  0) [000039] ------------                nop       void
+        //
+        // This can lead to problems when debugging the generated code. To prevent these issues, make sure
+        // we've generated code for the last IL offset we saw in the block.
+        genEnsureCodeEmitted(currentILOffset);
 
         if (compiler->opts.compScopeInfo && (compiler->info.compVarScopesCount > 0))
         {

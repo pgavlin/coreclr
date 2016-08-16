@@ -198,7 +198,7 @@ GTNODE(STMT       , "stmtExpr"   ,0,GTK_SPECIAL|GTK_NOVALUE) // top-level list n
 GTNODE(RETURN     , "return"     ,0,GTK_UNOP|GTK_NOVALUE)    // return from current function
 GTNODE(SWITCH     , "switch"     ,0,GTK_UNOP|GTK_NOVALUE)    // switch
 
-GTNODE(NO_OP      , "no_op"      ,0,GTK_LEAF)    // nop!
+GTNODE(NO_OP      , "no_op"      ,0,GTK_LEAF|GTK_NOVALUE)    // nop!
 
 GTNODE(START_NONGC, "start_nongc",0,GTK_LEAF|GTK_NOVALUE)    // starts a new instruction group that will be non-gc interruptible
 
