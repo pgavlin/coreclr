@@ -1715,7 +1715,7 @@ void CodeGen::genCodeForBBlist()
 #ifdef DEBUGGING_SUPPORT
         IL_OFFSETX currentILOffset = BAD_IL_OFFSET;
 #endif
-        for (GenTree* node : LIR::AsRange(block))
+        for (GenTree* node : LIR::AsRange(block).NonPhiNodes())
         {
 #ifdef DEBUGGING_SUPPORT
             // Do we have a new IL offset?
@@ -1756,9 +1756,11 @@ void CodeGen::genCodeForBBlist()
                 genConsumeReg(node);
             }
 
+// TODO(pdg): re-enable the debug checks below after making sure they are valid on a node-by-node basis.
+#if 0
+#ifdef DEBUG
             regSet.rsSpillChk();
 
-#ifdef DEBUG
             assert((node->gtFlags & GTF_SPILL) == 0);
 
             /* Make sure we didn't bungle pointer register tracking */
@@ -1806,6 +1808,7 @@ void CodeGen::genCodeForBBlist()
 
             noway_assert(nonVarPtrRegs == 0);
 #endif // DEBUG
+#endif
         }
 
 #if defined(DEBUG) && defined(_TARGET_ARM64_)
