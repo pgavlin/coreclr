@@ -109,7 +109,7 @@ GenTree* DecomposeLongs::DecomposeNode(LIR::Use& use)
             {
                 printf("Changing implicit reference to lo half of long lclVar to an explicit reference of its promoted "
                        "half:\n");
-                m_compiler->gtDispTree(tree);
+                m_compiler->gtDispTreeRange(BlockRange(), tree);
             }
 #endif // DEBUG
             m_compiler->lvaDecRefCnts(tree);
@@ -129,7 +129,7 @@ GenTree* DecomposeLongs::DecomposeNode(LIR::Use& use)
     if (m_compiler->verbose)
     {
         printf("Decomposing TYP_LONG tree.  BEFORE:\n");
-        m_compiler->gtDispTree(tree);
+        m_compiler->gtDispTreeRange(BlockRange(), tree);
     }
 #endif // DEBUG
 
@@ -255,7 +255,7 @@ GenTree* DecomposeLongs::DecomposeNode(LIR::Use& use)
     {
         // NOTE: st_lcl_var doesn't dump properly afterwards.
         printf("Decomposing TYP_LONG tree.  AFTER:\n");
-        m_compiler->gtDispTree(use.Def());
+        m_compiler->gtDispTreeRange(BlockRange(), use.Def());
     }
 #endif
 
