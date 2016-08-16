@@ -2408,6 +2408,8 @@ bool Compiler::fgTryRemoveDeadLIRStore(LIR::Range& blockRange, GenTree* node, Ge
 bool Compiler::fgRemoveDeadStore(
     GenTree** pTree, LclVarDsc* varDsc, VARSET_TP life, bool* doAgain, bool* pStmtInfoDirty DEBUGARG(bool* treeModf))
 {
+    assert(!compRationalIRForm);
+
     // Vars should have already been checked for address exposure by this point.
     assert(!varDsc->lvIsStructField || !lvaTable[varDsc->lvParentLcl].lvAddrExposed);
     assert(!varDsc->lvAddrExposed);
@@ -2596,11 +2598,6 @@ bool Compiler::fgRemoveDeadStore(
 
             if (rhsNode->gtFlags & GTF_SIDE_EFFECT)
             {
-                if (compRationalIRForm)
-                {
-                    return false;
-                }
-
             EXTRACT_SIDE_EFFECTS:
                 /* Extract the side effects */
 
@@ -2685,12 +2682,6 @@ bool Compiler::fgRemoveDeadStore(
         else
         {
             /* This is an INTERIOR STATEMENT with a dead assignment - remove it */
-
-            // don't want to deal with this
-            if (compRationalIRForm)
-            {
-                return false;
-            }
 
             noway_assert(!VarSetOps::IsMember(this, life, varDsc->lvVarIndex));
 
