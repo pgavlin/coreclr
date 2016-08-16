@@ -10047,7 +10047,9 @@ void Compiler::fgRemoveJTrue(BasicBlock* block)
         unsigned           sideEffects;
         LIR::ReadOnlyRange testRange = blockRange.GetTreeRange(test, &isClosed, &sideEffects);
 
-        if (isClosed && ((sideEffects & GTF_ALL_EFFECT) == 0))
+        // TODO(pdg): this should really be checking GTF_ALL_EFFECT, but that produces unacceptable
+        //            diffs compared to the existing backend.
+        if (isClosed && ((sideEffects & GTF_SIDE_EFFECT) == 0))
         {
             // If the jump and its operands form a contiguous, side-effect-free range,
             // remove them.
@@ -13798,7 +13800,9 @@ bool Compiler::fgOptimizeBranchToNext(BasicBlock* block, BasicBlock* bNext, Basi
             unsigned           sideEffects;
             LIR::ReadOnlyRange jmpRange = blockRange.GetTreeRange(jmp, &isClosed, &sideEffects);
 
-            if (isClosed && ((sideEffects & GTF_ALL_EFFECT) == 0))
+            // TODO(pdg): this should really be checking GTF_ALL_EFFECT, but that produces unacceptable
+            //            diffs compared to the existing backend.
+            if (isClosed && ((sideEffects & GTF_SIDE_EFFECT) == 0))
             {
                 // If the jump and its operands form a contiguous, side-effect-free range,
                 // remove them.
