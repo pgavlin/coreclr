@@ -3848,7 +3848,7 @@ void Lowering::LowerBlock(BasicBlock* block)
     //
     // See e.g. uses of InsertPInvoke{Method,Call}{Prolog,Epilog}.
 
-    GenTree* node = BlockRange().FirstNonPhiNode();
+    GenTree* node = BlockRange().FirstNode();
     while (node != nullptr)
     {
         node = LowerNode(node);
