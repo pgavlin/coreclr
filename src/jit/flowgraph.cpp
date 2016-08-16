@@ -8981,7 +8981,7 @@ void Compiler::fgSimpleLowering()
                         add->gtNext  = tree;
                         tree->gtPrev = add;
 #else
-                            range.InsertAfter(arr, con, add);
+                        range.InsertAfter(arr, con, add);
 #endif
                     }
 
@@ -9530,14 +9530,7 @@ void Compiler::fgCompactBlocks(BasicBlock* block, BasicBlock* bNext)
             nextFirstNonPhi       = nextPhis.LastNode()->gtNext;
 
             LIR::Range phisToMove = nextRange.Remove(std::move(nextPhis));
-            if (blockLastPhi == nullptr)
-            {
-                blockRange.InsertAtBeginning(std::move(phisToMove));
-            }
-            else
-            {
-                blockRange.InsertAfter(blockLastPhi, std::move(phisToMove));
-            }
+            blockRange.InsertAfter(blockLastPhi, std::move(phisToMove));
         }
         else
         {
@@ -9548,7 +9541,7 @@ void Compiler::fgCompactBlocks(BasicBlock* block, BasicBlock* bNext)
         if (nextFirstNonPhi != nullptr)
         {
             LIR::Range nextNodes = nextRange.Remove(nextFirstNonPhi, nextRange.LastNode());
-            blockRange.InsertAfter(blockRange.LastNode(), std::move(nextNodes));
+            blockRange.InsertAtEnd(std::move(nextNodes));
         }
     }
     else

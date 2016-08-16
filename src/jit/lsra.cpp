@@ -8543,7 +8543,7 @@ void LinearScan::insertMove(
         else
         {
             assert(block->bbJumpKind == BBJ_NONE || block->bbJumpKind == BBJ_ALWAYS);
-            blockRange.InsertAfter(blockRange.LastNode(), std::move(treeRange));
+            blockRange.InsertAtEnd(std::move(treeRange));
         }
     }
 }
@@ -8614,7 +8614,7 @@ void LinearScan::insertSwap(
         else
         {
             assert(block->bbJumpKind == BBJ_NONE || block->bbJumpKind == BBJ_ALWAYS);
-            blockRange.InsertAfter(blockRange.LastNode(), std::move(swapRange));
+            blockRange.InsertAtEnd(std::move(swapRange));
         }
     }
 }

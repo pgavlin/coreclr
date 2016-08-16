@@ -2304,7 +2304,6 @@ void Lowering::InsertPInvokeMethodProlog()
 
     comp->fgMorphTree(store);
     firstBlockRange.InsertBefore(insertionPoint, LIR::SeqTree(comp, store));
-
     DISPTREERANGE(firstBlockRange, store);
 
 #ifndef _TARGET_X86_ // For x86, this step is done at the call site (due to stack pointer not being static in the
@@ -2317,15 +2316,7 @@ void Lowering::InsertPInvokeMethodProlog()
         GenTreeLclFld(GT_STORE_LCL_FLD, TYP_I_IMPL, comp->lvaInlinedPInvokeFrameVar, callFrameInfo.offsetOfCallSiteSP);
     storeSP->gtOp1 = PhysReg(REG_SPBASE);
 
-    if (insertionPoint == nullptr)
-    {
-        firstBlockRange.InsertAtEnd(LIR::SeqTree(comp, storeSP));
-    }
-    else
-    {
-        firstBlockRange.InsertBefore(insertionPoint, LIR::SeqTree(comp, storeSP));
-    }
-
+    firstBlockRange.InsertBefore(insertionPoint, LIR::SeqTree(comp, storeSP));
     DISPTREERANGE(firstBlockRange, storeSP);
 
 #endif // !_TARGET_X86_
@@ -2338,15 +2329,7 @@ void Lowering::InsertPInvokeMethodProlog()
                                                    callFrameInfo.offsetOfCalleeSavedFP);
     storeFP->gtOp1 = PhysReg(REG_FPBASE);
 
-    if (insertionPoint == nullptr)
-    {
-        firstBlockRange.InsertAtEnd(LIR::SeqTree(comp, storeFP));
-    }
-    else
-    {
-        firstBlockRange.InsertBefore(insertionPoint, LIR::SeqTree(comp, storeFP));
-    }
-
+    firstBlockRange.InsertBefore(insertionPoint, LIR::SeqTree(comp, storeFP));
     DISPTREERANGE(firstBlockRange, storeFP);
 
     // --------------------------------------------------------
@@ -2356,14 +2339,7 @@ void Lowering::InsertPInvokeMethodProlog()
         // Push a frame - if we are NOT in an IL stub, this is done right before the call
         // The init routine sets InlinedCallFrame's m_pNext, so we just set the thead's top-of-stack
         GenTree* frameUpd = CreateFrameLinkUpdate(PushFrame);
-        if (insertionPoint == nullptr)
-        {
-            firstBlockRange.InsertAtEnd(LIR::SeqTree(comp, frameUpd));
-        }
-        else
-        {
-            firstBlockRange.InsertBefore(insertionPoint, LIR::SeqTree(comp, frameUpd));
-        }
+        firstBlockRange.InsertBefore(insertionPoint, LIR::SeqTree(comp, frameUpd));
         DISPTREERANGE(firstBlockRange, frameUpd);
     }
 }
@@ -2399,6 +2375,7 @@ void Lowering::InsertPInvokeMethodEpilog(BasicBlock* returnBB DEBUGARG(GenTreePt
     LIR::Range& returnBlockRange = LIR::AsRange(returnBB);
 
     GenTree* insertionPoint = returnBlockRange.LastNode();
+    assert(insertionPoint == lastExpr);
 
     // Note: PInvoke Method Epilog (PME) needs to be inserted just before GT_RETURN, GT_JMP or GT_CALL node in execution
     // order so that it is guaranteed that there will be no further PInvokes after that point in the method.
@@ -2618,21 +2595,19 @@ void Lowering::InsertPInvokeCallEpilog(GenTreeCall* call)
 #endif
 
     // gcstate = 1
-    GenTree* insertionPoint = call;
+    GenTree* insertionPoint = call->gtNext;
 
     GenTree* tree = SetGCState(1);
-    BlockRange().InsertAfter(insertionPoint, LIR::SeqTree(comp, tree));
-    insertionPoint = tree;
+    BlockRange().InsertBefore(insertionPoint, LIR::SeqTree(comp, tree));
 
     tree = CreateReturnTrapSeq();
-    BlockRange().InsertAfter(insertionPoint, LIR::SeqTree(comp, tree));
-    insertionPoint = tree;
+    BlockRange().InsertBefore(insertionPoint, LIR::SeqTree(comp, tree));
 
     // Pop the frame if necessasry
     if (!(comp->opts.eeFlags & CORJIT_FLG_IL_STUB))
     {
         tree = CreateFrameLinkUpdate(PopFrame);
-        BlockRange().InsertAfter(insertionPoint, LIR::SeqTree(comp, tree));
+        BlockRange().InsertBefore(insertionPoint, LIR::SeqTree(comp, tree));
     }
 }
 
