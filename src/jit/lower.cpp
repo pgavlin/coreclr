@@ -3371,9 +3371,6 @@ void Lowering::LowerStoreInd(GenTree* node)
 
     // Mark all GT_STOREIND nodes to indicate that it is not known
     // whether it represents a RMW memory op.
-    //
-    // TODO(pdg): could this be conditional on whether or not TryCreateAddrMode
-    // actually created an address mode?
     node->AsStoreInd()->SetRMWStatusDefault();
 }
 
