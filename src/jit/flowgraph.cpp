@@ -13186,7 +13186,7 @@ bool Compiler::fgOptimizeEmptyBlock(BasicBlock* block)
                         // for the catchret target in the right EH region.
                         GenTree* nop = new (this, GT_NO_OP) GenTree(GT_NO_OP, TYP_VOID);
 
-                        if (compRationalIRForm)
+                        if (block->IsLIR())
                         {
                             LIR::AsRange(block).InsertAtEnd(nop);
                         }
