@@ -10007,6 +10007,7 @@ void Compiler::fgUnreachableBlock(BasicBlock* block)
 void Compiler::fgRemoveJTrue(BasicBlock* block)
 {
     noway_assert(block->bbJumpKind == BBJ_COND && block->bbJumpDest == block->bbNext);
+    assert(compRationalIRForm == block->IsLIR());
 
     flowList* flow = fgGetPredForBlock(block->bbNext, block);
     noway_assert(flow->flDupCount == 2);
@@ -10066,44 +10067,26 @@ void Compiler::fgRemoveJTrue(BasicBlock* block)
 
         if (tree->gtFlags & GTF_SIDE_EFFECT)
         {
-            if (compRationalIRForm)
-            {
-                // if we are in rational form don't try to extract the side effects
-                // because gtExtractSideEffList will create new comma nodes
-                // (which we would have to rationalize) and fgMorphBlockStmt can't
-                // handle embedded statements.
+            gtExtractSideEffList(tree, &sideEffList);
 
-                // Instead just transform the JTRUE into a NEG which has the effect of
-                // evaluating the side-effecting tree and perform a benign operation on it.
-                tree->SetOper(GT_NEG);
-                tree->gtType = TYP_I_IMPL;
-            }
-            else
+            if (sideEffList)
             {
-                gtExtractSideEffList(tree, &sideEffList);
-
-                if (sideEffList)
-                {
-                    noway_assert(sideEffList->gtFlags & GTF_SIDE_EFFECT);
+                noway_assert(sideEffList->gtFlags & GTF_SIDE_EFFECT);
 #ifdef DEBUG
-                    if (verbose)
-                    {
-                        printf("Extracted side effects list from condition...\n");
-                        gtDispTree(sideEffList);
-                        printf("\n");
-                    }
-#endif
+                if (verbose)
+                {
+                    printf("Extracted side effects list from condition...\n");
+                    gtDispTree(sideEffList);
+                    printf("\n");
                 }
+#endif
             }
         }
 
         // Delete the cond test or replace it with the side effect tree
         if (sideEffList == nullptr)
         {
-            if (!compRationalIRForm || (tree->gtFlags & GTF_SIDE_EFFECT) == 0)
-            {
-                fgRemoveStmt(block, test);
-            }
+            fgRemoveStmt(block, test);
         }
         else
         {
@@ -13203,8 +13186,7 @@ bool Compiler::fgOptimizeEmptyBlock(BasicBlock* block)
                         // for the catchret target in the right EH region.
                         GenTree* nop = new (this, GT_NO_OP) GenTree(GT_NO_OP, TYP_VOID);
 
-                        // TODO(pdg): allow empty blocks to be LIR blocks
-                        if (compRationalIRForm)
+                        if (block->IsLIR())
                         {
                             LIR::AsRange(block).InsertAtEnd(nop);
                         }
