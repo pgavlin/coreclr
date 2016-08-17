@@ -13683,6 +13683,9 @@ bool Compiler::fgOptimizeUncondBranchToSimpleCond(BasicBlock* block, BasicBlock*
 
     if (block->IsLIR())
     {
+        // NOTE: we do not currently hit this NYI because this function is only called when
+        // `fgUpdateFlowGraph` has been called with `doTailDuplication` set to true, and the
+        // backend always calls `fgUpdateFlowGraph` with `doTailDuplication` set to false.
         NYI("fgOptimizeUncondBranchToSimpleCond for LIR");
     }
 
@@ -13953,12 +13956,12 @@ bool Compiler::fgOptimizeBranch(BasicBlock* bJump)
         return false;
     }
 
-    // TODO(pdg): cost information for LIR
-    if (bJump->IsLIR() || bDest->IsLIR())
-    {
-        NYI("fgOptimizeBranch for LIR");
-        return false;
-    }
+    // This function is only called by fgReorderBlocks, which we do not run in the backend.
+    // If we wanted to run block reordering in the backend, we would need to be able to
+    // calculate cost information for LIR on a per-node basis in order for this function
+    // to work.
+    assert(!bJump->IsLIR());
+    assert(!bDest->IsLIR());
 
     GenTreeStmt* stmt;
     unsigned     estDupCostSz = 0;
