@@ -636,7 +636,6 @@ bool BasicBlock::IsLIR()
 // Return Value:
 //    The first statement in the block's bbTreeList.
 //
-
 GenTreeStmt* BasicBlock::firstStmt()
 {
     if (bbTreeList == nullptr)
@@ -656,9 +655,6 @@ GenTreeStmt* BasicBlock::firstStmt()
 // Return Value:
 //    The last statement in the block's bbTreeList.
 //
-// Notes:
-//    The last statement may be an embedded statement, when in linear order.
-
 GenTreeStmt* BasicBlock::lastStmt()
 {
     if (bbTreeList == nullptr)
@@ -671,13 +667,18 @@ GenTreeStmt* BasicBlock::lastStmt()
     return result->AsStmt();
 }
 
-// TODO(pdg): comments
+
+//------------------------------------------------------------------------
+// BasicBlock::firstNode: Returns the first node in the block.
+//
 GenTree* BasicBlock::firstNode()
 {
     return IsLIR() ? bbTreeList : Compiler::fgGetFirstNode(firstStmt()->gtStmtExpr);
 }
 
-// TODO(pdg): comments
+//------------------------------------------------------------------------
+// BasicBlock::lastNode: Returns the last node in the block.
+//
 GenTree* BasicBlock::lastNode()
 {
     return IsLIR() ? m_lastNode : lastStmt()->gtStmtExpr;

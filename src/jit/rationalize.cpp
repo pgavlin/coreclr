@@ -736,10 +736,6 @@ void Rationalizer::RewriteAssignmentIntoStoreLcl(GenTreeOp* assignment)
     GenTree* location = assignment->gtGetOp1();
     GenTree* value    = assignment->gtGetOp2();
 
-    // TODO(pdg): because this function does not have access to an LIR::Range,
-    // it cannot remove the location node. If the location has been threaded into
-    // a range, it will need to be removed by the caller.
-
     RewriteAssignmentIntoStoreLclCore(assignment, location, value, location->OperGet());
 }
 

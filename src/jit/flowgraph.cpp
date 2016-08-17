@@ -13681,12 +13681,15 @@ bool Compiler::fgOptimizeUncondBranchToSimpleCond(BasicBlock* block, BasicBlock*
         return false;
     }
 
+    if (block->IsLIR())
+    {
+        NYI("fgOptimizeUncondBranchToSimpleCond for LIR");
+    }
+
     GenTreeStmt* stmt = target->FirstNonPhiDef();
+    assert(stmt == target->lastStmt());
 
     // Duplicate the target block at the end of this block
-
-    // TODO(pdg): It seems like the operations below are dropping code on the floor...
-    //            Shouldn't all of the statements in the target block be copied?
 
     GenTree* cloned = gtCloneExpr(stmt->gtStmtExpr);
     noway_assert(cloned);
@@ -19674,7 +19677,12 @@ void                Compiler::fgDumpStmtTree(GenTreePtr stmt, unsigned blkNum)
     }
 }
 
-//TODO(pdg): comment
+//------------------------------------------------------------------------
+// Compiler::fgDumpBlock: dumps the contents of the given block to stdout.
+//
+// Arguments:
+//    block - The block to dump.
+//
 void                Compiler::fgDumpBlock(BasicBlock* block)
 {
     printf("\n------------ ");

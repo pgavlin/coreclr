@@ -2772,7 +2772,6 @@ inline bool Compiler::fgIsThrowHlpBlk(BasicBlock* block)
     GenTree* call = nullptr;
     if (block->IsLIR())
     {
-        // TODO(pdg): it would be nice if there was simply a bit on the block we could check.
         LIR::Range& blockRange = LIR::AsRange(block);
         call                   = blockRange.LastNode();
 

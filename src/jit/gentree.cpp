@@ -10985,7 +10985,12 @@ void Compiler::gtDispTreeList(GenTreePtr tree, IndentStack* indentStack /* = nul
     }
 }
 
-// TODO(pdg): comment
+//------------------------------------------------------------------------
+// Compiler::gtDispRange: dumps a range of LIR to stdout.
+//
+// Arguments:
+//    range - the range of LIR to display.
+//
 void Compiler::gtDispRange(LIR::ReadOnlyRange const& range)
 {
     for (GenTree* node : range)
@@ -10994,14 +10999,27 @@ void Compiler::gtDispRange(LIR::ReadOnlyRange const& range)
     }
 }
 
-// TODO(pdg): comment
+//------------------------------------------------------------------------
+// Compiler::gtDispTreeRange: dumps the LIR range that contains all of the
+//                            nodes in the dataflow tree rooted at a given
+//                            node to stdout.
+//
+// Arguments:
+//    containingRange - the LIR range that contains the root node.
+//    tree - the root of the dataflow tree.
+//
 void Compiler::gtDispTreeRange(LIR::Range& containingRange, GenTree* tree)
 {
     bool unused;
     gtDispRange(containingRange.GetTreeRange(tree, &unused));
 }
 
-// TODO(pdg): comment
+//------------------------------------------------------------------------
+// Compiler::gtDispLIRNode: dumps a single LIR node to stdout.
+//
+// Arguments:
+//    node - the LIR node to dump.
+//
 void Compiler::gtDispLIRNode(GenTree* node)
 {
     auto displayOperand = [](GenTree* operand, const char* message, IndentInfo operandArc, IndentStack& indentStack) {
@@ -11049,8 +11067,6 @@ void Compiler::gtDispLIRNode(GenTree* node)
         if (operand->IsArgPlaceHolderNode() || !operand->IsValue())
         {
             // Either of these situations may happen with calls.
-            //
-            // TODO(pdg): provide some sort of dump for on-stack args.
             continue;
         }
 
