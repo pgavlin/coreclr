@@ -13681,13 +13681,10 @@ bool Compiler::fgOptimizeUncondBranchToSimpleCond(BasicBlock* block, BasicBlock*
         return false;
     }
 
-    if (block->IsLIR())
-    {
-        // NOTE: we do not currently hit this NYI because this function is only called when
-        // `fgUpdateFlowGraph` has been called with `doTailDuplication` set to true, and the
-        // backend always calls `fgUpdateFlowGraph` with `doTailDuplication` set to false.
-        NYI("fgOptimizeUncondBranchToSimpleCond for LIR");
-    }
+    // NOTE: we do not currently hit this assert because this function is only called when
+    // `fgUpdateFlowGraph` has been called with `doTailDuplication` set to true, and the
+    // backend always calls `fgUpdateFlowGraph` with `doTailDuplication` set to false.
+    assert(!block->IsLIR());
 
     GenTreeStmt* stmt = target->FirstNonPhiDef();
     assert(stmt == target->lastStmt());
