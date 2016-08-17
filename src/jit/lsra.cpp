@@ -3222,8 +3222,12 @@ static int ComputeOperandDstCount(GenTree* operand)
     }
     else if (operandInfo.srcCount != 0)
     {
-        // If an operand has no destination registers but does have source registers, it must be a store.
-        assert(operand->OperIsStore() || operand->OperIsBlkOp() || operand->OperIsPutArgStk());
+        // If an operand has no destination registers but does have source registers, it must be a store
+        // or a compare.
+        assert(operand->OperIsStore() ||
+               operand->OperIsBlkOp() ||
+               operand->OperIsPutArgStk() ||
+               operand->OperIsCompare());
         return 0;
     }
     else if (operand->OperIsStore() || operand->TypeGet() == TYP_VOID)
@@ -9969,28 +9973,69 @@ void LinearScan::lsraDispNode(GenTreePtr tree, LsraTupleDumpMode mode, bool hasD
     }
 }
 
-GenTreePtr popAndPrintLclVarUses(ArrayStack<GenTreePtr>* stack, int* remainingUses)
+//------------------------------------------------------------------------
+// ComputeOperandDstCount: computes the number of registers defined by a
+//                         node.
+//
+// For most nodes, this is simple:
+// - Nodes that do not produce values (e.g. stores and other void-typed
+//   nodes) and nodes that immediately use the registers they define
+//   produce no registers
+// - Nodes that are marked as defining N registers define N registers.
+//
+// For contained nodes, however, things are more complicated: for purposes
+// of bookkeeping, a contained node is treated as producing the transitive
+// closure of the registers produced by its sources.
+//
+// Arguments:
+//    operand - The operand for which to compute a register count.
+//
+// Returns:
+//    The number of registers defined by `operand`.
+//
+void LinearScan::DumpOperandDefs(GenTree* operand,
+                                 bool& first,
+                                 LsraTupleDumpMode mode,
+                                 char* operandString,
+                                 const unsigned operandStringLength)
 {
-    while (*remainingUses != 0)
+    assert(operand != nullptr);
+    assert(operandString != nullptr);
+
+    if (ComputeOperandDstCount(operand) == 0)
     {
-        GenTreePtr nextUseNode = stack->Pop();
-        (*remainingUses)--;
-        if (nextUseNode->IsLocal())
+        return;
+    }
+
+    if (operand->gtLsraInfo.dstCount != 0)
+    {
+        // This operand directly produces registers; print it.
+        for (unsigned i = 0; i < operand->gtLsraInfo.dstCount; i++)
         {
-            printf("  V%02u");
-        }
-        else
-        {
-            return nextUseNode;
+            if (!first)
+            {
+                printf(",");
+            }
+
+            lsraGetOperandString(operand, mode, operandString, operandStringLength);
+            printf("%s", operandString);
+
+            first = false;
         }
     }
-    return nullptr;
+    else
+    {
+        // This is a contained node. Dump the defs produced by its operands.
+        for (GenTree* op : operand->Operands())
+        {
+            DumpOperandDefs(op, first, mode, operandString, operandStringLength);
+        }
+    }
 }
 
 void LinearScan::TupleStyleDump(LsraTupleDumpMode mode)
 {
     BasicBlock*            block;
-    ArrayStack<GenTreePtr> stack(compiler, CMK_LSRA);
     LsraLocation           currentLoc          = 1; // 0 is the entry
     const unsigned         operandStringLength = 16;
     char                   operandString[operandStringLength];
@@ -10116,15 +10161,9 @@ void LinearScan::TupleStyleDump(LsraTupleDumpMode mode)
 
         for (GenTree* node : LIR::AsRange(block).NonPhiNodes())
         {
-            // TODO(pdg): fix the dump below for LIR
-
             GenTree* tree = node;
 
             genTreeOps oper = tree->OperGet();
-            if (oper == GT_ARGPLACE)
-            {
-                continue;
-            }
             TreeNodeInfo& info = tree->gtLsraInfo;
             if (tree->gtLsraInfo.isLsraAdded)
             {
@@ -10171,40 +10210,19 @@ void LinearScan::TupleStyleDump(LsraTupleDumpMode mode)
             regMaskTP killMask  = RBM_NONE;
             regMaskTP fixedMask = RBM_NONE;
 
-            if (tree->OperGet() == GT_LIST)
-            {
-                continue;
-            }
-
             lsraDispNode(tree, mode, produce != 0 && mode != LSRA_DUMP_REFPOS);
 
             if (mode != LSRA_DUMP_REFPOS)
             {
-                if (consume > stack.Height())
-                {
-                    printf("about to consume %d, height is only %d\n", consume, stack.Height());
-                }
-
-                if (!(tree->gtFlags & GTF_REVERSE_OPS))
-                {
-                    stack.ReverseTop(consume);
-                }
                 if (consume > 0)
                 {
                     printf("; ");
-                }
-                while (consume--)
-                {
-                    lsraGetOperandString(stack.Pop(), mode, operandString, operandStringLength);
-                    printf("%s", operandString);
-                    if (consume)
+
+                    bool first = true;
+                    for (GenTree* operand : tree->Operands())
                     {
-                        printf(",");
+                        DumpOperandDefs(operand, first, mode, operandString, operandStringLength);
                     }
-                }
-                while (produce--)
-                {
-                    stack.Push(tree);
                 }
             }
             else

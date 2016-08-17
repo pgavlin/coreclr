@@ -11022,7 +11022,8 @@ void Compiler::gtDispTreeRange(LIR::Range& containingRange, GenTree* tree)
 //
 void Compiler::gtDispLIRNode(GenTree* node)
 {
-    auto displayOperand = [](GenTree* operand, const char* message, IndentInfo operandArc, IndentStack& indentStack) {
+    auto displayOperand = [](GenTree* operand, const char* message, IndentInfo operandArc, IndentStack& indentStack)
+    {
         assert(operand != nullptr);
         assert(message != nullptr);
 
@@ -11109,6 +11110,7 @@ void Compiler::gtDispLIRNode(GenTree* node)
                         }
 
                         displayOperand(operand, buf, operandArc, indentStack);
+                        operandArc = IIArc;
                     }
                 }
                 else
@@ -11132,6 +11134,8 @@ void Compiler::gtDispLIRNode(GenTree* node)
         {
             displayOperand(operand, "", operandArc, indentStack);
         }
+
+        operandArc = IIArc;
     }
 
     // Visit the operator
@@ -13169,7 +13173,7 @@ GenTreePtr Compiler::gtNewTempAssign(unsigned tmp, GenTreePtr val)
     }
 
 #ifndef LEGACY_BACKEND
-    if (fgOrder == FGOrderLinear)
+    if (compRationalIRForm)
     {
         Rationalizer::RewriteAssignmentIntoStoreLcl(asg->AsOp());
     }

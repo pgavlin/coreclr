@@ -17634,7 +17634,10 @@ BasicBlock* Compiler::fgRngChkTarget(BasicBlock* block, unsigned stkDepth, Speci
     if (verbose)
     {
         printf("*** Computing fgRngChkTarget for block BB%02u to stkDepth %d\n", block->bbNum, stkDepth);
-        gtDispTree(compCurStmt);
+        if (!block->IsLIR())
+        {
+            gtDispTree(compCurStmt);
+        }
     }
 #endif // DEBUG
 

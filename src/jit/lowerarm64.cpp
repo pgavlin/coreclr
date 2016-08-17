@@ -1039,7 +1039,7 @@ void Lowering::TreeNodeInfoInitCall(GenTreeCall* call)
             else
             {
 #ifdef DEBUG
-                compiler->gtDispTree(argNode);
+                compiler->gtDispTreeRange(BlockRange(), argNode);
 #endif
                 noway_assert(!"Unsupported TYP_STRUCT arg kind");
             }
