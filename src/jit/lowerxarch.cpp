@@ -3146,7 +3146,7 @@ void Lowering::LowerCmp(GenTreePtr tree)
                         {
                             printf("LowerCmp: Removing a GT_CAST to TYP_UBYTE and changing castOp1->gtType to "
                                    "TYP_UBYTE\n");
-                            comp->gtDispTree(tree);
+                            comp->gtDispTreeRange(BlockRange(), tree);
                         }
 #endif
                     }

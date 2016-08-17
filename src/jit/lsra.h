@@ -939,6 +939,11 @@ private:
                               char*             operandString,
                               unsigned          operandStringLength);
     void lsraDispNode(GenTreePtr tree, LsraTupleDumpMode mode, bool hasDest);
+    void DumpOperandDefs(GenTree* operand,
+                         bool& first,
+                         LsraTupleDumpMode mode,
+                         char* operandString,
+                         const unsigned operandStringLength);
     void TupleStyleDump(LsraTupleDumpMode mode);
 
     bool         dumpTerse;
