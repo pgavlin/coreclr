@@ -10986,7 +10986,7 @@ void Compiler::gtDispTreeList(GenTreePtr tree, IndentStack* indentStack /* = nul
 }
 
 //------------------------------------------------------------------------
-// Compiler::gtDispRange: dumps a range of LIR to stdout.
+// Compiler::gtDispRange: dumps a range of LIR.
 //
 // Arguments:
 //    range - the range of LIR to display.
@@ -11002,7 +11002,7 @@ void Compiler::gtDispRange(LIR::ReadOnlyRange const& range)
 //------------------------------------------------------------------------
 // Compiler::gtDispTreeRange: dumps the LIR range that contains all of the
 //                            nodes in the dataflow tree rooted at a given
-//                            node to stdout.
+//                            node.
 //
 // Arguments:
 //    containingRange - the LIR range that contains the root node.
@@ -11015,7 +11015,7 @@ void Compiler::gtDispTreeRange(LIR::Range& containingRange, GenTree* tree)
 }
 
 //------------------------------------------------------------------------
-// Compiler::gtDispLIRNode: dumps a single LIR node to stdout.
+// Compiler::gtDispLIRNode: dumps a single LIR node.
 //
 // Arguments:
 //    node - the LIR node to dump.
