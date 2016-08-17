@@ -3893,13 +3893,11 @@ void LinearScan::insertZeroInitRefPositions()
         if (!varDsc->lvIsParam && isCandidateVar(varDsc) &&
             (compiler->info.compInitMem || varTypeIsGC(varDsc->TypeGet())))
         {
-            // TODO(pdg): verify this for LIR.
-
-            GenTree* firstStmt = getNonEmptyBlock(compiler->fgFirstBB)->bbTreeList;
+            GenTree* firstNode = getNonEmptyBlock(compiler->fgFirstBB)->firstNode();
             JITDUMP("V%02u was live in\n", varNum);
             Interval*    interval = getIntervalForLocalVar(varNum);
             RefPosition* pos =
-                newRefPosition(interval, MinLocation, RefTypeZeroInit, firstStmt, allRegs(interval->registerType));
+                newRefPosition(interval, MinLocation, RefTypeZeroInit, firstNode, allRegs(interval->registerType));
             varDsc->lvMustInit = true;
         }
     }
@@ -8425,8 +8423,7 @@ void LinearScan::resolveRegisters()
         compiler->fgDispBasicBlocks(true);
     }
 
-// TODO(pdg): re-enable verification once it's moved to LIR, as it will almost certainly be useful.
-// verifyFinalAllocation();
+    verifyFinalAllocation();
 #endif // DEBUG
 
     compiler->raMarkStkVars();
@@ -11010,6 +11007,66 @@ void LinearScan::dumpRefPositionShort(RefPosition* refPosition, BasicBlock* curr
 }
 
 //------------------------------------------------------------------------
+// LinearScan::IsResolutionMove:
+//     Returns true if the given node is a move inserted by LSRA
+//     resolution.
+//
+// Arguments:
+//     node - the node to check.
+//
+bool LinearScan::IsResolutionMove(GenTree* node)
+{
+    if (!node->gtLsraInfo.isLsraAdded)
+    {
+        return false;
+    }
+
+    switch (node->OperGet())
+    {
+    case GT_LCL_VAR:
+    case GT_COPY:
+        return node->gtLsraInfo.isLocalDefUse;
+
+    case GT_SWAP:
+        return true;
+
+    default:
+        return false;
+    }
+}
+
+//------------------------------------------------------------------------
+// LinearScan::IsResolutionNode:
+//     Returns true if the given node is either a move inserted by LSRA
+//     resolution or an operand to such a move.
+//
+// Arguments:
+//     containingRange - the range that contains the node to check.
+//     node - the node to check.
+//
+bool LinearScan::IsResolutionNode(LIR::Range& containingRange, GenTree* node)
+{
+    for (;;)
+    {
+        if (IsResolutionMove(node))
+        {
+            return true;
+        }
+
+        if (!node->gtLsraInfo.isLsraAdded || (node->OperGet() != GT_LCL_VAR))
+        {
+            return false;
+        }
+
+        LIR::Use use;
+        bool foundUse = containingRange.TryGetUse(node, &use);
+        assert(foundUse);
+
+        node = use.User();
+    }
+}
+
+//------------------------------------------------------------------------
 // verifyFinalAllocation: Traverse the RefPositions and verify various invariants.
 //
 // Arguments:
@@ -11043,7 +11100,7 @@ void LinearScan::verifyFinalAllocation()
     DBEXEC(VERBOSE, dumpRegRecordTitle());
 
     BasicBlock*  currentBlock                = nullptr;
-    GenTreeStmt* firstBlockEndResolutionStmt = nullptr;
+    GenTree*     firstBlockEndResolutionNode = nullptr;
     regMaskTP    regsToFree                  = RBM_NONE;
     regMaskTP    delayRegsToFree             = RBM_NONE;
     LsraLocation currentLocation             = MinLocation;
@@ -11122,9 +11179,14 @@ void LinearScan::verifyFinalAllocation()
                 else
                 {
                     // Verify the resolution moves at the end of the previous block.
-                    for (GenTreeStmt* stmt = firstBlockEndResolutionStmt; stmt != nullptr; stmt = stmt->getNextStmt())
+                    for (GenTree* node = firstBlockEndResolutionNode; node != nullptr; node = node->gtNext)
                     {
-                        verifyResolutionMove(stmt, currentLocation);
+                        // Only verify nodes that are actually moves; don't bother with the nodes that are
+                        // operands to moves.
+                        if (IsResolutionMove(node))
+                        {
+                            verifyResolutionMove(node, currentLocation);
+                        }
                     }
 
                     // Validate the locations at the end of the previous block.
@@ -11174,32 +11236,29 @@ void LinearScan::verifyFinalAllocation()
                     }
 
                     // Finally, handle the resolution moves, if any, at the beginning of the next block.
-                    firstBlockEndResolutionStmt = nullptr;
-                    bool foundNonResolutionStmt = false;
-                    if (currentBlock != nullptr)
+                    firstBlockEndResolutionNode = nullptr;
+                    bool foundNonResolutionNode = false;
+
+                    LIR::Range& currentBlockRange = LIR::AsRange(currentBlock);
+                    for (GenTree* node : currentBlockRange.NonPhiNodes())
                     {
-                        for (GenTreeStmt* stmt = currentBlock->FirstNonPhiDef();
-                             stmt != nullptr && firstBlockEndResolutionStmt == nullptr; stmt = stmt->getNextStmt())
+                        if (IsResolutionNode(currentBlockRange, node))
                         {
-                            if (stmt->gtStmtExpr->gtLsraInfo.isLsraAdded
-#ifdef FEATURE_SIMD
-                                && stmt->gtStmtExpr->OperGet() != GT_SIMD
-#endif // FEATURE_SIMD
-                                )
+                            if (foundNonResolutionNode)
                             {
-                                if (foundNonResolutionStmt)
-                                {
-                                    firstBlockEndResolutionStmt = stmt;
-                                }
-                                else
-                                {
-                                    verifyResolutionMove(stmt, currentLocation);
-                                }
+                                firstBlockEndResolutionNode = node;
+                                break;
                             }
-                            else
+                            else if (IsResolutionMove(node))
                             {
-                                foundNonResolutionStmt = true;
+                                // Only verify nodes that are actually moves; don't bother with the nodes that are
+                                // operands to moves.
+                                verifyResolutionMove(node, currentLocation);
                             }
+                        }
+                        else
+                        {
+                            foundNonResolutionNode = true;
                         }
                     }
                 }
@@ -11405,10 +11464,16 @@ void LinearScan::verifyFinalAllocation()
             }
 
             // Verify the moves in this block
-            for (GenTreeStmt* stmt = currentBlock->FirstNonPhiDef(); stmt != nullptr; stmt = stmt->getNextStmt())
+            LIR::Range& currentBlockRange = LIR::AsRange(currentBlock);
+            for (GenTree* node : currentBlockRange.NonPhiNodes())
             {
-                assert(stmt->gtStmtExpr->gtLsraInfo.isLsraAdded);
-                verifyResolutionMove(stmt, currentLocation);
+                assert(IsResolutionNode(currentBlockRange, node));
+                if (IsResolutionMove(node))
+                {
+                    // Only verify nodes that are actually moves; don't bother with the nodes that are
+                    // operands to moves.
+                    verifyResolutionMove(node, currentLocation);
+                }
             }
 
             // Verify the outgoing register assignments
@@ -11436,7 +11501,7 @@ void LinearScan::verifyFinalAllocation()
 // verifyResolutionMove: Verify a resolution statement.  Called by verifyFinalAllocation()
 //
 // Arguments:
-//    resolutionStmt    - A GenTreeStmt* that must be a resolution move.
+//    resolutionMove    - A GenTree* that must be a resolution move.
 //    currentLocation   - The LsraLocation of the most recent RefPosition that has been verified.
 //
 // Return Value:
@@ -11444,9 +11509,11 @@ void LinearScan::verifyFinalAllocation()
 //
 // Notes:
 //    If verbose is set, this will also dump the moves into the table of final allocations.
-void LinearScan::verifyResolutionMove(GenTreeStmt* resolutionStmt, LsraLocation currentLocation)
+void LinearScan::verifyResolutionMove(GenTree* resolutionMove, LsraLocation currentLocation)
 {
-    GenTree* dst = resolutionStmt->gtStmtExpr;
+    GenTree* dst = resolutionMove;
+    assert(IsResolutionMove(dst));
+
     if (dst->OperGet() == GT_SWAP)
     {
         GenTreeLclVarCommon* left          = dst->gtGetOp1()->AsLclVarCommon();
