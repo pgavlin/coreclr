@@ -613,8 +613,12 @@ private:
     void lsraDumpIntervals(const char* msg);
     void dumpRefPositions(const char* msg);
     void dumpVarRefPositions(const char* msg);
+
+    static bool IsResolutionMove(GenTree* node);
+    static bool IsResolutionNode(LIR::Range& containingRange, GenTree* node);
+
     void verifyFinalAllocation();
-    void verifyResolutionMove(GenTreeStmt* resolutionStmt, LsraLocation currentLocation);
+    void verifyResolutionMove(GenTree* resolutionNode, LsraLocation currentLocation);
 #else  // !DEBUG
     bool             doSelectNearest()
     {
