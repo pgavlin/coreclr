@@ -1097,7 +1097,9 @@ void Compiler::fgExtendDbgLifetimes()
                 continue;
             }
 
-            // TODO(pdg): fix the code below for LIR!
+            // TODO-LIR: the code below does not work for blocks that contain LIR. As a result,
+            //           we must run liveness at least once before any LIR is created in order
+            //           to ensure that this code doesn't attempt to insert HIR into LIR blocks.
 
             // If we haven't already done this ...
             if (!fgLocalVarLivenessDone)
@@ -2982,8 +2984,6 @@ void Compiler::fgInterBlockLocalVarLiveness()
         /* Mark any interference we might have at the end of the block */
 
         fgMarkIntf(life);
-
-        // TODO(pdg): update for LIR!
 
         if (!block->IsLIR())
         {

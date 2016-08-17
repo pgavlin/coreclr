@@ -389,7 +389,7 @@ bool LIR::ReadOnlyRange::Contains(GenTree* node) const
 {
     assert(node != nullptr);
 
-    // TODO(pdg): derive this from the # of nodes in the function as well as
+    // TODO-LIR: derive this from the # of nodes in the function as well as
     // the debug level. Checking small functions is pretty cheap; checking
     // large functions is not.
     if (JitConfig.JitExpensiveDebugCheckLevel() < 2)
@@ -1510,7 +1510,7 @@ LIR::Range LIR::EmptyRange()
 // static
 LIR::Range LIR::SeqTree(Compiler* compiler, GenTree* tree)
 {
-    // TODO(pdg): it would be great to assert that the node has not already been
+    // TODO-LIR: it would be great to assert that the tree has not already been
     // threaded into an order, but I'm not sure that will be practical at this
     // point.
 

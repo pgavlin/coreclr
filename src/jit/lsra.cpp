@@ -4348,11 +4348,6 @@ void LinearScan::buildIntervals()
 
         VarSetOps::Assign(compiler, currentLiveVars, block->bbLiveIn);
 
-        // TODO(pdg): insert nodes in rationalize to consume unused values
-        //
-        // Also: rethink ranges vs. subranges in order to ensure that first/last nodes
-        // are updated correctly when dealing in subranges.
-
         LIR::Range& blockRange = LIR::AsRange(block);
         for (GenTree* node : blockRange.NonPhiNodes())
         {

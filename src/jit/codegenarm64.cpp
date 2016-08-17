@@ -1746,7 +1746,12 @@ void CodeGen::genCodeForBBlist()
                 }
             }
 
-// TODO(pdg): JIT dump, cost accounting
+            // TODO-LIR: the cost accounting performed below is incorrect: each operator's cost includes the
+            //           cost of its operands, so the total cost of the block is grossly overestimated. Fixing
+            //           this requires the ability to calculate the cost of the operator itself.
+            //
+            // totalCostEx += (UINT64)node->gtCostEx * block->getBBWeight(compiler);
+            // totalCostSz += (UINT64)node->gtCostSz;
 
 #endif // DEBUG
 

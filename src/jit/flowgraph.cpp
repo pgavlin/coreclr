@@ -10040,7 +10040,7 @@ void Compiler::fgRemoveJTrue(BasicBlock* block)
         unsigned           sideEffects;
         LIR::ReadOnlyRange testRange = blockRange.GetTreeRange(test, &isClosed, &sideEffects);
 
-        // TODO(pdg): this should really be checking GTF_ALL_EFFECT, but that produces unacceptable
+        // TODO-LIR: this should really be checking GTF_ALL_EFFECT, but that produces unacceptable
         //            diffs compared to the existing backend.
         if (isClosed && ((sideEffects & GTF_SIDE_EFFECT) == 0))
         {
@@ -13681,12 +13681,15 @@ bool Compiler::fgOptimizeUncondBranchToSimpleCond(BasicBlock* block, BasicBlock*
         return false;
     }
 
+    // NOTE: we do not currently hit this assert because this function is only called when
+    // `fgUpdateFlowGraph` has been called with `doTailDuplication` set to true, and the
+    // backend always calls `fgUpdateFlowGraph` with `doTailDuplication` set to false.
+    assert(!block->IsLIR());
+
     GenTreeStmt* stmt = target->FirstNonPhiDef();
+    assert(stmt == target->lastStmt());
 
     // Duplicate the target block at the end of this block
-
-    // TODO(pdg): It seems like the operations below are dropping code on the floor...
-    //            Shouldn't all of the statements in the target block be copied?
 
     GenTree* cloned = gtCloneExpr(stmt->gtStmtExpr);
     noway_assert(cloned);
@@ -13793,7 +13796,7 @@ bool Compiler::fgOptimizeBranchToNext(BasicBlock* block, BasicBlock* bNext, Basi
             unsigned           sideEffects;
             LIR::ReadOnlyRange jmpRange = blockRange.GetTreeRange(jmp, &isClosed, &sideEffects);
 
-            // TODO(pdg): this should really be checking GTF_ALL_EFFECT, but that produces unacceptable
+            // TODO-LIR: this should really be checking GTF_ALL_EFFECT, but that produces unacceptable
             //            diffs compared to the existing backend.
             if (isClosed && ((sideEffects & GTF_SIDE_EFFECT) == 0))
             {
@@ -13950,12 +13953,12 @@ bool Compiler::fgOptimizeBranch(BasicBlock* bJump)
         return false;
     }
 
-    // TODO(pdg): cost information for LIR
-    if (bJump->IsLIR() || bDest->IsLIR())
-    {
-        NYI("fgOptimizeBranch for LIR");
-        return false;
-    }
+    // This function is only called by fgReorderBlocks, which we do not run in the backend.
+    // If we wanted to run block reordering in the backend, we would need to be able to
+    // calculate cost information for LIR on a per-node basis in order for this function
+    // to work.
+    assert(!bJump->IsLIR());
+    assert(!bDest->IsLIR());
 
     GenTreeStmt* stmt;
     unsigned     estDupCostSz = 0;
@@ -19674,7 +19677,12 @@ void                Compiler::fgDumpStmtTree(GenTreePtr stmt, unsigned blkNum)
     }
 }
 
-//TODO(pdg): comment
+//------------------------------------------------------------------------
+// Compiler::fgDumpBlock: dumps the contents of the given block to stdout.
+//
+// Arguments:
+//    block - The block to dump.
+//
 void                Compiler::fgDumpBlock(BasicBlock* block)
 {
     printf("\n------------ ");
