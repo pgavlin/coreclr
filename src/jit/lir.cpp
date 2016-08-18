@@ -439,23 +439,12 @@ GenTree* LIR::Range::LastPhiNode() const
     GenTree* lastPhiNode = nullptr;
     for (GenTree* node : *this)
     {
-        if (node->OperGet() == GT_PHI_ARG)
+        if (!node->IsPhiNode())
         {
-            lastPhiNode = node;
-            continue;
-        }
-        else if (node->OperGet() == GT_PHI)
-        {
-            lastPhiNode = node;
-            continue;
-        }
-        else if (node->IsPhiDefn())
-        {
-            lastPhiNode = node;
-            continue;
+            break;
         }
 
-        break;
+        lastPhiNode = node;
     }
 
     return lastPhiNode;
@@ -470,20 +459,10 @@ GenTree* LIR::Range::FirstNonPhiNode() const
 {
     for (GenTree* node : *this)
     {
-        if (node->OperGet() == GT_PHI_ARG)
+        if (!node->IsPhiNode())
         {
-            continue;
+            return node;
         }
-        else if (node->OperGet() == GT_PHI)
-        {
-            continue;
-        }
-        else if (node->IsPhiDefn())
-        {
-            continue;
-        }
-
-        return node;
     }
 
     return nullptr;
@@ -1086,6 +1065,102 @@ LIR::Range LIR::Range::Remove(ReadOnlyRange&& range)
 }
 
 //------------------------------------------------------------------------
+// LIR::Range::Delete: Deletes a node from this range.
+//
+// Note that the deleted node must not be used after this function has
+// been called. If the deleted node is part of a block, this function also
+// calls `Compiler::lvaDecRefCnts` as necessary.
+//
+// Arguments:
+//    node - The node to delete. Must be part of this range.
+//    block - The block that contains the node, if any. May be null.
+//    compiler - The compiler context. May be null if block is null.
+//
+void LIR::Range::Delete(Compiler* compiler, BasicBlock* block, GenTree* node)
+{
+    assert(node != nullptr);
+    assert((block == nullptr) == (compiler == nullptr));
+
+    Remove(node);
+
+    if (block != nullptr)
+    {
+        if (((node->OperGet() == GT_CALL) && ((node->gtFlags & GTF_CALL_UNMANAGED) != 0)) ||
+            (node->OperIsLocal() && !node->IsPhiNode()))
+        {
+            compiler->lvaDecRefCnts(block, node);
+        }
+    }
+
+    DEBUG_DESTROY_NODE(node);
+}
+
+//------------------------------------------------------------------------
+// LIR::Range::Delete: Deletes a subrange from this range.
+//
+// Both the start and the end of the subrange must be part of this range.
+// Note that the deleted nodes must not be used after this function has
+// been called. If the deleted nodes are part of a block, this function
+// also calls `Compiler::lvaDecRefCnts` as necessary.
+//
+// Arguments:
+//    firstNode - The first node in the subrange.
+//    lastNode - The last node in the subrange.
+//    block - The block that contains the subrange, if any. May be null.
+//    compiler - The compiler context. May be null if block is null.
+//
+void LIR::Range::Delete(Compiler* compiler, BasicBlock* block, GenTree* firstNode, GenTree* lastNode)
+{
+    assert(firstNode != nullptr);
+    assert(lastNode != nullptr);
+    assert((block == nullptr) == (compiler == nullptr));
+
+    Remove(firstNode, lastNode);
+
+    assert(lastNode->gtNext == nullptr);
+
+    if (block != nullptr)
+    {
+        for (GenTree* node = firstNode; node != nullptr; node = node->gtNext)
+        {
+            if (((node->OperGet() == GT_CALL) && ((node->gtFlags & GTF_CALL_UNMANAGED) != 0)) ||
+                (node->OperIsLocal() && !node->IsPhiNode()))
+            {
+                compiler->lvaDecRefCnts(block, node);
+            }
+        }
+    }
+
+#ifdef DEBUG
+    // We can't do this in the loop above because it causes `IsPhiNode` to return a false negative
+    // for `GT_STORE_LCL_VAR` nodes that participate in phi definitions.
+    for (GenTree* node = firstNode; node != nullptr; node = node->gtNext)
+    {
+        DEBUG_DESTROY_NODE(node);
+    }
+#endif
+}
+
+//------------------------------------------------------------------------
+// LIR::Range::Delete: Deletes a subrange from this range.
+//
+// Both the start and the end of the subrange must be part of this range.
+// Note that the deleted nodes must not be used after this function has
+// been called. If the deleted nodes are part of a block, this function
+// also calls `Compiler::lvaDecRefCnts` as necessary.
+//
+// Arguments:
+//    range - The subrange to delete.
+//    block - The block that contains the subrange, if any. May be null.
+//    compiler - The compiler context. May be null if block is null.
+//
+void LIR::Range::Delete(Compiler* compiler, BasicBlock* block, ReadOnlyRange&& range)
+{
+    Delete(compiler, block, range.m_firstNode, range.m_lastNode);
+}
+
+
+//------------------------------------------------------------------------
 // LIR::Range::TryGetUse: Try to find the use for a given node.
 //
 // Arguments:
@@ -1516,16 +1591,4 @@ LIR::Range LIR::SeqTree(Compiler* compiler, GenTree* tree)
 
     compiler->gtSetEvalOrder(tree);
     return Range(compiler->fgSetTreeSeq(tree, nullptr, true), tree);
-}
-
-// TODO(pdg): this should probably just be folded into LIR::Range::Remove(ReadOnlyRange& range);
-void LIR::DecRefCnts(Compiler* compiler, BasicBlock* block, const ReadOnlyRange& range)
-{
-    for (GenTree* node : range)
-    {
-        if (((node->OperGet() == GT_CALL) && ((node->gtFlags & GTF_CALL_UNMANAGED) != 0)) || node->OperIsLocal())
-        {
-            compiler->lvaDecRefCnts(block, node);
-        }
-    }
 }

@@ -2381,15 +2381,23 @@ bool Compiler::fgTryRemoveDeadLIRStore(LIR::Range& blockRange, GenTree* node, Ge
             *next = operandsRange.FirstNode()->gtPrev;
         }
 
-        // TODO(pdg): this scan should really be folded into LIR::Range::Remove().
-        LIR::DecRefCnts(this, compCurBB, operandsRange);
-        blockRange.Remove(std::move(operandsRange));
+        blockRange.Delete(this, compCurBB, std::move(operandsRange));
     }
 
-    blockRange.Remove(store);
-    if (store->IsLocal())
+    // If the store is marked as a late argument, it is referenced by a call. Instead of removing it,
+    // bash it to a NOP.
+    if ((store->gtFlags & GTF_LATE_ARG) != 0)
     {
-        lvaDecRefCnts(store);
+        if (store->IsLocal())
+        {
+            lvaDecRefCnts(compCurBB, store);
+        }
+
+        store->gtBashToNOP();
+    }
+    else
+    {
+        blockRange.Delete(this, compCurBB, store);
     }
 
     return true;
