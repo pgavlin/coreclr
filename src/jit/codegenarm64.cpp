@@ -1706,12 +1706,10 @@ void CodeGen::genCodeForBBlist()
         compiler->compCurStmt     = nullptr;
         compiler->compCurLifeTree = nullptr;
 
-#ifdef DEBUG
-        bool pastProfileUpdate = false;
-#endif
+        // Traverse the block in linear order, generating code for each node as we
+        // as we encounter it.
+        CLANG_FORMAT_COMMENT_ANCHOR;
 
-// Traverse the block in linear order, generating code for each node as we
-// as we encounter it.
 #ifdef DEBUGGING_SUPPORT
         IL_OFFSETX currentILOffset = BAD_IL_OFFSET;
 #endif
@@ -1722,9 +1720,7 @@ void CodeGen::genCodeForBBlist()
             if (node->OperGet() == GT_IL_OFFSET)
             {
                 genEnsureCodeEmitted(currentILOffset);
-
                 currentILOffset = node->gtStmt.gtStmtILoffsx;
-
                 genIPmappingAdd(currentILOffset, firstMapping);
                 firstMapping = false;
             }
@@ -1760,61 +1756,57 @@ void CodeGen::genCodeForBBlist()
             {
                 genConsumeReg(node);
             }
+        } // end for each node in block
 
-// TODO(pdg): re-enable the debug checks below after making sure they are valid on a node-by-node basis.
-#if 0
 #ifdef DEBUG
-            regSet.rsSpillChk();
+        // The following set of register spill checks and GC pointer tracking checks used to be
+        // performed at statement boundaries. Now, with LIR, there are no statements, so they are
+        // performed at the end of each block.
+        // TODO: could these checks be performed more frequently? E.g., at each location where
+        // the register allocator says there are no live non-variable registers. Perhaps this could
+        // be done by (a) keeping a running count of live non-variable registers by using
+        // gtLsraInfo.srcCount and gtLsraInfo.dstCount to decrement and increment the count, respectively,
+        // and running the checks when the count is zero. Or, (b) use the map maintained by LSRA
+        // (operandToLocationInfoMap) to mark a node somehow when, after the execution of that node,
+        // there will be no live non-variable registers.
 
-            assert((node->gtFlags & GTF_SPILL) == 0);
+        regSet.rsSpillChk();
 
-            /* Make sure we didn't bungle pointer register tracking */
+        /* Make sure we didn't bungle pointer register tracking */
 
-            regMaskTP ptrRegs       = (gcInfo.gcRegGCrefSetCur | gcInfo.gcRegByrefSetCur);
-            regMaskTP nonVarPtrRegs = ptrRegs & ~regSet.rsMaskVars;
+        regMaskTP ptrRegs       = gcInfo.gcRegGCrefSetCur | gcInfo.gcRegByrefSetCur;
+        regMaskTP nonVarPtrRegs = ptrRegs & ~regSet.rsMaskVars;
 
-            // If return is a GC-type, clear it.  Note that if a common
-            // epilog is generated (genReturnBB) it has a void return
-            // even though we might return a ref.  We can't use the compRetType
-            // as the determiner because something we are tracking as a byref
-            // might be used as a return value of a int function (which is legal)
-            if (node->gtOper == GT_RETURN && (varTypeIsGC(compiler->info.compRetType) ||
-                                              (node->gtOp.gtOp1 != 0 && varTypeIsGC(node->gtOp.gtOp1->TypeGet()))))
-            {
-                nonVarPtrRegs &= ~RBM_INTRET;
-            }
-
-            // When profiling, the first few nodes in a catch block will be an update of
-            // the profile count (does not interfere with the exception object).
-            if (((compiler->opts.eeFlags & CORJIT_FLG_BBINSTR) != 0) && handlerGetsXcptnObj(block->bbCatchTyp))
-            {
-                pastProfileUpdate = pastProfileUpdate || node->OperGet() == GT_CATCH_ARG;
-                if (!pastProfileUpdate)
-                {
-                    nonVarPtrRegs &= ~RBM_EXCEPTION_OBJECT;
-                }
-            }
-
-            if (nonVarPtrRegs)
-            {
-                printf("Regset after node=");
-                Compiler::printTreeID(node);
-                printf(" BB%02u gcr=", block->bbNum);
-                printRegMaskInt(gcInfo.gcRegGCrefSetCur & ~regSet.rsMaskVars);
-                compiler->getEmitter()->emitDispRegSet(gcInfo.gcRegGCrefSetCur & ~regSet.rsMaskVars);
-                printf(", byr=");
-                printRegMaskInt(gcInfo.gcRegByrefSetCur & ~regSet.rsMaskVars);
-                compiler->getEmitter()->emitDispRegSet(gcInfo.gcRegByrefSetCur & ~regSet.rsMaskVars);
-                printf(", regVars=");
-                printRegMaskInt(regSet.rsMaskVars);
-                compiler->getEmitter()->emitDispRegSet(regSet.rsMaskVars);
-                printf("\n");
-            }
-
-            noway_assert(nonVarPtrRegs == 0);
-#endif // DEBUG
-#endif
+        // If return is a GC-type, clear it.  Note that if a common
+        // epilog is generated (genReturnBB) it has a void return
+        // even though we might return a ref.  We can't use the compRetType
+        // as the determiner because something we are tracking as a byref
+        // might be used as a return value of a int function (which is legal)
+        GenTree* blockLastNode = block->lastNode();
+        if ((blockLastNode != nullptr) &&
+            (blockLastNode->gtOper == GT_RETURN) &&
+            (varTypeIsGC(compiler->info.compRetType) ||
+             (blockLastNode->gtOp.gtOp1 != nullptr && varTypeIsGC(blockLastNode->gtOp.gtOp1->TypeGet()))))
+        {
+            nonVarPtrRegs &= ~RBM_INTRET;
         }
+
+        if  (nonVarPtrRegs)
+        {
+            printf("Regset after BB%02u gcr=", block->bbNum);
+            printRegMaskInt(gcInfo.gcRegGCrefSetCur & ~regSet.rsMaskVars);
+            compiler->getEmitter()->emitDispRegSet(gcInfo.gcRegGCrefSetCur & ~regSet.rsMaskVars);
+            printf(", byr=");
+            printRegMaskInt(gcInfo.gcRegByrefSetCur & ~regSet.rsMaskVars);
+            compiler->getEmitter()->emitDispRegSet(gcInfo.gcRegByrefSetCur & ~regSet.rsMaskVars);
+            printf(", regVars=");
+            printRegMaskInt(regSet.rsMaskVars);
+            compiler->getEmitter()->emitDispRegSet(regSet.rsMaskVars);
+            printf("\n");
+        }
+
+        noway_assert(nonVarPtrRegs == RBM_NONE);
+#endif // DEBUG
 
 #if defined(DEBUG) && defined(_TARGET_ARM64_)
         if (block->bbNext == nullptr)
