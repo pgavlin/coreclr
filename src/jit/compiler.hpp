@@ -2769,13 +2769,12 @@ inline bool Compiler::fgIsThrowHlpBlk(BasicBlock* block)
         return false;
     }
 
-    GenTree* call = nullptr;
+    GenTree* call = block->lastNode();
+
+#ifdef DEBUG
     if (block->IsLIR())
     {
         LIR::Range& blockRange = LIR::AsRange(block);
-        call                   = blockRange.LastNode();
-
-#ifdef DEBUG
         for (LIR::Range::ReverseIterator node = blockRange.rbegin(), end = blockRange.rend(); node != end; ++node)
         {
             if (node->OperGet() == GT_CALL)
@@ -2785,12 +2784,8 @@ inline bool Compiler::fgIsThrowHlpBlk(BasicBlock* block)
                 break;
             }
         }
+    }
 #endif
-    }
-    else
-    {
-        call = block->bbTreeList->gtStmt.gtStmtExpr;
-    }
 
     if (!call || (call->gtOper != GT_CALL))
     {

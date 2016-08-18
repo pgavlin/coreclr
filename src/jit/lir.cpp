@@ -1574,7 +1574,7 @@ LIR::Range LIR::EmptyRange()
 // LIR::SeqTree: Given a newly created, unsequenced HIR tree, set the evaluation
 // order (call gtSetEvalOrder) and sequence the tree (set gtNext/gtPrev pointers
 // by calling fgSetTreeSeq), and return a Range representing the list of nodes.
-// It is expected this will later be spliced into the LIR graph afterwards.
+// It is expected this will later be spliced into the LIR graph.
 //
 // Arguments:
 //    compiler - The Compiler context.

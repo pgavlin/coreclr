@@ -971,7 +971,7 @@ GenTreePtr Lowering::NewPutArg(GenTreeCall* call, GenTreePtr arg, fgArgTabEntryP
 //
 // Arguments:
 //    call  - The call node
-//    ppArg - Pointer to the call argument pointer. We migth replace the call argument by
+//    ppArg - Pointer to the call argument pointer. We might replace the call argument by
 //            changing *ppArg.
 //
 // Return Value:
@@ -1213,7 +1213,7 @@ void Lowering::LowerCall(GenTree* node)
         {
             // The controlExpr should go before the gtCallCookie and the gtCallAddr, if they exist
             //
-            // TODO(pdg): find out what's really required here, as this is currently a tree order
+            // TODO-LIR: find out what's really required here, as this is currently a tree order
             // dependency.
             if (call->gtCallType == CT_INDIRECT)
             {
@@ -1227,13 +1227,13 @@ void Lowering::LowerCall(GenTree* node)
 #endif // DEBUG
 
                     insertionPoint = BlockRange().GetTreeRange(call->gtCallCookie, &isClosed).FirstNode();
+                    assert(isClosed);
                 }
                 else if (call->gtCallAddr != nullptr)
                 {
                     insertionPoint = BlockRange().GetTreeRange(call->gtCallAddr, &isClosed).FirstNode();
+                    assert(isClosed);
                 }
-
-                assert(isClosed);
             }
         }
 
@@ -2954,7 +2954,7 @@ void Lowering::AddrModeCleanupHelper(GenTreeAddrMode* addrMode, GenTree* node)
         return;
     }
 
-    // TODO(pdg): change this to use the LIR mark bit and iterate instead of recursing
+    // TODO-LIR: change this to use the LIR mark bit and iterate instead of recursing
     for (GenTree* operand : node->Operands())
     {
         AddrModeCleanupHelper(addrMode, operand);
@@ -3837,13 +3837,12 @@ void Lowering::LowerBlock(BasicBlock* block)
 
     m_block = block;
 
-    // TODO(pdg): some of the lowering methods insert calls before the node
-    // being lowered. It is not clear that the inserted calls are themselves
-    // lowered. In general, any code that is inserted before the current
-    // node should be "pre-lowered" as they won't be subject to further
-    // processing.
-    //
-    // See e.g. uses of InsertPInvoke{Method,Call}{Prolog,Epilog}.
+    // NOTE: some of the lowering methods insert calls before the node being
+    // lowered (See e.g. InsertPInvoke{Method,Call}{Prolog,Epilog}). In
+    // general, any code that is inserted before the current node should be
+    // "pre-lowered" as they won't be subject to further processing.
+    // Lowering::CheckBlock() runs some extra checks on call arguments in
+    // order to help catch unlowered nodes.
 
     GenTree* node = BlockRange().FirstNode();
     while (node != nullptr)

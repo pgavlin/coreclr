@@ -43,7 +43,8 @@ public:
     //------------------------------------------------------------------------
     // LIR::Use: Represents a use <-> def edge between two nodes in a range
     //           of LIR. Provides utilities to point the use to a different
-    //           def.
+    //           def. Note that because this type deals in edges between
+    //           nodes, it represents the single use of the def.
     //
     class Use final
     {

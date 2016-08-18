@@ -651,9 +651,6 @@ public:
     // Used by Lowering when considering whether to split Longs, as well as by identifyCandidates().
     bool isRegCandidate(LclVarDsc* varDsc);
 
-    // Return the registers killed by the given tree node.
-    regMaskTP getKillSetForNode(Compiler* compiler, GenTree* tree);
-
 private:
     // Determine which locals are candidates for allocation
     void identifyCandidates();

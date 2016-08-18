@@ -1025,8 +1025,8 @@ public:
             case GT_ARGPLACE:
             case GT_LIST:
                 // ARGPLACE and LIST nodes may not be present in a block's LIR sequence, but they may
-                // be used to represent non-executable concepts.
-                return gtNext == nullptr && gtPrev == nullptr;
+                // be present as children of an LIR node.
+                return (gtNext == nullptr) && (gtPrev == nullptr);
 
             case GT_ADDR:
             {
@@ -1034,7 +1034,7 @@ public:
                 // local, class variable, or IND node.
                 GenTree*   location   = const_cast<GenTree*>(this)->gtGetOp1();
                 genTreeOps locationOp = location->OperGet();
-                return !location->IsLocal() && locationOp != GT_CLS_VAR && locationOp != GT_IND;
+                return !location->IsLocal() && (locationOp != GT_CLS_VAR) && (locationOp != GT_IND);
             }
 
             default:

@@ -52,10 +52,11 @@ void Compiler::fgMarkUseDef(GenTreeLclVarCommon* tree, GenTree* asgdLclVar)
         varDsc->lvRefCnt = 1;
     }
 
-    // NOTE: the analysis done below is not correct for LIR: it depends on all of the
-    // nodes that precede `asgdLclVar` in execution order to factor into the dataflow for the
+    // NOTE: the analysis done below is neither necessary nor correct for LIR: it depends on
+    // the nodes that precede `asgdLclVar` in execution order to factor into the dataflow for the
     // value being assigned to the local var, which is not necessarily the case without tree
-    // order.
+    // order. Furthermore, LIR is always traversed in an order that reflects the dataflow for the
+    // block.
     if (asgdLclVar != nullptr)
     {
         assert(!compCurBB->IsLIR());
