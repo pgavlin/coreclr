@@ -1368,9 +1368,9 @@ FCFuncEnd()
 FCFuncStart(gWaitHandleFuncs)
     FCFuncElement("WaitOneNative", WaitHandleNative::CorWaitOneNative)
     FCFuncElement("WaitMultiple", WaitHandleNative::CorWaitMultipleNative)
-#ifndef FEATURE_CORECLR
+#ifndef FEATURE_PAL
     FCFuncElement("SignalAndWaitOne", WaitHandleNative::CorSignalAndWaitOneNative)
-#endif // !FEATURE_CORECLR
+#endif // !FEATURE_PAL
 FCFuncEnd()
 
 FCFuncStart(gNumberFuncs)
@@ -2100,9 +2100,7 @@ FCFuncStart(gWeakReferenceOfTFuncs)
     FCFuncElement("Finalize", WeakReferenceOfTNative::Finalize)
     FCFuncElement("get_Target", WeakReferenceOfTNative::GetTarget)
     FCFuncElement("set_Target", WeakReferenceOfTNative::SetTarget)
-#ifndef FEATURE_CORECLR
     FCFuncElement("IsTrackResurrection", WeakReferenceOfTNative::IsTrackResurrection)
-#endif
 FCFuncEnd()
 
 #ifdef FEATURE_COMINTEROP
