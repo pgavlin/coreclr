@@ -282,6 +282,10 @@ public:
         Range Remove(GenTree* firstNode, GenTree* lastNode);
         Range Remove(ReadOnlyRange&& range);
 
+        void Delete(GenTree* node, BasicBlock* block, Compiler* compiler);
+        void Delete(GenTree* firstNode, GenTree* lastNode, BasicBlock* block, Compiler* compiler);
+        void Delete(ReadOnlyRange&& range, BasicBlock* block, Compiler* compiler);
+
         bool TryGetUse(GenTree* node, Use* use);
 
         ReadOnlyRange GetTreeRange(GenTree* root, bool* isClosed) const;
@@ -298,7 +302,6 @@ public:
 
     static Range EmptyRange();
     static Range SeqTree(Compiler* compiler, GenTree* tree);
-    static void DecRefCnts(Compiler* compiler, BasicBlock* block, const ReadOnlyRange& range);
 };
 
 #endif // _LIR_H_

@@ -866,6 +866,10 @@ Compiler::fgWalkResult Rationalizer::RewriteNode(GenTree** useEdge, ArrayStack<G
     GenTree* node = *useEdge;
     assert(node != nullptr);
 
+#ifdef DEBUG
+    const bool isLateArg = (node->gtFlags & GTF_LATE_ARG) != 0;
+#endif
+
     // First, remove any preceeding GT_LIST nodes, which are not otherwise visited by the tree walk.
     //
     // NOTE: GT_LIST nodes that are used by block ops and phi nodes will in fact be visited.
@@ -934,9 +938,7 @@ Compiler::fgWalkResult Rationalizer::RewriteNode(GenTree** useEdge, ArrayStack<G
                 assert(isClosed);
                 assert((sideEffects & GTF_ALL_EFFECT) == 0);
 
-                BlockRange().Remove(std::move(lhsRange));
-
-                LIR::DecRefCnts(comp, m_block, lhsRange);
+                BlockRange().Delete(std::move(lhsRange), m_block, comp);
             }
 
             GenTree* replacement = node->gtGetOp2();
@@ -959,9 +961,7 @@ Compiler::fgWalkResult Rationalizer::RewriteNode(GenTree** useEdge, ArrayStack<G
                     assert(isClosed);
                     assert((sideEffects & GTF_ALL_EFFECT) == 0);
 
-                    BlockRange().Remove(std::move(rhsRange));
-
-                    LIR::DecRefCnts(comp, m_block, rhsRange);
+                    BlockRange().Delete(std::move(rhsRange), m_block, comp);
                 }
             }
 
@@ -1122,6 +1122,8 @@ Compiler::fgWalkResult Rationalizer::RewriteNode(GenTree** useEdge, ArrayStack<G
         comp->lvaDecRefCnts(node);
         BlockRange().Remove(node);
     }
+
+    assert(isLateArg == ((node->gtFlags & GTF_LATE_ARG) != 0));
 
     return Compiler::WALK_CONTINUE;
 }

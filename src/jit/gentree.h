@@ -1748,6 +1748,9 @@ public:
     // register.
     bool IsRegOptional() const;
 
+    // Returns "true" iff "this" is a phi-related node (i.e. a GT_PHI_ARG, GT_PHI, or a PhiDefn).
+    bool IsPhiNode();
+
     // Returns "true" iff "*this" is an assignment (GT_ASG) tree that defines an SSA name (lcl = phi(...));
     bool IsPhiDefn();
 
@@ -1854,19 +1857,19 @@ public:
 };
 
 //------------------------------------------------------------------------
-// GenTreeOperandIterator: an iterator that will produce each operand of a
+// GenTreeUseEdgeIterator: an iterator that will produce each use edge of a
 //                         GenTree node in the order in which they are
-//                         used. Note that the operands of a node may not
+//                         used. Note that the use edges of a node may not
 //                         correspond exactly to the nodes on the other
 //                         ends of its use edges: in particular, GT_LIST
 //                         nodes are expanded into their component parts
 //                         (with the optional exception of multi-reg
 //                         arguments). This differs from the behavior of
-//                         GenTree::GetChild(), which does not expand
+//                         GenTree::GetChildPointer(), which does not expand
 //                         lists.
 //
 // Note: valid values of this type may be obtained by calling
-// `GenTree::OperandsBegin` and `GenTree::OperandsEnd`.
+// `GenTree::UseEdgesBegin` and `GenTree::UseEdgesEnd`.
 //
 class GenTreeUseEdgeIterator final
 {
@@ -1925,14 +1928,9 @@ public:
 //------------------------------------------------------------------------
 // GenTreeOperandIterator: an iterator that will produce each operand of a
 //                         GenTree node in the order in which they are
-//                         used. Note that the operands of a node may not
-//                         correspond exactly to the nodes on the other
-//                         ends of its use edges: in particular, GT_LIST
-//                         nodes are expanded into their component parts
-//                         (with the optional exception of multi-reg
-//                         arguments). This differs from the behavior of
-//                         GenTree::GetChild(), which does not expand
-//                         lists.
+//                         used. This uses `GenTreeUseEdgeIterator` under
+//                         the covers and comes with the same caveats
+//                         w.r.t. `GetChild`.
 //
 // Note: valid values of this type may be obtained by calling
 // `GenTree::OperandsBegin` and `GenTree::OperandsEnd`.

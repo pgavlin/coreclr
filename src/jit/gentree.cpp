@@ -14406,6 +14406,11 @@ bool GenTree::IsRegOptional() const
 #endif
 }
 
+bool GenTree::IsPhiNode()
+{
+    return (OperGet() == GT_PHI_ARG) || (OperGet() == GT_PHI) || IsPhiDefn();
+}
+
 bool GenTree::IsPhiDefn()
 {
     bool res = ((OperGet() == GT_ASG) && (gtOp.gtOp2 != nullptr) && (gtOp.gtOp2->OperGet() == GT_PHI)) ||

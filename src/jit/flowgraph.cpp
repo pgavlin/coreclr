@@ -9963,8 +9963,7 @@ void Compiler::fgUnreachableBlock(BasicBlock* block)
         LIR::Range& blockRange = LIR::AsRange(block);
         if (!blockRange.IsEmpty())
         {
-            LIR::DecRefCnts(this, block, blockRange.NonPhiNodes());
-            blockRange.Remove(blockRange.FirstNode(), blockRange.LastNode());
+            blockRange.Delete(blockRange.FirstNode(), blockRange.LastNode(), block, this);
         }
     }
     else
@@ -10047,8 +10046,7 @@ void Compiler::fgRemoveJTrue(BasicBlock* block)
         {
             // If the jump and its operands form a contiguous, side-effect-free range,
             // remove them.
-            LIR::DecRefCnts(this, block, testRange);
-            blockRange.Remove(std::move(testRange));
+            blockRange.Delete(std::move(testRange), block, this);
         }
         else
         {
@@ -13392,8 +13390,7 @@ bool Compiler::fgOptimizeSwitchBranches(BasicBlock* block)
             assert(isClosed);
             assert((sideEffects & GTF_ALL_EFFECT) == 0);
 
-            LIR::DecRefCnts(this, block, switchTreeRange);
-            blockRange->Remove(std::move(switchTreeRange));
+            blockRange->Delete(std::move(switchTreeRange), block, this);
         }
         else
         {
@@ -13784,8 +13781,7 @@ bool Compiler::fgOptimizeBranchToNext(BasicBlock* block, BasicBlock* bNext, Basi
             {
                 // If the jump and its operands form a contiguous, side-effect-free range,
                 // remove them.
-                LIR::DecRefCnts(this, block, jmpRange);
-                blockRange.Remove(std::move(jmpRange));
+                blockRange.Delete(std::move(jmpRange), block, this);
             }
             else
             {
