@@ -282,9 +282,9 @@ public:
         Range Remove(GenTree* firstNode, GenTree* lastNode);
         Range Remove(ReadOnlyRange&& range);
 
-        void Delete(GenTree* node, BasicBlock* block, Compiler* compiler);
-        void Delete(GenTree* firstNode, GenTree* lastNode, BasicBlock* block, Compiler* compiler);
-        void Delete(ReadOnlyRange&& range, BasicBlock* block, Compiler* compiler);
+        void Delete(Compiler* compiler, BasicBlock* block, GenTree* node);
+        void Delete(Compiler* compiler, BasicBlock* block, GenTree* firstNode, GenTree* lastNode);
+        void Delete(Compiler* compiler, BasicBlock* block, ReadOnlyRange&& range);
 
         bool TryGetUse(GenTree* node, Use* use);
 

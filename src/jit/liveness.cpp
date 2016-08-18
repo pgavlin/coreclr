@@ -2381,7 +2381,7 @@ bool Compiler::fgTryRemoveDeadLIRStore(LIR::Range& blockRange, GenTree* node, Ge
             *next = operandsRange.FirstNode()->gtPrev;
         }
 
-        blockRange.Delete(std::move(operandsRange), compCurBB, this);
+        blockRange.Delete(this, compCurBB, std::move(operandsRange));
     }
 
     // If the store is marked as a late argument, it is referenced by a call. Instead of removing it,
@@ -2397,7 +2397,7 @@ bool Compiler::fgTryRemoveDeadLIRStore(LIR::Range& blockRange, GenTree* node, Ge
     }
     else
     {
-        blockRange.Delete(store, compCurBB, this);
+        blockRange.Delete(this, compCurBB, store);
     }
 
     return true;

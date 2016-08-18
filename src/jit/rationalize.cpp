@@ -938,7 +938,7 @@ Compiler::fgWalkResult Rationalizer::RewriteNode(GenTree** useEdge, ArrayStack<G
                 assert(isClosed);
                 assert((sideEffects & GTF_ALL_EFFECT) == 0);
 
-                BlockRange().Delete(std::move(lhsRange), m_block, comp);
+                BlockRange().Delete(comp, m_block, std::move(lhsRange));
             }
 
             GenTree* replacement = node->gtGetOp2();
@@ -961,7 +961,7 @@ Compiler::fgWalkResult Rationalizer::RewriteNode(GenTree** useEdge, ArrayStack<G
                     assert(isClosed);
                     assert((sideEffects & GTF_ALL_EFFECT) == 0);
 
-                    BlockRange().Delete(std::move(rhsRange), m_block, comp);
+                    BlockRange().Delete(comp, m_block, std::move(rhsRange));
                 }
             }
 

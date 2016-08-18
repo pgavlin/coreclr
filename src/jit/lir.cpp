@@ -1076,7 +1076,7 @@ LIR::Range LIR::Range::Remove(ReadOnlyRange&& range)
 //    block - The block that contains the node, if any. May be null.
 //    compiler - The compiler context. May be null if block is null.
 //
-void LIR::Range::Delete(GenTree* node, BasicBlock* block, Compiler* compiler)
+void LIR::Range::Delete(Compiler* compiler, BasicBlock* block, GenTree* node)
 {
     assert(node != nullptr);
     assert((block == nullptr) == (compiler == nullptr));
@@ -1109,7 +1109,7 @@ void LIR::Range::Delete(GenTree* node, BasicBlock* block, Compiler* compiler)
 //    block - The block that contains the subrange, if any. May be null.
 //    compiler - The compiler context. May be null if block is null.
 //
-void LIR::Range::Delete(GenTree* firstNode, GenTree* lastNode, BasicBlock* block, Compiler* compiler)
+void LIR::Range::Delete(Compiler* compiler, BasicBlock* block, GenTree* firstNode, GenTree* lastNode)
 {
     assert(firstNode != nullptr);
     assert(lastNode != nullptr);
@@ -1154,9 +1154,9 @@ void LIR::Range::Delete(GenTree* firstNode, GenTree* lastNode, BasicBlock* block
 //    block - The block that contains the subrange, if any. May be null.
 //    compiler - The compiler context. May be null if block is null.
 //
-void LIR::Range::Delete(ReadOnlyRange&& range, BasicBlock* block, Compiler* compiler)
+void LIR::Range::Delete(Compiler* compiler, BasicBlock* block, ReadOnlyRange&& range)
 {
-    Delete(range.m_firstNode, range.m_lastNode, block, compiler);
+    Delete(compiler, block, range.m_firstNode, range.m_lastNode);
 }
 
 
