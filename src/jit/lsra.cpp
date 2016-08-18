@@ -10010,7 +10010,7 @@ void LinearScan::DumpOperandDefs(GenTree* operand,
     if (operand->gtLsraInfo.dstCount != 0)
     {
         // This operand directly produces registers; print it.
-        for (unsigned i = 0; i < operand->gtLsraInfo.dstCount; i++)
+        for (int i = 0; i < operand->gtLsraInfo.dstCount; i++)
         {
             if (!first)
             {
