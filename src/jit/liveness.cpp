@@ -1193,10 +1193,9 @@ class LiveVarAnalysis
         return liveInChanged || heapLiveInChanged;
     }
 
-    void Run(bool updateInternalOnly)
+    void UpdateInternalBlocks(bool keepAliveThis)
     {
-        const bool keepAliveThis =
-            m_compiler->lvaKeepAliveAndReportThis() && m_compiler->lvaTable[m_compiler->info.compThisArg].lvTracked;
+        noway_assert(m_compiler->opts.compDbgCode && (m_compiler->info.compVarScopesCount > 0));
 
         /* Live Variable Analysis - Backward dataflow */
         bool changed;
@@ -1221,24 +1220,18 @@ class LiveVarAnalysis
                     m_hasPossibleBackEdge = true;
                 }
 
-                if (updateInternalOnly)
+                // Only update BBF_INTERNAL blocks as they may be syntactically out of sequence.
+                if (!(block->bbFlags & BBF_INTERNAL))
                 {
-                    /* Only update BBF_INTERNAL blocks as they may be
-                       syntactically out of sequence. */
-
-                    noway_assert(m_compiler->opts.compDbgCode && (m_compiler->info.compVarScopesCount > 0));
-
-                    if (!(block->bbFlags & BBF_INTERNAL))
-                    {
-                        continue;
-                    }
+                    continue;
                 }
 
-                if (PerBlockAnalysis(block, updateInternalOnly, keepAliveThis))
+                if (PerBlockAnalysis(block, true, keepAliveThis))
                 {
                     changed = true;
                 }
             }
+
             // if there is no way we could have processed a block without seeing all of its predecessors
             // then there is no need to iterate
             if (!m_hasPossibleBackEdge)
@@ -1246,6 +1239,144 @@ class LiveVarAnalysis
                 break;
             }
         } while (changed);
+    }
+
+    struct Worklist
+    {
+        BasicBlock* m_head;
+        BasicBlock* m_tail;
+
+    public:
+        Worklist()
+            : m_head(nullptr), m_tail(nullptr)
+        {
+        }
+
+        bool IsEmpty() const
+        {
+            return m_head == nullptr;
+        }
+
+        bool Contains(BasicBlock* block) const
+        {
+            return block->bbLvaWorklistPrev != nullptr;
+        }
+
+        void PushBack(BasicBlock* block)
+        {
+            if (!Contains(block))
+            {
+                if (m_head == nullptr)
+                {
+                    block->bbLvaWorklistPrev = block->bbLvaWorklistNext = m_head = m_tail = block;
+                }
+                else
+                {
+                    block->bbLvaWorklistPrev  = m_tail;
+                    m_tail->bbLvaWorklistNext = block;
+                    block->bbLvaWorklistNext  = m_head;
+                    m_head->bbLvaWorklistPrev = block;
+                    m_tail = block;
+                }
+            }
+        }
+
+        BasicBlock* PopFront()
+        {
+            assert(!IsEmpty());
+
+            BasicBlock* block = m_head;
+            if (block == m_tail)
+            {
+                m_head = m_tail = nullptr;
+            }
+            else
+            {
+                m_head = block->bbLvaWorklistNext;
+
+                m_head->bbLvaWorklistPrev = m_tail;
+                m_tail->bbLvaWorklistNext = m_head;
+            }
+
+            block->bbLvaWorklistPrev = block->bbLvaWorklistNext = nullptr;
+            return block;
+        }
+
+        void Remove(BasicBlock* block)
+        {
+            assert(Contains(block));
+
+            if ((block == m_head) && (block == m_tail))
+            {
+                m_head = nullptr;
+                m_tail = nullptr;
+            }
+            else
+            {
+                block->bbLvaWorklistPrev->bbLvaWorklistNext = block->bbLvaWorklistNext;
+                block->bbLvaWorklistNext->bbLvaWorklistPrev = block->bbLvaWorklistPrev;
+
+                if (block == m_head)
+                {
+                    m_head = block->bbLvaWorklistNext;
+                }
+                else if (block == m_tail)
+                {
+                    m_tail = block->bbLvaWorklistPrev;
+                }
+            }
+
+            block->bbLvaWorklistPrev = block->bbLvaWorklistNext = nullptr;
+        }
+    };
+
+    void Run(bool updateInternalOnly)
+    {
+        const bool keepAliveThis =
+            m_compiler->lvaKeepAliveAndReportThis() && m_compiler->lvaTable[m_compiler->info.compThisArg].lvTracked;
+
+        if (updateInternalOnly)
+        {
+            UpdateInternalBlocks(keepAliveThis);
+            return;
+        }
+
+        /* Live Variable Analysis - Backward dataflow */
+        VarSetOps::ClearD(m_compiler, m_liveIn);
+        VarSetOps::ClearD(m_compiler, m_liveOut);
+
+        m_heapLiveIn  = false;
+        m_heapLiveOut = false;
+
+        Worklist worklist;
+        for (BasicBlock* block = m_compiler->fgLastBB; block != nullptr; block = block->bbPrev)
+        {
+            if (worklist.Contains(block))
+            {
+                worklist.Remove(block);
+            }
+
+            if (PerBlockAnalysis(block, false, keepAliveThis))
+            {
+                for (flowList* pred = block->bbPreds; pred != nullptr; pred = pred->flNext)
+                {
+                    worklist.PushBack(pred->flBlock);
+                }
+            }
+        }
+
+        while (!worklist.IsEmpty())
+        {
+            BasicBlock* block = worklist.PopFront();
+
+            if (PerBlockAnalysis(block, false, keepAliveThis))
+            {
+                for (flowList* pred = block->bbPreds; pred != nullptr; pred = pred->flNext)
+                {
+                    worklist.PushBack(pred->flBlock);
+                }
+            }
+        }
     }
 
 public:

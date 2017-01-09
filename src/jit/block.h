@@ -808,6 +808,10 @@ struct BasicBlock : private LIR::Range
     VARSET_TP bbLiveIn;  // variables live on entry
     VARSET_TP bbLiveOut; // variables live on exit
 
+    BasicBlock* bbLvaWorklistPrev;     // Previous block on the live variable analysis worklist
+    BasicBlock* bbLvaWorklistNext;     // Next block on the live variable analysis worklist
+    unsigned    bbIsOnLvaWorklist : 1; // 1 if this block is on the LVA worklist; 0 otherwise.
+
     // Use, def, live in/out information for the implicit "Heap" variable.
     unsigned bbHeapUse : 1; // must be set to true for any block that references the global Heap
     unsigned bbHeapDef : 1; // must be set to true for any block that mutates the global Heap
@@ -998,6 +1002,8 @@ struct BasicBlock : private LIR::Range
 #endif // ASSERTION_PROP
         VARSET_INIT_NOCOPY(bbLiveIn, VarSetOps::UninitVal())
         , VARSET_INIT_NOCOPY(bbLiveOut, VarSetOps::UninitVal())
+        , bbLvaWorklistPrev(nullptr)
+        , bbLvaWorklistNext(nullptr)
     {
     }
 
