@@ -1193,54 +1193,6 @@ class LiveVarAnalysis
         return liveInChanged || heapLiveInChanged;
     }
 
-    void UpdateInternalBlocks(bool keepAliveThis)
-    {
-        noway_assert(m_compiler->opts.compDbgCode && (m_compiler->info.compVarScopesCount > 0));
-
-        /* Live Variable Analysis - Backward dataflow */
-        bool changed;
-        do
-        {
-            changed = false;
-
-            /* Visit all blocks and compute new data flow values */
-
-            VarSetOps::ClearD(m_compiler, m_liveIn);
-            VarSetOps::ClearD(m_compiler, m_liveOut);
-
-            m_heapLiveIn  = false;
-            m_heapLiveOut = false;
-
-            for (BasicBlock* block = m_compiler->fgLastBB; block; block = block->bbPrev)
-            {
-                // sometimes block numbers are not monotonically increasing which
-                // would cause us not to identify backedges
-                if (block->bbNext && block->bbNext->bbNum <= block->bbNum)
-                {
-                    m_hasPossibleBackEdge = true;
-                }
-
-                // Only update BBF_INTERNAL blocks as they may be syntactically out of sequence.
-                if (!(block->bbFlags & BBF_INTERNAL))
-                {
-                    continue;
-                }
-
-                if (PerBlockAnalysis(block, true, keepAliveThis))
-                {
-                    changed = true;
-                }
-            }
-
-            // if there is no way we could have processed a block without seeing all of its predecessors
-            // then there is no need to iterate
-            if (!m_hasPossibleBackEdge)
-            {
-                break;
-            }
-        } while (changed);
-    }
-
     struct Worklist
     {
         BasicBlock* m_head;
@@ -1330,50 +1282,101 @@ class LiveVarAnalysis
         }
     };
 
+    void PushPredsOntoWorklist(Worklist& worklist, BasicBlock* block, bool updateInternalOnly)
+    {
+        for (flowList* pred = block->bbPreds; pred != nullptr; pred = pred->flNext)
+        {
+            if (!updateInternalOnly || ((pred->flBlock->bbFlags & BBF_INTERNAL) != 0))
+            {
+                worklist.PushBack(pred->flBlock);
+            }
+        }
+    }
+
     void Run(bool updateInternalOnly)
     {
         const bool keepAliveThis =
             m_compiler->lvaKeepAliveAndReportThis() && m_compiler->lvaTable[m_compiler->info.compThisArg].lvTracked;
 
-        if (updateInternalOnly)
-        {
-            UpdateInternalBlocks(keepAliveThis);
-            return;
-        }
+        noway_assert(!updateInternalOnly || (m_compiler->opts.compDbgCode && (m_compiler->info.compVarScopesCount > 0)));
 
         /* Live Variable Analysis - Backward dataflow */
-        VarSetOps::ClearD(m_compiler, m_liveIn);
-        VarSetOps::ClearD(m_compiler, m_liveOut);
-
-        m_heapLiveIn  = false;
-        m_heapLiveOut = false;
-
-        Worklist worklist;
-        for (BasicBlock* block = m_compiler->fgLastBB; block != nullptr; block = block->bbPrev)
+        if (m_compiler->compHndBBtabCount > 0)
         {
-            if (worklist.Contains(block))
+            bool changed;
+            do
             {
-                worklist.Remove(block);
-            }
+                changed = false;
 
-            if (PerBlockAnalysis(block, false, keepAliveThis))
-            {
-                for (flowList* pred = block->bbPreds; pred != nullptr; pred = pred->flNext)
+                /* Visit all blocks and compute new data flow values */
+
+                VarSetOps::ClearD(m_compiler, m_liveIn);
+                VarSetOps::ClearD(m_compiler, m_liveOut);
+
+                m_heapLiveIn  = false;
+                m_heapLiveOut = false;
+
+                for (BasicBlock* block = m_compiler->fgLastBB; block; block = block->bbPrev)
                 {
-                    worklist.PushBack(pred->flBlock);
+                    // sometimes block numbers are not monotonically increasing which
+                    // would cause us not to identify backedges
+                    if (block->bbNext && block->bbNext->bbNum <= block->bbNum)
+                    {
+                        m_hasPossibleBackEdge = true;
+                    }
+
+                    // Only update BBF_INTERNAL blocks as they may be syntactically out of sequence.
+                    if (updateInternalOnly)
+                    {
+                        if (!(block->bbFlags & BBF_INTERNAL))
+                        {
+                            continue;
+                        }
+                    }
+
+                    if (PerBlockAnalysis(block, updateInternalOnly, keepAliveThis))
+                    {
+                        changed = true;
+                    }
+                }
+
+                // if there is no way we could have processed a block without seeing all of its predecessors
+                // then there is no need to iterate
+                if (!m_hasPossibleBackEdge)
+                {
+                    break;
+                }
+            } while (changed);
+        }
+        else
+        {
+            VarSetOps::ClearD(m_compiler, m_liveIn);
+            VarSetOps::ClearD(m_compiler, m_liveOut);
+
+            m_heapLiveIn  = false;
+            m_heapLiveOut = false;
+
+            Worklist worklist;
+            for (BasicBlock* block = m_compiler->fgLastBB; block != nullptr; block = block->bbPrev)
+            {
+                if (worklist.Contains(block))
+                {
+                    worklist.Remove(block);
+                }
+
+                if (PerBlockAnalysis(block, updateInternalOnly, keepAliveThis))
+                {
+                    PushPredsOntoWorklist(worklist, block, updateInternalOnly);
                 }
             }
-        }
 
-        while (!worklist.IsEmpty())
-        {
-            BasicBlock* block = worklist.PopFront();
-
-            if (PerBlockAnalysis(block, false, keepAliveThis))
+            while (!worklist.IsEmpty())
             {
-                for (flowList* pred = block->bbPreds; pred != nullptr; pred = pred->flNext)
+                BasicBlock* block = worklist.PopFront();
+
+                if (PerBlockAnalysis(block, updateInternalOnly, keepAliveThis))
                 {
-                    worklist.PushBack(pred->flBlock);
+                    PushPredsOntoWorklist(worklist, block, updateInternalOnly);
                 }
             }
         }
@@ -3064,7 +3067,17 @@ void Compiler::fgInterBlockLocalVarLiveness()
             // which may expose more dead stores.
             fgLocalVarLivenessChanged = true;
 
-            noway_assert(VarSetOps::Equal(this, VarSetOps::Intersection(this, life, block->bbLiveIn), life));
+#ifdef DEBUG
+            if (!VarSetOps::Equal(this, VarSetOps::Intersection(this, life, block->bbLiveIn), life))
+            {
+                printf("BB%02u life: ", block->bbNum);
+                lvaDispVarSet(life);
+                printf("\n live in: ");
+                lvaDispVarSet(block->bbLiveIn);
+                printf("\n");
+                assert(false);
+            }
+#endif // DEBUG
 
             /* set the new bbLiveIn */
 
