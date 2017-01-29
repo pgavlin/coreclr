@@ -4928,6 +4928,9 @@ int Compiler::compCompile(CORINFO_METHOD_HANDLE methodHnd,
     this->dumpIRBlockHeaders = compIsForInlining() ? impInlineInfo->InlinerCompiler->dumpIRBlockHeaders : NULL;
     this->dumpIRExit         = compIsForInlining() ? impInlineInfo->InlinerCompiler->dumpIRExit : NULL;
 
+    fgLVAIterations = 0;
+    fgLVABlocksProcessed = 0;
+    fgLVAChanges = 0;
 #endif
 
 #if defined(DEBUG) || defined(INLINE_DATA)
@@ -7801,6 +7804,10 @@ void JitTimer::PrintCsvHeader()
             fprintf(fp, "\"Opt Level\",");
             fprintf(fp, "\"Loops Cloned\",");
 
+            fprintf(fp, "\"LVA Iterations\",");
+            fprintf(fp, "\"LVA Blocks Processed\",");
+            fprintf(fp, "\"LVA Live-In Changes\",");
+
             for (int i = 0; i < PHASE_NUMBER_OF; i++)
             {
                 fprintf(fp, "\"%s\",", PhaseNames[i]);
@@ -7846,6 +7853,11 @@ void JitTimer::PrintCsvMethodStats(Compiler* comp)
     fprintf(fp, "%u,", comp->fgBBcount);
     fprintf(fp, "%u,", comp->opts.MinOpts());
     fprintf(fp, "%u,", comp->optLoopsCloned);
+
+    fprintf(fp, "%u,", comp->fgLVAIterations);
+    fprintf(fp, "%u,", comp->fgLVABlocksProcessed);
+    fprintf(fp, "%u,", comp->fgLVAChanges);
+
     unsigned __int64 totCycles = 0;
     for (int i = 0; i < PHASE_NUMBER_OF; i++)
     {
