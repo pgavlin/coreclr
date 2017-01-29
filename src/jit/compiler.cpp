@@ -7805,6 +7805,7 @@ void JitTimer::PrintCsvHeader()
             fprintf(fp, "\"Method Index\",");
             fprintf(fp, "\"IL Bytes\",");
             fprintf(fp, "\"Basic Blocks\",");
+            fprintf(fp, "\"EH clauses\",");
             fprintf(fp, "\"Opt Level\",");
             fprintf(fp, "\"Loops Cloned\",");
 
@@ -7855,6 +7856,7 @@ void JitTimer::PrintCsvMethodStats(Compiler* comp)
     fprintf(fp, "%d,", index);
     fprintf(fp, "%u,", comp->info.compILCodeSize);
     fprintf(fp, "%u,", comp->fgBBcount);
+    fprintf(fp, "%u,", comp->compHndBBtabCount);
     fprintf(fp, "%u,", comp->opts.MinOpts());
     fprintf(fp, "%u,", comp->optLoopsCloned);
 
