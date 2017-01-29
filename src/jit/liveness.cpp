@@ -1336,9 +1336,20 @@ class LiveVarAnalysis
 
                     if (PerBlockAnalysis(block, updateInternalOnly, keepAliveThis))
                     {
+#ifdef DEBUG
+                        m_compiler->fgLVAChanges++;
+#endif // DEBUG
                         changed = true;
                     }
+
+#ifdef DEBUG
+                    m_compiler->fgLVABlocksProcessed++;
+#endif // DEBUG
                 }
+
+#ifdef DEBUG
+                m_compiler->fgLVAIterations++;
+#endif // DEBUG
 
                 // if there is no way we could have processed a block without seeing all of its predecessors
                 // then there is no need to iterate
@@ -1367,7 +1378,15 @@ class LiveVarAnalysis
                 if (PerBlockAnalysis(block, updateInternalOnly, keepAliveThis))
                 {
                     PushPredsOntoWorklist(worklist, block, updateInternalOnly);
+
+#ifdef DEBUG
+                    m_compiler->fgLVAChanges++;
+#endif // DEBUG
                 }
+
+#ifdef DEBUG
+                m_compiler->fgLVABlocksProcessed++;
+#endif // DEBUG
             }
 
             while (!worklist.IsEmpty())
@@ -1377,7 +1396,14 @@ class LiveVarAnalysis
                 if (PerBlockAnalysis(block, updateInternalOnly, keepAliveThis))
                 {
                     PushPredsOntoWorklist(worklist, block, updateInternalOnly);
+
+#ifdef DEBUG
+                    m_compiler->fgLVAChanges++;
+#endif // DEBUG
                 }
+#ifdef DEBUG
+                m_compiler->fgLVABlocksProcessed++;
+#endif // DEBUG
             }
         }
     }

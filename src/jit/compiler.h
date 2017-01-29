@@ -3586,6 +3586,12 @@ public:
 
     VARSET_VALRET_TP fgGetHandlerLiveVars(BasicBlock* block);
 
+#ifdef DEBUG
+    unsigned fgLVAIterations;
+    unsigned fgLVABlocksProcessed;
+    unsigned fgLVAChanges;
+#endif // DEBUG
+
     void fgLiveVarAnalysis(bool updateInternalOnly = false);
 
     // This is used in the liveness computation, as a temporary.  When we use the
