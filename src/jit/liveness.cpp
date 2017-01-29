@@ -1282,6 +1282,35 @@ class LiveVarAnalysis
         }
     };
 
+    bool IsHandlerBeg(BasicBlock *block, EHblkDsc** theEhDsc) const
+    {
+        EHblkDsc* ehDsc = m_compiler->ehGetBlockHndDsc(block);
+        if (ehDsc == nullptr)
+        {
+            return false;
+        }
+
+        *theEhDsc = ehDsc;
+        if (ehDsc->HasFilter() && (block == ehDsc->ebdFilter))
+        {
+            return true;
+        }
+#if !FEATURE_EH_FUNCLETS
+        else
+        {
+            // The EH subsystem can trigger a stack walk after the filter
+            // has returned, but before invoking the handler, and the only
+            // IP address reported from this method will be the original
+            // faulting instruction, thus everything in the try body
+            // must report as live any variables live-out of the filter
+            // (which is the same as those live-in to the handler)
+            return false;
+        }
+#endif // FEATURE_EH_FUNCLETS
+
+        return block == ehDsc->ebdHndBeg;
+    }
+
     void PushPredsOntoWorklist(Worklist& worklist, BasicBlock* block, bool updateInternalOnly)
     {
         for (flowList* pred = block->bbPreds; pred != nullptr; pred = pred->flNext)
@@ -1289,6 +1318,31 @@ class LiveVarAnalysis
             if (!updateInternalOnly || ((pred->flBlock->bbFlags & BBF_INTERNAL) != 0))
             {
                 worklist.PushBack(pred->flBlock);
+            }
+        }
+
+        EHblkDsc* ehDsc;
+        if (!IsHandlerBeg(block, &ehDsc))
+        {
+            return;
+        }
+
+        assert(m_compiler->compHndBBtabCount <= 1);
+
+        BasicBlock* const tryStart = ehDsc->ebdTryBeg;
+        for (flowList* pred = tryStart->bbPreds; pred != nullptr; pred = pred->flNext)
+        {
+            if (!updateInternalOnly || ((pred->flBlock->bbFlags & BBF_INTERNAL) != 0))
+            {
+                worklist.PushBack(pred->flBlock);
+            }
+        }
+
+        for (BasicBlock* bb = ehDsc->ebdTryBeg; bb != ehDsc->ebdTryLast->bbNext; bb = bb->bbNext)
+        {
+            if (!updateInternalOnly || ((bb->bbFlags & BBF_INTERNAL) != 0))
+            {
+                worklist.PushBack(bb);
             }
         }
     }
@@ -1301,7 +1355,7 @@ class LiveVarAnalysis
         noway_assert(!updateInternalOnly || (m_compiler->opts.compDbgCode && (m_compiler->info.compVarScopesCount > 0)));
 
         /* Live Variable Analysis - Backward dataflow */
-        if (m_compiler->compHndBBtabCount > 0)
+        if (m_compiler->compHndBBtabCount > 1)
         {
             bool changed;
             do
