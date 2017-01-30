@@ -4931,11 +4931,11 @@ int Compiler::compCompile(CORINFO_METHOD_HANDLE methodHnd,
     this->dumpIRDataflow     = compIsForInlining() ? impInlineInfo->InlinerCompiler->dumpIRDataflow : false;
     this->dumpIRBlockHeaders = compIsForInlining() ? impInlineInfo->InlinerCompiler->dumpIRBlockHeaders : NULL;
     this->dumpIRExit         = compIsForInlining() ? impInlineInfo->InlinerCompiler->dumpIRExit : NULL;
+#endif
 
     fgLVAIterations = 0;
     fgLVABlocksProcessed = 0;
     fgLVAChanges = 0;
-#endif
 
 #if defined(DEBUG) || defined(INLINE_DATA)
     info.compMethodHashPrivate = 0;

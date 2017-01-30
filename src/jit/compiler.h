@@ -3586,11 +3586,9 @@ public:
 
     VARSET_VALRET_TP fgGetHandlerLiveVars(BasicBlock* block);
 
-#ifdef DEBUG
     unsigned fgLVAIterations;
     unsigned fgLVABlocksProcessed;
     unsigned fgLVAChanges;
-#endif // DEBUG
 
     void fgLiveVarAnalysis(bool updateInternalOnly = false);
 

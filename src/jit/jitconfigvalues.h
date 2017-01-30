@@ -284,6 +284,8 @@ CONFIG_INTEGER(JitEnableRemoveEmptyTry, W("JitEnableRemoveEmptyTry"), 0)
 #endif // defined(FEATURE_CORECLR)
 #endif // DEBUG
 
+CONFIG_INTEGER(JitEnableLVAWorklist, W("JitEnableLVAWorklist"), 0)
+
 #undef CONFIG_INTEGER
 #undef CONFIG_STRING
 #undef CONFIG_METHODSET
