@@ -1081,7 +1081,7 @@ class LiveVarAnalysis
     {
     }
 
-    bool PerBlockAnalysis(BasicBlock* block, bool updateInternalOnly, bool keepAliveThis)
+    bool PerBlockAnalysis(BasicBlock* block, bool updateInternalOnly, bool keepAliveThis, bool calcLiveOut)
     {
         /* Compute the 'liveOut' set */
         VarSetOps::ClearD(m_compiler, m_liveOut);
@@ -1103,16 +1103,24 @@ class LiveVarAnalysis
         }
 
         // Additionally, union in all the live-in tracked vars of successors.
-        AllSuccessorIter succsEnd = block->GetAllSuccs(m_compiler).end();
-        for (AllSuccessorIter succs = block->GetAllSuccs(m_compiler).begin(); succs != succsEnd; ++succs)
+        if (calcLiveOut)
         {
-            BasicBlock* succ = (*succs);
-            VarSetOps::UnionD(m_compiler, m_liveOut, succ->bbLiveIn);
-            m_heapLiveOut = m_heapLiveOut || (*succs)->bbHeapLiveIn;
-            if (succ->bbNum <= block->bbNum)
+            AllSuccessorIter succsEnd = block->GetAllSuccs(m_compiler).end();
+            for (AllSuccessorIter succs = block->GetAllSuccs(m_compiler).begin(); succs != succsEnd; ++succs)
             {
-                m_hasPossibleBackEdge = true;
+                BasicBlock* succ = (*succs);
+                VarSetOps::UnionD(m_compiler, m_liveOut, succ->bbLiveIn);
+                m_heapLiveOut = m_heapLiveOut || (*succs)->bbHeapLiveIn;
+                if (succ->bbNum <= block->bbNum)
+                {
+                    m_hasPossibleBackEdge = true;
+                }
             }
+        }
+        else
+        {
+            VarSetOps::UnionD(m_compiler, m_liveOut, block->bbLiveOut);
+            m_heapLiveOut = block->bbHeapLiveOut;
         }
 
         /* For lvaKeepAliveAndReportThis methods, "this" has to be kept alive everywhere
@@ -1135,6 +1143,10 @@ class LiveVarAnalysis
 
         /* Can exceptions from this block be handled (in this function)? */
 
+        // NOTE: I believe that with the exception of the special behavior for EH_FUNCLETS in fgGetHandlerLiveVars
+        //       and the fact that the live var set is unioned with liveOut *and* live in, this should be covered
+        //       by the EH succesors that are iterated over above. It is worth experimenting with this, as the work
+        //       done below is non-trivial.
         if (m_compiler->ehBlockHasExnFlowDsc(block))
         {
             VARSET_TP VARSET_INIT_NOCOPY(liveVars, m_compiler->fgGetHandlerLiveVars(block));
@@ -1178,6 +1190,8 @@ class LiveVarAnalysis
             }
             else
             {
+                assert(VarSetOps::Count(m_compiler, block->bbLiveIn) <= VarSetOps::Count(m_compiler, m_liveIn));
+
                 VarSetOps::Assign(m_compiler, block->bbLiveIn, m_liveIn);
                 VarSetOps::Assign(m_compiler, block->bbLiveOut, m_liveOut);
             }
@@ -1311,14 +1325,33 @@ class LiveVarAnalysis
         return block == ehDsc->ebdHndBeg;
     }
 
+    template<bool IsEHPred>
+    void PushPredOnWorklist(Worklist& worklist, BasicBlock* block, BasicBlock* pred, bool updateInternalOnly)
+    {
+        if (updateInternalOnly && ((pred->bbFlags & BBF_INTERNAL) == 0))
+        {
+            return;
+        }
+
+        const bool liveOutChanged = VarSetOps::UnionDRes(m_compiler, pred->bbLiveOut, block->bbLiveIn);
+        const bool liveInChanged  = IsEHPred && VarSetOps::UnionDRes(m_compiler, pred->bbLiveIn, block->bbLiveIn);
+
+        const bool heapLiveOutChanged = !pred->bbHeapLiveOut && block->bbHeapLiveIn;
+        pred->bbHeapLiveOut = pred->bbHeapLiveOut || block->bbHeapLiveIn;
+
+        if (!liveOutChanged && !liveInChanged && !heapLiveOutChanged)
+        {
+            return;
+        }
+
+        worklist.PushBack(pred);
+    }
+
     void PushPredsOntoWorklist(Worklist& worklist, BasicBlock* block, bool updateInternalOnly)
     {
         for (flowList* pred = block->bbPreds; pred != nullptr; pred = pred->flNext)
         {
-            if (!updateInternalOnly || ((pred->flBlock->bbFlags & BBF_INTERNAL) != 0))
-            {
-                worklist.PushBack(pred->flBlock);
-            }
+            PushPredOnWorklist<false>(worklist, block, pred->flBlock, updateInternalOnly);
         }
 
         EHblkDsc* ehDsc;
@@ -1332,18 +1365,12 @@ class LiveVarAnalysis
         BasicBlock* const tryStart = ehDsc->ebdTryBeg;
         for (flowList* pred = tryStart->bbPreds; pred != nullptr; pred = pred->flNext)
         {
-            if (!updateInternalOnly || ((pred->flBlock->bbFlags & BBF_INTERNAL) != 0))
-            {
-                worklist.PushBack(pred->flBlock);
-            }
+            PushPredOnWorklist<false>(worklist, block, pred->flBlock, updateInternalOnly);
         }
 
         for (BasicBlock* bb = ehDsc->ebdTryBeg; bb != ehDsc->ebdTryLast->bbNext; bb = bb->bbNext)
         {
-            if (!updateInternalOnly || ((bb->bbFlags & BBF_INTERNAL) != 0))
-            {
-                worklist.PushBack(bb);
-            }
+            PushPredOnWorklist<true>(worklist, block, bb, updateInternalOnly);
         }
     }
 
@@ -1388,7 +1415,7 @@ class LiveVarAnalysis
                         }
                     }
 
-                    if (PerBlockAnalysis(block, updateInternalOnly, keepAliveThis))
+                    if (PerBlockAnalysis(block, updateInternalOnly, keepAliveThis, true))
                     {
                         m_compiler->fgLVAChanges++;
                         changed = true;
@@ -1423,7 +1450,7 @@ class LiveVarAnalysis
                     worklist.Remove(block);
                 }
 
-                if (PerBlockAnalysis(block, updateInternalOnly, keepAliveThis))
+                if (PerBlockAnalysis(block, updateInternalOnly, keepAliveThis, false))
                 {
                     PushPredsOntoWorklist(worklist, block, updateInternalOnly);
 
@@ -1437,7 +1464,7 @@ class LiveVarAnalysis
             {
                 BasicBlock* block = worklist.PopFront();
 
-                if (PerBlockAnalysis(block, updateInternalOnly, keepAliveThis))
+                if (PerBlockAnalysis(block, updateInternalOnly, keepAliveThis, false))
                 {
                     PushPredsOntoWorklist(worklist, block, updateInternalOnly);
 

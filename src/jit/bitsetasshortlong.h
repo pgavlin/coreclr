@@ -39,6 +39,7 @@ private:
     static bool IsEmptyLong(Env env, BitSetShortLongRep bs);
     static unsigned CountLong(Env env, BitSetShortLongRep bs);
     static void UnionDLong(Env env, BitSetShortLongRep& bs1, BitSetShortLongRep bs2);
+    static bool UnionDResLong(Env env, BitSetShortLongRep& bs1, BitSetShortLongRep bs2);
     static void DiffDLong(Env env, BitSetShortLongRep& bs1, BitSetShortLongRep bs2);
     static void AddElemDLong(Env env, BitSetShortLongRep& bs, unsigned i);
     static void RemoveElemDLong(Env env, BitSetShortLongRep& bs, unsigned i);
@@ -192,6 +193,21 @@ public:
         BitSetShortLongRep res = MakeCopy(env, bs1);
         UnionD(env, res, bs2);
         return res;
+    }
+
+    static bool UnionDRes(Env env, BitSetShortLongRep& bs1, BitSetShortLongRep bs2)
+    {
+        bool changed;
+        if (IsShort(env))
+        {
+            changed = ((size_t)bs1 ^ (size_t)bs2) != 0;
+            bs1 = (BitSetShortLongRep)(((size_t)bs1) | ((size_t)bs2));
+        }
+        else
+        {
+            changed = UnionDResLong(env, bs1, bs2);
+        }
+        return changed;
     }
 
     static void DiffD(Env env, BitSetShortLongRep& bs1, BitSetShortLongRep bs2)
@@ -567,6 +583,23 @@ void BitSetOps</*BitSetType*/ BitSetShortLongRep,
     {
         bs1[i] |= bs2[i];
     }
+}
+
+template <typename Env, typename BitSetTraits>
+bool BitSetOps</*BitSetType*/ BitSetShortLongRep,
+               /*Brand*/ BSShortLong,
+               /*Env*/ Env,
+               /*BitSetTraits*/ BitSetTraits>::UnionDResLong(Env env, BitSetShortLongRep& bs1, BitSetShortLongRep bs2)
+{
+    assert(!IsShort(env));
+    unsigned len = BitSetTraits::GetArrSize(env, sizeof(size_t));
+    size_t changes = 0;
+    for (unsigned i = 0; i < len; i++)
+    {
+        changes |= bs1[i] ^ bs2[i];
+        bs1[i] |= bs2[i];
+    }
+    return changes != 0;
 }
 
 template <typename Env, typename BitSetTraits>
