@@ -3030,6 +3030,7 @@ void Compiler::fgInterBlockLocalVarLiveness()
 
             if (!VarSetOps::Equal(this, VarSetOps::Intersection(this, life, block->bbLiveIn), life))
             {
+#ifdef DEBUG
                 if (verbose)
                 {
                     VARSET_TP VARSET_INIT_NOCOPY(allVars, VarSetOps::Union(this, block->bbLiveIn, life));
@@ -3040,6 +3041,7 @@ void Compiler::fgInterBlockLocalVarLiveness()
                     lvaDispVarSet(life, allVars);
                     printf("\n\n");
                 }
+#endif // DEBUG
                 noway_assert(false);
             }
 
