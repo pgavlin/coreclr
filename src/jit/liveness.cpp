@@ -3003,22 +3003,6 @@ void Compiler::fgInterBlockLocalVarLiveness()
          * variables may have become dead at the beginning of the block
          * -> have to update bbLiveIn */
 
-        VarSetOps::Assign(this, block->bbVarUse, fgCurUseSet);
-        VarSetOps::Assign(this, block->bbVarDef, fgCurDefSet);
-
-#ifdef DEBUG
-        if (verbose)
-        {
-            VARSET_TP VARSET_INIT_NOCOPY(allVars, VarSetOps::Union(this, fgCurUseSet, fgCurDefSet));
-            printf("BB%02u", block->bbNum);
-            printf(" USE(%d)=", VarSetOps::Count(this, fgCurUseSet));
-            lvaDispVarSet(fgCurUseSet, allVars);
-            printf("\n     DEF(%d)=", VarSetOps::Count(this, fgCurDefSet));
-            lvaDispVarSet(fgCurDefSet, allVars);
-            printf("\n\n");
-        }
-#endif // DEBUG
-
         if (!VarSetOps::Equal(this, life, block->bbLiveIn))
         {
             /* some variables have become dead all across the block
@@ -3028,28 +3012,25 @@ void Compiler::fgInterBlockLocalVarLiveness()
             // which may expose more dead stores.
             fgLocalVarLivenessChanged = true;
 
-            if (!VarSetOps::Equal(this, VarSetOps::Intersection(this, life, block->bbLiveIn), life))
-            {
+            noway_assert(VarSetOps::Equal(this, VarSetOps::Intersection(this, life, block->bbLiveIn), life));
+
 #ifdef DEBUG
-                if (verbose)
-                {
-                    VARSET_TP VARSET_INIT_NOCOPY(allVars, VarSetOps::Union(this, block->bbLiveIn, life));
-                    printf("BB%02u", block->bbNum);
-                    printf(" OLD IN (%d)=", VarSetOps::Count(this, block->bbLiveIn));
-                    lvaDispVarSet(block->bbLiveIn, allVars);
-                    printf("\n     NEW IN (%d)=", VarSetOps::Count(this, life));
-                    lvaDispVarSet(life, allVars);
-                    printf("\n\n");
-                }
-#endif // DEBUG
-                noway_assert(false);
+            if (verbose)
+            {
+                VARSET_TP VARSET_INIT_NOCOPY(allVars, VarSetOps::Union(this, fgCurUseSet, fgCurDefSet));
+                printf("BB%02u", block->bbNum);
+                printf(" USE(%d)=", VarSetOps::Count(this, fgCurUseSet));
+                lvaDispVarSet(fgCurUseSet, allVars);
+                printf("\n     DEF(%d)=", VarSetOps::Count(this, fgCurDefSet));
+                lvaDispVarSet(fgCurDefSet, allVars);
+                printf("\n\n");
             }
+#endif // DEBUG
 
-            /* set the new bbLiveIn */
-
+            /* set the new use, def, and live-in sets */
+            VarSetOps::Assign(this, block->bbVarUse, fgCurUseSet);
+            VarSetOps::Assign(this, block->bbVarDef, fgCurDefSet);
             VarSetOps::Assign(this, block->bbLiveIn, life);
-
-            /* compute the new bbLiveOut for all the predecessors of this block */
         }
 
         noway_assert(compCurBB == block);
