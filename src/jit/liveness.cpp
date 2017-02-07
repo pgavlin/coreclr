@@ -117,15 +117,14 @@ void Compiler::fgLocalVarLiveness()
     // Initialize the per-block var sets.
     fgInitBlockVarSets();
 
+    /* Figure out use/def info for all basic blocks */
+    fgPerBlockLocalVarLiveness();
+    EndPhase(PHASE_LCLVARLIVENESS_PERBLOCK);
+
     fgLocalVarLivenessChanged = false;
     do
     {
-        /* Figure out use/def info for all basic blocks */
-        fgPerBlockLocalVarLiveness();
-        EndPhase(PHASE_LCLVARLIVENESS_PERBLOCK);
-
         /* Live variable analysis. */
-
         fgStmtRemoved = false;
         fgInterBlockLocalVarLiveness();
     } while (fgStmtRemoved && fgLocalVarLivenessChanged);
@@ -1455,6 +1454,7 @@ void Compiler::fgComputeLifeCall(VARSET_TP& life, GenTreeCall* call)
             {
                 VARSET_TP VARSET_INIT_NOCOPY(varBit, VarSetOps::MakeSingleton(this, frameVarDsc->lvVarIndex));
 
+                VarSetOps::AddElemD(this, fgCurUseSet, frameVarDsc->lvVarIndex);
                 VarSetOps::AddElemD(this, life, frameVarDsc->lvVarIndex);
 
                 /* Record interference with other live variables */
@@ -1484,6 +1484,8 @@ void Compiler::fgComputeLifeCall(VARSET_TP& life, GenTreeCall* call)
             {
                 unsigned varIndex = frameVarDsc->lvVarIndex;
                 noway_assert(varIndex < lvaTrackedCount);
+
+                VarSetOps::AddElemD(this, fgCurUseSet, varIndex);
 
                 // Is the variable already known to be alive?
                 //
@@ -1644,15 +1646,22 @@ bool Compiler::fgComputeLifeLocal(VARSET_TP& life, VARSET_TP& keepAliveVars, Gen
                     // of the variable has been exposed. Improved alias analysis could allow
                     // stores to these sorts of variables to be removed at the cost of compile
                     // time.
-                    return !varDsc->lvAddrExposed &&
-                           !(varDsc->lvIsStructField && lvaTable[varDsc->lvParentLcl].lvAddrExposed);
+                    if (!varDsc->lvAddrExposed && !(varDsc->lvIsStructField && lvaTable[varDsc->lvParentLcl].lvAddrExposed))
+                    {
+                        return true;
+                    }
                 }
             }
 
+            VarSetOps::RemoveElemD(this, fgCurUseSet, varIndex);
+            VarSetOps::AddElemD(this, fgCurDefSet, varIndex);
             return false;
         }
         else // it is a use
         {
+            // Add it to the working set of uses
+            VarSetOps::AddElemD(this, fgCurUseSet, varIndex);
+
             // Is the variable already known to be alive?
             if (VarSetOps::IsMember(this, life, varIndex))
             {
@@ -1708,11 +1717,16 @@ bool Compiler::fgComputeLifeLocal(VARSET_TP& life, VARSET_TP& keepAliveVars, Gen
             }
             if (node->gtFlags & GTF_VAR_DEF)
             {
+                VarSetOps::DiffD(this, fgCurUseSet, varBit);
+                VarSetOps::UnionD(this, fgCurDefSet, varBit);
+
                 VarSetOps::DiffD(this, varBit, keepAliveVars);
                 VarSetOps::DiffD(this, life, varBit);
                 return false;
             }
+
             // This is a use.
+            VarSetOps::UnionD(this, fgCurUseSet, varBit);
 
             // Are the variables already known to be alive?
             if (VarSetOps::IsSubset(this, varBit, life))
@@ -1799,6 +1813,9 @@ VARSET_VALRET_TP Compiler::fgComputeLife(VARSET_VALARG_TP lifeArg,
                     break;
                 }
 
+                VarSetOps::RemoveElemD(this, fgCurUseSet, varDsc->lvVarIndex);
+                VarSetOps::AddElemD(this, fgCurDefSet, varDsc->lvVarIndex);
+
                 if (doAgain)
                 {
                     goto AGAIN;
@@ -1838,10 +1855,19 @@ VARSET_VALRET_TP Compiler::fgComputeLifeLIR(VARSET_VALARG_TP lifeArg, BasicBlock
         }
         else if (node->OperIsNonPhiLocal() || node->OperIsLocalAddr())
         {
-            bool isDeadStore = fgComputeLifeLocal(life, keepAliveVars, node, node);
-            if (isDeadStore && fgTryRemoveDeadLIRStore(blockRange, node, &next))
+            const bool isDeadStore = fgComputeLifeLocal(life, keepAliveVars, node, node);
+            if (isDeadStore)
             {
-                fgStmtRemoved = true;
+                if (fgTryRemoveDeadLIRStore(blockRange, node, &next))
+                {
+                    fgStmtRemoved = true;
+                }
+                else
+                {
+                    const unsigned varIndex = lvaTable[node->gtLclVarCommon.gtLclNum].lvVarIndex;
+                    VarSetOps::RemoveElemD(this, fgCurUseSet, varIndex);
+                    VarSetOps::AddElemD(this, fgCurDefSet, varIndex);
+                }
             }
         }
     }
@@ -2855,6 +2881,10 @@ void Compiler::fgInterBlockLocalVarLiveness()
             noway_assert(VarSetOps::IsSubset(this, volatileVars, exceptVars));
         }
 
+        // Clear the working use/def sets
+        VarSetOps::ClearD(this, fgCurUseSet);
+        VarSetOps::ClearD(this, fgCurDefSet);
+
         /* Start with the variables live on exit from the block */
 
         VARSET_TP VARSET_INIT(this, life, block->bbLiveOut);
@@ -2935,8 +2965,10 @@ void Compiler::fgInterBlockLocalVarLiveness()
 
             noway_assert(VarSetOps::Equal(this, VarSetOps::Intersection(this, life, block->bbLiveIn), life));
 
-            /* set the new bbLiveIn */
+            /* set the new def, use, and bbLiveIn */
 
+            VarSetOps::Assign(this, block->bbVarUse, fgCurUseSet);
+            VarSetOps::Assign(this, block->bbVarDef, fgCurDefSet);
             VarSetOps::Assign(this, block->bbLiveIn, life);
 
             /* compute the new bbLiveOut for all the predecessors of this block */
