@@ -3003,6 +3003,9 @@ void Compiler::fgInterBlockLocalVarLiveness()
          * variables may have become dead at the beginning of the block
          * -> have to update bbLiveIn */
 
+        VarSetOps::Assign(this, block->bbVarUse, fgCurUseSet);
+        VarSetOps::Assign(this, block->bbVarDef, fgCurDefSet);
+
         if (!VarSetOps::Equal(this, life, block->bbLiveIn))
         {
             /* some variables have become dead all across the block
@@ -3027,9 +3030,7 @@ void Compiler::fgInterBlockLocalVarLiveness()
             }
 #endif // DEBUG
 
-            /* set the new use, def, and live-in sets */
-            VarSetOps::Assign(this, block->bbVarUse, fgCurUseSet);
-            VarSetOps::Assign(this, block->bbVarDef, fgCurDefSet);
+            // set the new live-in set
             VarSetOps::Assign(this, block->bbLiveIn, life);
         }
 
