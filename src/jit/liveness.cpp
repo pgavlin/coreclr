@@ -117,13 +117,30 @@ void Compiler::fgLocalVarLiveness()
     // Initialize the per-block var sets.
     fgInitBlockVarSets();
 
+#ifndef LEGACY_BACKEND
     /* Figure out use/def info for all basic blocks */
     fgPerBlockLocalVarLiveness();
     EndPhase(PHASE_LCLVARLIVENESS_PERBLOCK);
+#endif // !LEGACY_BACKEND
 
     fgLocalVarLivenessChanged = false;
     do
     {
+#ifdef LEGACY_BACKEND
+        /* Figure out use/def info for all basic blocks */
+        fgPerBlockLocalVarLiveness();
+        EndPhase(PHASE_LCLVARLIVENESS_PERBLOCK);
+#else
+        if (fgLocalVarLivenessChanged)
+        {
+            for (BasicBlock* block = fgFirstBB; block != nullptr; block = block->bbNext)
+            {
+                VarSetOps::ClearD(this, block->bbLiveIn);
+                block->bbHeapLiveIn = false;
+            }
+        }
+#endif // !LEGACY_BACKEND
+
         /* Live variable analysis. */
         fgStmtRemoved = false;
         fgInterBlockLocalVarLiveness();
@@ -1653,7 +1670,15 @@ bool Compiler::fgComputeLifeLocal(VARSET_TP& life, VARSET_TP& keepAliveVars, Gen
                 }
             }
 
-            VarSetOps::RemoveElemD(this, fgCurUseSet, varIndex);
+            if ((lclVarNode->gtFlags & GTF_VAR_USEASG) == 0)
+            {
+                VarSetOps::RemoveElemD(this, fgCurUseSet, varIndex);
+            }
+            else
+            {
+                VarSetOps::AddElemD(this, fgCurUseSet, varIndex);
+            }
+
             VarSetOps::AddElemD(this, fgCurDefSet, varIndex);
             return false;
         }
@@ -1805,16 +1830,29 @@ VARSET_VALRET_TP Compiler::fgComputeLife(VARSET_VALARG_TP lifeArg,
             if (isDeadStore)
             {
                 LclVarDsc* varDsc = &lvaTable[tree->gtLclVarCommon.gtLclNum];
+                const bool isUseAsg = (tree->gtFlags & GTF_VAR_USEASG) != 0;
 
-                bool doAgain = false;
-                if (fgRemoveDeadStore(&tree, varDsc, life, &doAgain, pStmtInfoDirty DEBUGARG(treeModf)))
+                bool doAgain = false, removedStore = false;
+                if (fgRemoveDeadStore(&tree, varDsc, life, &doAgain, pStmtInfoDirty, &removedStore))
                 {
                     assert(!doAgain);
                     break;
                 }
 
-                VarSetOps::RemoveElemD(this, fgCurUseSet, varDsc->lvVarIndex);
-                VarSetOps::AddElemD(this, fgCurDefSet, varDsc->lvVarIndex);
+                INDEBUG(*treeModf = removedStore;)
+
+                if (!removedStore)
+                {
+                    if (!isUseAsg)
+                    {
+                        VarSetOps::RemoveElemD(this, fgCurUseSet, varDsc->lvVarIndex);
+                    }
+                    else
+                    {
+                        VarSetOps::AddElemD(this, fgCurUseSet, varDsc->lvVarIndex);
+                    }
+                    VarSetOps::AddElemD(this, fgCurDefSet, varDsc->lvVarIndex);
+                }
 
                 if (doAgain)
                 {
@@ -1865,7 +1903,15 @@ VARSET_VALRET_TP Compiler::fgComputeLifeLIR(VARSET_VALARG_TP lifeArg, BasicBlock
                 else
                 {
                     const unsigned varIndex = lvaTable[node->gtLclVarCommon.gtLclNum].lvVarIndex;
-                    VarSetOps::RemoveElemD(this, fgCurUseSet, varIndex);
+
+                    if ((node->gtFlags & GTF_VAR_USEASG) == 0)
+                    {
+                        VarSetOps::RemoveElemD(this, fgCurUseSet, varIndex);
+                    }
+                    else
+                    {
+                        VarSetOps::AddElemD(this, fgCurUseSet, varIndex);
+                    }
                     VarSetOps::AddElemD(this, fgCurDefSet, varIndex);
                 }
             }
@@ -2120,13 +2166,14 @@ VARSET_VALRET_TP Compiler::fgComputeLife(VARSET_VALARG_TP lifeArg,
             {
                 LclVarDsc* varDsc = &lvaTable[lclVarTree->gtLclVarCommon.gtLclNum];
 
-                bool doAgain = false;
-                if (fgRemoveDeadStore(&tree, varDsc, life, &doAgain, pStmtInfoDirty DEBUGARG(treeModf)))
+                bool doAgain = false, removedStore = false;
+                if (fgRemoveDeadStore(&tree, varDsc, life, &doAgain, pStmtInfoDirty, &removedStore))
                 {
                     assert(!doAgain);
                     break;
                 }
 
+                INDEBUG(*treeModf = removedStore);
                 if (doAgain)
                 {
                     goto AGAIN;
@@ -2310,11 +2357,12 @@ bool Compiler::fgTryRemoveDeadLIRStore(LIR::Range& blockRange, GenTree* node, Ge
 //   life           - current live tracked vars (maintained as we walk backwards)
 //   doAgain        - out parameter, true if we should restart the statement
 //   pStmtInfoDirty - should defer the cost computation to the point after the reverse walk is completed?
+//   removedStore   - true if the store was removed; false otherwise
 //
 // Returns: true if we should skip the rest of the statement, false if we should continue
 
 bool Compiler::fgRemoveDeadStore(
-    GenTree** pTree, LclVarDsc* varDsc, VARSET_TP life, bool* doAgain, bool* pStmtInfoDirty DEBUGARG(bool* treeModf))
+    GenTree** pTree, LclVarDsc* varDsc, VARSET_TP life, bool* doAgain, bool* pStmtInfoDirty, bool* removedStore)
 {
     assert(!compRationalIRForm);
 
@@ -2328,6 +2376,8 @@ bool Compiler::fgRemoveDeadStore(
     GenTree* const tree     = *pTree;
 
     GenTree* nextNode = tree->gtNext;
+
+    *removedStore = false;
 
     // First, characterize the lclVarTree and see if we are taking its address.
     if (tree->OperIsLocalStore())
@@ -2450,9 +2500,7 @@ bool Compiler::fgRemoveDeadStore(
             }
             asgNode->gtOp.gtOp1->gtFlags &= ~(GTF_VAR_DEF | GTF_VAR_USEASG);
 
-#ifdef DEBUG
-            *treeModf = true;
-#endif // DEBUG
+            *removedStore = true;
 
             // Make sure no previous cousin subtree rooted at a common ancestor has
             // asked to defer the recomputation of costs.
@@ -2548,9 +2596,9 @@ bool Compiler::fgRemoveDeadStore(
                     noway_assert(sideEffList->gtOper != GT_STMT);
 
                     *pTree = compCurStmt->gtStmt.gtStmtExpr = sideEffList;
-#ifdef DEBUG
-                    *treeModf = true;
-#endif // DEBUG
+
+                    *removedStore = true;
+
                     /* Update ordering, costs, FP levels, etc. */
                     gtSetStmtInfo(compCurStmt);
 
@@ -2569,6 +2617,8 @@ bool Compiler::fgRemoveDeadStore(
                 {
                     /* No side effects, most likely we forgot to reset some flags */
                     fgRemoveStmt(compCurBB, compCurStmt);
+
+                    *removedStore = true;
 
                     return true;
                 }
@@ -2594,6 +2644,8 @@ bool Compiler::fgRemoveDeadStore(
                 /* Since we removed it do not process the rest (i.e. RHS) of the statement
                  * variables in the RHS will not be marked as live, so we get the benefit of
                  * propagating dead variables up the chain */
+
+                *removedStore = true;
 
                 return true;
             }
@@ -2636,9 +2688,9 @@ bool Compiler::fgRemoveDeadStore(
                 if (sideEffList->gtOper == asgNode->gtOper)
                 {
                     fgUpdateRefCntForExtract(asgNode, sideEffList);
-#ifdef DEBUG
-                    *treeModf = true;
-#endif // DEBUG
+
+                    *removedStore = true;
+
                     asgNode->gtOp.gtOp1 = sideEffList->gtOp.gtOp1;
                     asgNode->gtOp.gtOp2 = sideEffList->gtOp.gtOp2;
                     asgNode->gtType     = sideEffList->gtType;
@@ -2646,9 +2698,8 @@ bool Compiler::fgRemoveDeadStore(
                 else
                 {
                     fgUpdateRefCntForExtract(asgNode, sideEffList);
-#ifdef DEBUG
-                    *treeModf = true;
-#endif // DEBUG
+                    *removedStore = true;
+
                     /* Change the node to a GT_COMMA holding the side effect list */
                     asgNode->gtBashToNOP();
 
@@ -2687,9 +2738,7 @@ bool Compiler::fgRemoveDeadStore(
 
                 asgNode->gtBashToNOP();
 
-#ifdef DEBUG
-                *treeModf = true;
-#endif // DEBUG
+                *removedStore = true;
             }
 
             /* Re-link the nodes for this statement - Do not update ordering! */
@@ -2954,6 +3003,22 @@ void Compiler::fgInterBlockLocalVarLiveness()
          * variables may have become dead at the beginning of the block
          * -> have to update bbLiveIn */
 
+        VarSetOps::Assign(this, block->bbVarUse, fgCurUseSet);
+        VarSetOps::Assign(this, block->bbVarDef, fgCurDefSet);
+
+#ifdef DEBUG
+        if (verbose)
+        {
+            VARSET_TP VARSET_INIT_NOCOPY(allVars, VarSetOps::Union(this, fgCurUseSet, fgCurDefSet));
+            printf("BB%02u", block->bbNum);
+            printf(" USE(%d)=", VarSetOps::Count(this, fgCurUseSet));
+            lvaDispVarSet(fgCurUseSet, allVars);
+            printf("\n     DEF(%d)=", VarSetOps::Count(this, fgCurDefSet));
+            lvaDispVarSet(fgCurDefSet, allVars);
+            printf("\n\n");
+        }
+#endif // DEBUG
+
         if (!VarSetOps::Equal(this, life, block->bbLiveIn))
         {
             /* some variables have become dead all across the block
@@ -2963,12 +3028,23 @@ void Compiler::fgInterBlockLocalVarLiveness()
             // which may expose more dead stores.
             fgLocalVarLivenessChanged = true;
 
-            noway_assert(VarSetOps::Equal(this, VarSetOps::Intersection(this, life, block->bbLiveIn), life));
+            if (!VarSetOps::Equal(this, VarSetOps::Intersection(this, life, block->bbLiveIn), life))
+            {
+                if (verbose)
+                {
+                    VARSET_TP VARSET_INIT_NOCOPY(allVars, VarSetOps::Union(this, block->bbLiveIn, life));
+                    printf("BB%02u", block->bbNum);
+                    printf(" OLD IN (%d)=", VarSetOps::Count(this, block->bbLiveIn));
+                    lvaDispVarSet(block->bbLiveIn, allVars);
+                    printf("\n     NEW IN (%d)=", VarSetOps::Count(this, life));
+                    lvaDispVarSet(life, allVars);
+                    printf("\n\n");
+                }
+                noway_assert(false);
+            }
 
-            /* set the new def, use, and bbLiveIn */
+            /* set the new bbLiveIn */
 
-            VarSetOps::Assign(this, block->bbVarUse, fgCurUseSet);
-            VarSetOps::Assign(this, block->bbVarDef, fgCurDefSet);
             VarSetOps::Assign(this, block->bbLiveIn, life);
 
             /* compute the new bbLiveOut for all the predecessors of this block */

@@ -3651,7 +3651,8 @@ public:
                            LclVarDsc* varDsc,
                            VARSET_TP  life,
                            bool*      doAgain,
-                           bool* pStmtInfoDirty DEBUGARG(bool* treeModf));
+                           bool* pStmtInfoDirty,
+                           bool* removedStore);
 
     bool fgTryRemoveDeadLIRStore(LIR::Range& blockRange, GenTree* node, GenTree** next);
 
