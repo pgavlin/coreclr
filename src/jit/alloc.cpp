@@ -23,6 +23,9 @@ private:
         POOLED_ALLOCATOR_IN_USE         = 1,
         POOLED_ALLOCATOR_AVAILABLE      = 2,
         POOLED_ALLOCATOR_SHUTDOWN       = 3,
+
+        // Allocate 16 pages for the pooled allocator's first page.
+        FIRST_PAGE_SIZE = 16 * DEFAULT_PAGE_SIZE
     };
 
     static PooledAllocator s_pooledAllocator;
@@ -515,7 +518,7 @@ ArenaAllocator* PooledAllocator::getPooledAllocator(IEEMemoryManager* memoryMana
         case POOLED_ALLOCATOR_NOTINITIALIZED:
         {
             PooledAllocator allocator(memoryManager);
-            if (allocator.allocateNewPage(0, false) == nullptr)
+            if (allocator.allocateNewPage(FIRST_PAGE_SIZE, false) == nullptr)
             {
                 // Failed to grab the initial memory page.
                 InterlockedExchange(&s_pooledAllocatorState, POOLED_ALLOCATOR_NOTINITIALIZED);
@@ -557,7 +560,7 @@ void PooledAllocator::destroy()
     m_nextFreeByte      = m_firstPage->m_contents;
     m_lastFreeByte      = (BYTE*)m_firstPage + m_firstPage->m_pageBytes;
 
-    assert(getTotalBytesAllocated() == s_defaultPageSize);
+    assert(getTotalBytesAllocated() == FIRST_PAGE_SIZE);
 
     // If we've already been shut down, free the first page. Otherwise, return the allocator to the pool.
     if (s_pooledAllocatorState == POOLED_ALLOCATOR_SHUTDOWN)
