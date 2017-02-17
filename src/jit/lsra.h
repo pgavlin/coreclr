@@ -311,6 +311,25 @@ inline bool isCandidateVar(LclVarDsc* varDsc)
     return varDsc->lvLRACandidate;
 }
 
+enum class IntervalKind : unsigned
+{
+    // Indicates an interval that corresponds to an SDSU (tree) temp.
+    SDSU = 0x00,
+
+    // Indicates an interval that corresponds to a lclVar.
+    LclVar = 0x01,
+
+    // Indicates an interval representing the internal requirements for
+    // generating code for a node (temp registers internal to the node)
+    // Note that this interval may live beyond a node in the GT_ARR_LENREF/GT_IND
+    // case (though never lives beyond a stmt)
+    Internal = 0x02,
+
+    // Indicates an interval that is defined by a constant node that may be reused and/or may be
+    // able to reuse a constant that's already in a register.
+    Constant = 0x04,
+};
+
 /*XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 XX                                                                           XX
@@ -843,7 +862,9 @@ public:
     };
 
 private:
-    Interval* newInterval(RegisterType regType);
+    Interval* newInterval(IntervalKind kind, RegisterType regType);
+
+    Interval* newInterval(unsigned lclNum, RegisterType regType);
 
     Interval* getIntervalForLocalVar(unsigned varNum)
     {
@@ -1205,44 +1226,6 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 class Interval : public Referenceable
 {
 public:
-    Interval(RegisterType registerType, regMaskTP registerPreferences)
-        : registerPreferences(registerPreferences)
-        , relatedInterval(nullptr)
-        , assignedReg(nullptr)
-        , registerType(registerType)
-        , isLocalVar(false)
-        , isSplit(false)
-        , isSpilled(false)
-        , isInternal(false)
-        , isStructField(false)
-        , isPromotedStruct(false)
-        , hasConflictingDefUse(false)
-        , hasNonCommutativeRMWDef(false)
-        , isSpecialPutArg(false)
-        , preferCalleeSave(false)
-        , isConstant(false)
-        , physReg(REG_COUNT)
-#ifdef DEBUG
-        , intervalIndex(0)
-#endif
-        , varNum(0)
-    {
-    }
-
-#ifdef DEBUG
-    // print out representation
-    void dump();
-    // concise representation for embedding
-    void tinyDump();
-    // extremely concise representation
-    void microDump();
-#endif // DEBUG
-
-    void setLocalNumber(unsigned localNum, LinearScan* l);
-
-    // Fixed registers for which this Interval has a preference
-    regMaskTP registerPreferences;
-
     // The relatedInterval is:
     //  - for any other interval, it is the interval to which this interval
     //    is currently preferenced (e.g. because they are related by a copy)
@@ -1253,51 +1236,156 @@ public:
     // register it currently occupies.
     RegRecord* assignedReg;
 
-    // DECIDE : put this in a union or do something w/ inheritance?
-    // this is an interval for a physical register, not a allocatable entity
-
+    // The register type of the interval.
     RegisterType registerType;
-    bool         isLocalVar : 1;
+
+    // Fixed registers for which this Interval has a preference
+    regMaskTP registerPreferences;
+
+    // The register to which it is currently assigned.
+    regNumber physReg;
+
+    // This is the "variable number": the index into the lvaTable array
+    __declspec(property(get = getVarNum)) unsigned varNum;
+
+    // Indicates the kind of this Interval
+    __declspec(property(get = getIntervalKind)) IntervalKind intervalKind;
+
+    // True if this interval represents a lclVar
+    __declspec(property(get = getIsLclVar)) bool isLocalVar;
+
+    // True if this interval represents an internal interval
+    __declspec(property(get = getIsInternal)) bool isInternal;
+
+    // True if this interval represents a constant
+    __declspec(property(get = getIsConstant)) bool isConstant;
+
     // Indicates whether this interval has been assigned to different registers
-    bool isSplit : 1;
+    __declspec(property(get = getIsSplit, put = setIsSplit)) bool isSplit;
+
     // Indicates whether this interval is ever spilled
-    bool isSpilled : 1;
-    // indicates an interval representing the internal requirements for
-    // generating code for a node (temp registers internal to the node)
-    // Note that this interval may live beyond a node in the GT_ARR_LENREF/GT_IND
-    // case (though never lives beyond a stmt)
-    bool isInternal : 1;
+    __declspec(property(get = getIsSpilled, put = setIsSpilled)) bool isSpilled;
+
     // true if this is a LocalVar for a struct field
-    bool isStructField : 1;
+    __declspec(property(get = getIsStructField, put = setIsStructField)) bool isStructField;
+
     // true iff this is a GT_LDOBJ for a fully promoted (PROMOTION_TYPE_INDEPENDENT) struct
-    bool isPromotedStruct : 1;
-    // true if this is an SDSU interval for which the def and use have conflicting register
-    // requirements
-    bool hasConflictingDefUse : 1;
+    __declspec(property(get = getIsPromotedStruct, put = setIsPromotedStruct)) bool isPromotedStruct;
+
+    // true if this is an SDSU interval for which the def and use have conflicting register requirements
+    __declspec(property(get = getHasConflictingDefUse, put = setHasConflictingDefUse)) bool hasConflictingDefUse;
+
     // true if this interval is defined by a non-commutative 2-operand instruction
-    bool hasNonCommutativeRMWDef : 1;
+    __declspec(property(get = getHasNonCommutativeRMWDef, put = setHasNonCommutativeRMWDef)) bool hasNonCommutativeRMWDef;
 
     // True if this interval is defined by a putArg, whose source is a non-last-use lclVar.
     // During allocation, this flag will be cleared if the source is not already in the required register.
     // Othewise, we will leave the register allocated to the lclVar, but mark the RegRecord as
     // isBusyUntilNextKill, so that it won't be reused if the lclVar goes dead before the call.
-    bool isSpecialPutArg : 1;
+    __declspec(property(get = getIsSpecialPutArg, put = setIsSpecialPutArg)) bool isSpecialPutArg;
 
     // True if this interval interferes with a call.
-    bool preferCalleeSave : 1;
+    __declspec(property(get = getPreferCalleeSave, put = setPreferCalleeSave)) bool preferCalleeSave;
 
-    // True if this interval is defined by a constant node that may be reused and/or may be
-    // able to reuse a constant that's already in a register.
-    bool isConstant : 1;
+private:
+    unsigned int m_varNum;
 
-    // The register to which it is currently assigned.
-    regNumber physReg;
+    union
+    {
+        unsigned m_flags;
 
+        struct
+        {
+            unsigned m_intervalKind : 3;  // Keep this in sync with `enum IntervalKind` and the constructor below.
+            unsigned m_isSplit : 1;
+            unsigned m_isSpilled : 1;
+            unsigned m_isStructField : 1;
+            unsigned m_isPromotedStruct : 1;
+            unsigned m_hasConflictingDefUse : 1;
+            unsigned m_hasNonCommutativeRMWDef : 1;
+            unsigned m_isSpecialPutArg : 1;
+            unsigned m_preferCalleeSave : 1;
+        };
+    };
+
+public:
 #ifdef DEBUG
     unsigned int intervalIndex;
 #endif // DEBUG
 
-    unsigned int varNum; // This is the "variable number": the index into the lvaTable array
+private:
+    Interval(IntervalKind kind, RegisterType registerType, regMaskTP registerPreferences, unsigned varNum)
+        : relatedInterval(nullptr)
+        , assignedReg(nullptr)
+        , registerType(registerType)
+        , registerPreferences(registerPreferences)
+        , physReg(REG_COUNT)
+        , m_varNum(varNum)
+        , m_flags(static_cast<unsigned>(kind))
+#ifdef DEBUG
+        , intervalIndex(0)
+#endif
+    {
+        assert(intervalKind == kind);
+        assert((varNum == 0) || (kind == IntervalKind::LclVar));
+    }
+
+public:
+    Interval(IntervalKind kind, RegisterType registerType, regMaskTP registerPreferences)
+        : Interval(kind, registerType, registerPreferences, 0)
+    {
+    }
+
+    Interval(unsigned varNum, RegisterType registerType, regMaskTP registerPreferences)
+        : Interval(IntervalKind::LclVar, registerType, registerPreferences, varNum)
+    {
+    }
+
+    inline unsigned getVarNum() const { return m_varNum; }
+
+    inline IntervalKind getIntervalKind() const { return static_cast<IntervalKind>(m_intervalKind); }
+
+    inline bool getIsLclVar() const { return intervalKind == IntervalKind::LclVar; }
+
+    inline bool getIsInternal() const { return intervalKind == IntervalKind::Internal; }
+
+    inline bool getIsConstant() const { return intervalKind == IntervalKind::Constant; }
+
+    inline bool getIsSplit() const { return m_isSplit; }
+    inline void setIsSplit(bool isSplit) { m_isSplit = isSplit; }
+
+    inline bool getIsSpilled() const { return m_isSpilled; }
+    inline void setIsSpilled(bool isSpilled) { m_isSpilled = isSpilled; }
+
+    inline bool getIsStructField() const { return m_isStructField; }
+    inline void setIsStructField(bool isStructField) { m_isStructField = isStructField; }
+
+    inline bool getIsPromotedStruct() const { return m_isPromotedStruct; }
+    inline void setIsPromotedStruct(bool isPromotedStruct) { m_isPromotedStruct = isPromotedStruct; }
+
+    inline bool getHasConflictingDefUse() const { return m_hasConflictingDefUse; }
+    inline void setHasConflictingDefUse(bool hasConflictingDefUse) { m_hasConflictingDefUse = hasConflictingDefUse; }
+
+    inline bool getHasNonCommutativeRMWDef() const { return m_hasNonCommutativeRMWDef; }
+    inline void setHasNonCommutativeRMWDef(bool hasNonCommutativeRMWDef) { m_hasNonCommutativeRMWDef = hasNonCommutativeRMWDef; }
+
+    inline bool getIsSpecialPutArg() const { return m_isSpecialPutArg; }
+    inline void setIsSpecialPutArg(bool isSpecialPutArg) { m_isSpecialPutArg = isSpecialPutArg; }
+
+    inline bool getPreferCalleeSave() const { return m_preferCalleeSave; }
+    inline void setPreferCalleeSave(bool preferCalleeSave) { m_preferCalleeSave = preferCalleeSave; }
+
+    inline bool getIsCheapCopy() const { return m_isCheapCopy; }
+    inline void setIsCheapCopy(bool isCheapCopy) { m_isCheapCopy = isCheapCopy; }
+
+#ifdef DEBUG
+    // print out representation
+    void dump();
+    // concise representation for embedding
+    void tinyDump();
+    // extremely concise representation
+    void microDump();
+#endif // DEBUG
 
     LclVarDsc* getLocalVar(Compiler* comp)
     {
@@ -1416,6 +1504,7 @@ public:
         }
         registerPreferences = newPreferences;
     }
+
 };
 
 class RefPosition

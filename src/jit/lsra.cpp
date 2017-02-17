@@ -444,9 +444,9 @@ regMaskTP LinearScan::stressLimitRegs(RefPosition* refPosition, regMaskTP mask)
 // TODO-Cleanup: Consider adding an overload that takes a varDsc, and can appropriately
 // set such fields as isStructField
 
-Interval* LinearScan::newInterval(RegisterType theRegisterType)
+Interval* LinearScan::newInterval(IntervalKind kind, RegisterType theRegisterType)
 {
-    intervals.emplace_back(theRegisterType, allRegs(theRegisterType));
+    intervals.emplace_back(kind, theRegisterType, allRegs(theRegisterType));
     Interval* newInt = &intervals.back();
 
 #ifdef DEBUG
@@ -454,6 +454,23 @@ Interval* LinearScan::newInterval(RegisterType theRegisterType)
 #endif // DEBUG
 
     DBEXEC(VERBOSE, newInt->dump());
+    return newInt;
+}
+
+Interval* LinearScan::newInterval(unsigned lclNum, RegisterType theRegisterType)
+{
+    intervals.emplace_back(lclNum, theRegisterType, allRegs(theRegisterType));
+
+    Interval* newInt = &intervals.back();
+ 
+#ifdef DEBUG
+    newInt->intervalIndex = static_cast<unsigned>(intervals.size() - 1);
+#endif // DEBUG
+
+    DBEXEC(VERBOSE, newInt->dump());
+
+    localVarIntervals[lclNum] = newInt;
+
     return newInt;
 }
 
@@ -1814,15 +1831,6 @@ void LinearScan::recordVarLocationsAtStartOfBB(BasicBlock* bb)
     JITDUMP("\n");
 }
 
-void Interval::setLocalNumber(unsigned lclNum, LinearScan* linScan)
-{
-    linScan->localVarIntervals[lclNum] = this;
-
-    assert(linScan->getIntervalForLocalVar(lclNum) == this);
-    this->isLocalVar = true;
-    this->varNum     = lclNum;
-}
-
 // identify the candidates which we are not going to enregister due to
 // being used in EH in a way we don't want to deal with
 // this logic cloned from fgInterBlockLocalVarLiveness
@@ -2018,9 +2026,8 @@ void LinearScan::identifyCandidates()
         // Assign intervals to all the variables - this makes it easier to map
         // them back
         var_types intervalType = (var_types)varDsc->lvType;
-        Interval* newInt       = newInterval(intervalType);
 
-        newInt->setLocalNumber(lclNum, this);
+        Interval* newInt = newInterval(lclNum, intervalType);
 
 #if DOUBLE_ALIGN
         if (checkDoubleAlign)
@@ -2942,8 +2949,7 @@ RefPosition* LinearScan::defineNewInternalTemp(GenTree*     tree,
                                                LsraLocation currentLoc,
                                                regMaskTP regMask DEBUGARG(unsigned minRegCandidateCount))
 {
-    Interval* current   = newInterval(regType);
-    current->isInternal = true;
+    Interval* current   = newInterval(IntervalKind::Internal, regType);
     return newRefPosition(current, currentLoc, RefTypeDef, tree, regMask, 0 DEBUG_ARG(minRegCandidateCount));
 }
 
@@ -3322,8 +3328,7 @@ LinearScan::buildUpperVectorSaveRefPositions(GenTree* tree, LsraLocation current
             {
                 unsigned  varNum         = compiler->lvaTrackedToVarNum[varIndex];
                 Interval* varInterval    = getIntervalForLocalVar(varNum);
-                Interval* tempInterval   = newInterval(LargeVectorType);
-                tempInterval->isInternal = true;
+                Interval* tempInterval   = newInterval(IntervalKind::Internal, LargeVectorType);
                 RefPosition* pos =
                     newRefPosition(tempInterval, currentLoc, RefTypeUpperVectorSaveDef, tree, RBM_FLT_CALLEE_SAVED);
                 // We are going to save the existing relatedInterval of varInterval on tempInterval, so that we can set
@@ -4053,15 +4058,15 @@ void LinearScan::buildRefPositionsForNode(GenTree*                  tree,
         if (interval == nullptr)
         {
             // Make a new interval
-            interval = newInterval(registerType);
+            const bool isConstant = !hasDelayFreeSrc && tree->OperIsConst();
+            assert(!isConstant || !tree->IsReuseRegVal());
+
+            const IntervalKind intervalKind = isConstant ? IntervalKind::Constant : IntervalKind::SDSU;
+            interval = newInterval(intervalKind, registerType);
+
             if (hasDelayFreeSrc)
             {
                 interval->hasNonCommutativeRMWDef = true;
-            }
-            else if (tree->OperIsConst())
-            {
-                assert(!tree->IsReuseRegVal());
-                interval->isConstant = true;
             }
 
             if ((currCandidates & useCandidates) != RBM_NONE)
