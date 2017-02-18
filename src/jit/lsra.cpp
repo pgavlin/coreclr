@@ -3683,9 +3683,9 @@ void LinearScan::buildRefPositionsForNode(GenTree*                  tree,
                     srcInterval->assignRelatedInterval(varDefInterval);
                 }
 
-                // If this is a def that starts an interval and the source is a local var, speculatively mark this
-                // interval as a copy (and a cheap copy) and record the source interval.
-                if ((varDefInterval->lastRefPosition == nullptr) && srcInterval->isLocalVar)
+                // If this is a def that starts an interval, speculatively mark this interval as a copy (and a cheap copy)
+                // and record the source interval.
+                if (varDefInterval->lastRefPosition == nullptr)
                 {
                     varDefInterval->isCopy = true;
                     varDefInterval->isCheapCopy = true;
