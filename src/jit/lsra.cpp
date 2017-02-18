@@ -7107,12 +7107,23 @@ void LinearScan::allocateRegisters()
                 currentInterval->isActive = true;
             }
 
-            if (currentInterval->isCheapCopy)
+#ifdef DEBUG
+            const bool coalesceCheapCopies = (JitConfig.JitCoalesceCheapCopies() != 0);
+#else
+            const bool coalesceCheapCopies = true;
+#endif
+
+            if (currentInterval->isCheapCopy && coalesceCheapCopies)
             {
                 // Because cheap copies must be block-local (i.e. all references to the interval occur in the same
                 // block), they can never affect the inter-block lifetime of their source interval and may be freely
                 // coalesced.
                 coalesceCheapCopy(currentInterval);
+            }
+            else
+            {
+                currentInterval->isCheapCopy = false;
+                currentInterval->relatedInterval = nullptr;
             }
         }
     }
