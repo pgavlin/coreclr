@@ -1248,6 +1248,9 @@ public:
     // This is the "variable number": the index into the lvaTable array
     __declspec(property(get = getVarNum)) unsigned varNum;
 
+    // Indicates the location of the most recent def seen during buildIntervals().
+    __declspec(property(get = getLastDefLocation)) LsraLocation lastDefLocation;
+
     // Indicates the kind of this Interval
     __declspec(property(get = getIntervalKind)) IntervalKind intervalKind;
 
@@ -1287,8 +1290,18 @@ public:
     // True if this interval interferes with a call.
     __declspec(property(get = getPreferCalleeSave, put = setPreferCalleeSave)) bool preferCalleeSave;
 
+    // True iff this interval contains a single def.
+    __declspec(property(get = getIsSingleDef)) bool isSingleDef;
+
+    // True iff this interval is a singly-defined lclVar interval where the only def is a copy from another interval.
+    __declspec(property(get = getIsCopy, put = setIsCopy)) bool isCopy;
+
+    // True iff this interval is a copy whose last ref position ends before the last ref position in the source interval.
+    __declspec(property(get = getIsCheapCopy, put = setIsCheapCopy)) bool isCheapCopy;
+
 private:
     unsigned int m_varNum;
+    LsraLocation m_lastDef;
 
     union
     {
@@ -1305,6 +1318,10 @@ private:
             unsigned m_hasNonCommutativeRMWDef : 1;
             unsigned m_isSpecialPutArg : 1;
             unsigned m_preferCalleeSave : 1;
+            unsigned m_hasAnyDef : 1;
+            unsigned m_isMultiDef : 1;
+            unsigned m_isCopy : 1;
+            unsigned m_isCheapCopy : 1;
         };
     };
 
@@ -1343,6 +1360,8 @@ public:
 
     inline unsigned getVarNum() const { return m_varNum; }
 
+    inline LsraLocation getLastDefLocation() const { return m_lastDef; }
+
     inline IntervalKind getIntervalKind() const { return static_cast<IntervalKind>(m_intervalKind); }
 
     inline bool getIsLclVar() const { return intervalKind == IntervalKind::LclVar; }
@@ -1374,6 +1393,11 @@ public:
 
     inline bool getPreferCalleeSave() const { return m_preferCalleeSave; }
     inline void setPreferCalleeSave(bool preferCalleeSave) { m_preferCalleeSave = preferCalleeSave; }
+
+    inline bool getIsSingleDef() const { return !m_isMultiDef; }
+
+    inline bool getIsCopy() const { return m_isCopy; }
+    inline void setIsCopy(bool isCopy) { m_isCopy = isCopy; }
 
     inline bool getIsCheapCopy() const { return m_isCheapCopy; }
     inline void setIsCheapCopy(bool isCheapCopy) { m_isCheapCopy = isCheapCopy; }
@@ -1505,6 +1529,20 @@ public:
         registerPreferences = newPreferences;
     }
 
+    void recordDefAt(LsraLocation loc)
+    {
+        if (!m_hasAnyDef)
+        {
+            m_hasAnyDef = true;
+            assert(!m_isMultiDef);
+        }
+        else
+        {
+            m_isMultiDef = true;
+        }
+
+        m_lastDef = loc;
+    }
 };
 
 class RefPosition

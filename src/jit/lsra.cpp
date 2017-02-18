@@ -733,12 +733,18 @@ void LinearScan::associateRefPosWithInterval(RefPosition* rp)
 
         if (rp->isIntervalRef())
         {
-            Interval* theInterval = rp->getInterval();
+            Interval* const theInterval = rp->getInterval();
 
             applyCalleeSaveHeuristics(rp);
 
             if (theInterval->isLocalVar)
             {
+                // Update the state necessary to decide whether or not this interval is singly-defined.
+                if (RefTypeIsDef(rp->refType))
+                {
+                    theInterval->recordDefAt(rp->nodeLocation);
+                }
+
                 if (RefTypeIsUse(rp->refType))
                 {
                     RefPosition* const prevRP = theInterval->recentRefPosition;
@@ -756,6 +762,7 @@ void LinearScan::associateRefPosWithInterval(RefPosition* rp)
                 // Ensure that we have consistent def/use on SDSU temps.
                 // However, in the case of a non-commutative rmw def, we must avoid over-constraining
                 // the def, so don't propagate a single-register restriction from the consumer to the producer
+
                 RefPosition* prevRefPosition = theInterval->recentRefPosition;
                 assert(prevRefPosition != nullptr && theInterval->firstRefPosition == prevRefPosition);
                 regMaskTP prevAssignment = prevRefPosition->registerAssignment;
@@ -3676,6 +3683,15 @@ void LinearScan::buildRefPositionsForNode(GenTree*                  tree,
                     srcInterval->assignRelatedInterval(varDefInterval);
                 }
 
+                // If this is a def that starts an interval and the source is a local var, speculatively mark this
+                // interval as a copy (and a cheap copy) and record the source interval.
+                if ((varDefInterval->lastRefPosition == nullptr) && srcInterval->isLocalVar)
+                {
+                    varDefInterval->isCopy = true;
+                    varDefInterval->isCheapCopy = true;
+                    varDefInterval->assignRelatedInterval(srcInterval);
+                }
+
                 // We can have a case where the source of the store has a different register type,
                 // e.g. when the store is of a return value temp, and op1 is a Vector2
                 // (TYP_SIMD8).  We will need to set the
@@ -3986,6 +4002,15 @@ void LinearScan::buildRefPositionsForNode(GenTree*                  tree,
         {
             pos->setAllocateIfProfitable(1);
         }
+
+        // If the interval for the use was speculatively marked as a cheap copy, check to see if the "cheap copy"
+        // condition still holds (i.e. check to ensure that the source interval has not been redefined during the
+        // copy interval's lifetime).
+        if (i->isCheapCopy && i->relatedInterval->lastDefLocation > i->lastDefLocation)
+        {
+            i->isCheapCopy = false;
+            i->relatedInterval = nullptr;
+        }
     }
     JITDUMP("\n");
 
@@ -4106,6 +4131,15 @@ void LinearScan::buildRefPositionsForNode(GenTree*                  tree,
         DBEXEC(VERBOSE, pos->dump());
         interval->updateRegisterPreferences(currCandidates);
         interval->updateRegisterPreferences(useCandidates);
+
+        // If the interval associated with our defs was marked as a copy, ensure that it is still
+        // a single-def interval. If it is not, mark it as not a copy.
+        if (interval->isCopy && !interval->isSingleDef)
+        {
+            varDefInterval->isCopy = false;
+            varDefInterval->isCheapCopy = false;
+            varDefInterval->relatedInterval = nullptr;
+        }
     }
 
 #if FEATURE_PARTIAL_SIMD_CALLEE_SAVE
@@ -6886,6 +6920,14 @@ void LinearScan::allocateRegisters()
             if (varDsc->lvIsRegArg && currentInterval->firstRefPosition != nullptr)
             {
                 currentInterval->isActive = true;
+            }
+
+            // Ensure the last "cheap copy condition": make sure the lifetime of the interval fits entirely in the
+            // lifetime of its source.
+            if (currentInterval->isCheapCopy && currentInterval->relatedInterval->lastRefPosition->nodeLocation < currentInterval->lastRefPosition->nodeLocation)
+            {
+                currentInterval->isCheapCopy = false;
+                currentInterval->relatedInterval = nullptr;
             }
         }
     }
@@ -10289,6 +10331,18 @@ void Interval::dump()
     if (isConstant)
     {
         printf(" (constant)");
+    }
+    if (isSingleDef)
+    {
+        printf(" (single-def)");
+    }
+    if (isCopy)
+    {
+        printf(" (copy)");
+    }
+    if (isCheapCopy)
+    {
+        printf(" (cheap copy)");
     }
 
     printf(" RefPositions {");
