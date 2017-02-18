@@ -313,6 +313,7 @@ public:
 #endif
 #ifndef LEGACY_BACKEND
     unsigned char lvLRACandidate : 1; // Tracked for linear scan register allocation purposes
+    unsigned char lvCoalesced : 1;    // True if this lclVar has been coalesced into another
 #endif                                // !LEGACY_BACKEND
 
 #ifdef FEATURE_SIMD
@@ -340,6 +341,8 @@ public:
     unsigned char lvFieldCnt; //  Number of fields in the promoted VarDsc.
     unsigned char lvFldOffset;
     unsigned char lvFldOrdinal;
+
+    unsigned lvCoalescedLcl; // The index of the local var that now represents this local var.
 
 #if FEATURE_MULTIREG_ARGS
     regNumber lvRegNumForSlot(unsigned slotNum)

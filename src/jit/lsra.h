@@ -69,6 +69,7 @@ struct LsraBlockInfo
 {
     // bbNum of the predecessor to use for the register location of live-in variables.
     // 0 for fgFirstBB.
+    BasicBlock*          block;
     BasicBlock::weight_t weight;
     unsigned int         predBBNum;
     bool                 hasCriticalInEdge;
@@ -795,6 +796,8 @@ private:
 
     // Given some tree node add refpositions for all the registers this node kills
     bool buildKillPositionsForNode(GenTree* tree, LsraLocation currentLoc);
+
+    void coalesceCheapCopy(Interval* copy);
 
     regMaskTP allRegs(RegisterType rt);
     regMaskTP allRegs(GenTree* tree);
@@ -1567,6 +1570,7 @@ public:
         , isLocalDefUse(false)
         , delayRegFree(false)
         , outOfOrder(false)
+        , isOrphaned(false)
 #ifdef DEBUG
         , minRegCandidateCount(1)
         , rpNum(0)
@@ -1735,6 +1739,10 @@ public:
     // register currently assigned to the Interval.  This happens when we use the assigned
     // register from a predecessor that is not the most recently allocated BasicBlock.
     bool outOfOrder : 1;
+
+    // isOrphaned is marked on a RefPosition that no longer belongs to any Interval. These RefPositions
+    // do not need to be allocated.
+    bool isOrphaned : 1;
 
     LsraLocation getRefEndLocation()
     {

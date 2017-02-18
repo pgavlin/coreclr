@@ -382,6 +382,16 @@ void CodeGen::genCodeForBBlist()
             }
 #endif // DEBUG
 
+            if (node->OperIsLocal())
+            {
+                GenTreeLclVarCommon* lclVarNode = node->AsLclVarCommon();
+                LclVarDsc* const varDsc = &compiler->lvaTable[lclVarNode->gtLclNum];
+                if (varDsc->lvCoalesced)
+                {
+                    lclVarNode->SetLclNum(varDsc->lvCoalescedLcl);
+                }
+            }
+
             genCodeForTreeNode(node);
             if (node->gtHasReg() && node->gtLsraInfo.isLocalDefUse)
             {

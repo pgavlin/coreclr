@@ -745,6 +745,17 @@ void LinearScan::associateRefPosWithInterval(RefPosition* rp)
                     theInterval->recordDefAt(rp->nodeLocation);
                 }
 
+                // If this interval was speculated as a cheap copy, make sure the "block local" condition
+                // still holds. 
+                if (theInterval->isCheapCopy)
+                {
+                    RefPosition* prevRefPosition = theInterval->recentRefPosition;
+                    if (prevRefPosition != nullptr && prevRefPosition->bbNum != rp->bbNum)
+                    {
+                        theInterval->isCheapCopy = false;
+                    }
+                }
+
                 if (RefTypeIsUse(rp->refType))
                 {
                     RefPosition* const prevRP = theInterval->recentRefPosition;
@@ -1358,6 +1369,8 @@ void LinearScan::setBlockSequence()
         markBlockVisited(block);
         bbSeqCount++;
         nextBlock = nullptr;
+
+        blockInfo[block->bbNum].block = block;
 
         // Initialize the blockInfo.
         // predBBNum will be set later.  0 is never used as a bbNum.
@@ -5263,6 +5276,12 @@ regNumber LinearScan::tryAllocateFreeReg(Interval* currentInterval, RefPosition*
     Interval* relatedInterval = currentInterval->relatedInterval;
     if (relatedInterval != nullptr)
     {
+        if (relatedInterval->isCheapCopy)
+        {
+            relatedInterval = relatedInterval->relatedInterval;
+            currentInterval->relatedInterval = relatedInterval;
+        }
+
         RefPosition* nextRelatedRefPosition = relatedInterval->getNextRefPosition();
         if (nextRelatedRefPosition != nullptr)
         {
@@ -6583,11 +6602,12 @@ void LinearScan::processBlockStartLocations(BasicBlock* currentBlock, bool alloc
         {
             continue;
         }
-        regNumber    targetReg;
+
         Interval*    interval        = getIntervalForLocalVar(varNum);
         RefPosition* nextRefPosition = interval->getNextRefPosition();
         assert(nextRefPosition != nullptr);
 
+        regNumber targetReg;
         if (allocationPass)
         {
             targetReg = predVarToRegMap[varIndex];
@@ -6804,7 +6824,7 @@ void LinearScan::processBlockEndLocations(BasicBlock* currentBlock)
             outVarToRegMap[varIndex] = REG_STK;
         }
     }
-    INDEBUG(dumpLsraAllocationEvent(LSRA_EVENT_END_BB));
+    INDEBUG(dumpLsraAllocationEvent(LSRA_EVENT_END_BB, nullptr, REG_NA, currentBlock));
 }
 
 #ifdef DEBUG
@@ -6899,6 +6919,171 @@ void LinearScan::freeRegisters(regMaskTP regsToFree)
     }
 }
 
+void LinearScan::coalesceCheapCopy(Interval* copy)
+{
+    assert(copy->isCheapCopy);
+
+#ifdef DEBUG
+    if (VERBOSE)
+    {
+        JITDUMP("Coalescing cheap copy interval: ");
+        copy->dump();
+    }
+#endif
+
+    // Skip through other cheap copies
+    Interval* source = copy->relatedInterval;
+    while (source->isCheapCopy && compiler->lvaTable[source->varNum].lvCoalesced)
+    {
+        source = source->relatedInterval;
+    }
+    copy->relatedInterval = source;
+
+#ifdef DEBUG
+    if (VERBOSE)
+    {
+        JITDUMP("Source interval: ");
+        source->dump();
+    }
+#endif
+
+    // Adjust lclVar ref counts
+    LclVarDsc* const copyVar = &compiler->lvaTable[copy->varNum];
+    LclVarDsc* const sourceVar = &compiler->lvaTable[source->varNum];
+
+    sourceVar->lvRefCnt += copyVar->lvRefCnt;
+    sourceVar->lvRefCntWtd += copyVar->lvRefCnt;
+    copyVar->lvRefCnt = copyVar->lvRefCntWtd = 0;
+    copyVar->lvCoalesced = true;
+    copyVar->lvCoalescedLcl = source->varNum;
+
+    RefPosition* copyRefPos = copy->firstRefPosition;
+    RefPosition* sourceRefPos = source->firstRefPosition;
+
+    GenTree* const copyDef = copyRefPos->treeNode;
+    assert(copyDef->OperIsLocalStore());
+    GenTree* const sourceUse = copyDef->AsLclVarCommon()->gtOp1;
+    assert(sourceUse->AsLclVarCommon()->gtLclNum == source->varNum);
+
+    // Find the starting point for the merge, as we need to do a little extra work there.
+    RefPosition* prevRefPos = nullptr;
+    RefPosition* sourceUseRefPos = nullptr;
+    while (sourceRefPos->nextRefPosition != nullptr && sourceRefPos->nextRefPosition->nodeLocation < copyRefPos->nodeLocation)
+    {
+        if (sourceUseRefPos == nullptr)
+        {
+            if (sourceRefPos->treeNode == sourceUse)
+            {
+                assert(sourceUseRefPos == nullptr);
+                sourceUseRefPos = sourceRefPos;
+            }
+            else
+            {
+                prevRefPos = sourceRefPos;
+            }
+        }
+
+        sourceRefPos = sourceRefPos->nextRefPosition;
+    }
+    assert(prevRefPos != nullptr);
+
+    if (sourceUseRefPos == nullptr)
+    {
+        assert(sourceRefPos->treeNode == sourceUse);
+        sourceUseRefPos = sourceRefPos;
+    }
+
+    // `sourceRefPos` is now the ref position in `source` immediately preceding the first ref position in `copy`. This
+    // had better correspond to the use of the lclVar that feeds the corresponding def. Both the use of `source`
+    // and the def of `copy` will be removed.
+
+    LIR::Range& blockRange = LIR::AsRange(blockInfo[copyRefPos->bbNum].block);
+    blockRange.Remove(copyDef);
+    blockRange.Remove(sourceUse);
+
+    // Move to the second ref pos in the copy.
+    copyRefPos->isOrphaned = true;
+    copyRefPos = copyRefPos->nextRefPosition;
+
+    // Perform the coalescing rewrite.
+    bool sawLastUse = false;
+    RefPosition* lastCopyRefPos = nullptr;
+    while (copyRefPos != nullptr && sourceRefPos != nullptr)
+    {
+        const bool nextIsLater = sourceRefPos->nextRefPosition == nullptr ||
+            sourceRefPos->nextRefPosition->nodeLocation > copyRefPos->nodeLocation ||
+            (sourceRefPos->nextRefPosition->nodeLocation == copyRefPos->nodeLocation && sourceRefPos->nextRefPosition->rpNum > copyRefPos->rpNum);
+
+        if (sourceRefPos->nextRefPosition == nullptr || sourceRefPos->nextRefPosition->nodeLocation >= copyRefPos->nodeLocation)
+        {
+            copyRefPos->referent = source;
+            assert(!copyRefPos->lastUse || copyRefPos->nextRefPosition == nullptr);
+
+            if (sourceRefPos->lastUse && sourceRefPos != prevRefPos)
+            {
+                sawLastUse = true;
+                sourceRefPos->lastUse = false;
+                sourceRefPos->treeNode->gtFlags &= ~GTF_VAR_DEATH;
+            }
+
+            assert(copyRefPos->treeNode->OperIsLocal());
+            copyRefPos->treeNode->AsLclVarCommon()->SetLclNum(source->varNum);
+
+            RefPosition* nextCopyRefPos = copyRefPos->nextRefPosition;
+            copyRefPos->nextRefPosition = sourceRefPos->nextRefPosition;
+            sourceRefPos->nextRefPosition = copyRefPos;
+
+            lastCopyRefPos = copyRefPos;
+            copyRefPos = nextCopyRefPos;
+        }
+
+        sourceRefPos = sourceRefPos->nextRefPosition;
+    }
+
+    if (copyRefPos != nullptr)
+    {
+        lastCopyRefPos->nextRefPosition = copyRefPos;
+
+        do
+        {
+            copyRefPos->referent = source;
+            assert(!copyRefPos->lastUse || copyRefPos->nextRefPosition == nullptr);
+
+            lastCopyRefPos = copyRefPos;
+            copyRefPos = copyRefPos->nextRefPosition;
+        } while (copyRefPos != nullptr);
+
+        source->lastRefPosition = lastCopyRefPos;
+    }
+
+    assert(lastCopyRefPos != nullptr);
+    if (sawLastUse)
+    {
+        lastCopyRefPos->lastUse = true;
+        lastCopyRefPos->treeNode->gtFlags |= GTF_VAR_DEATH;
+    }
+    else
+    {
+        lastCopyRefPos->lastUse = false;
+        lastCopyRefPos->treeNode->gtFlags &= ~GTF_VAR_DEATH;
+    }
+
+    // Remove `sourceUseRefPos` from `source`.
+    prevRefPos->nextRefPosition = sourceUseRefPos->nextRefPosition;
+    sourceUseRefPos->isOrphaned = true;
+
+    copy->firstRefPosition = copy->lastRefPosition = nullptr;
+
+#ifdef DEBUG
+    if (VERBOSE)
+    {
+        JITDUMP("Coalesced interval: ");
+        source->dump();
+        JITDUMP("\n");
+    }
+#endif
+}
+
 // Actual register allocation, accomplished by iterating over all of the previously
 // constructed Intervals
 // Loosely based on raAssignVars()
@@ -6922,12 +7107,12 @@ void LinearScan::allocateRegisters()
                 currentInterval->isActive = true;
             }
 
-            // Ensure the last "cheap copy condition": make sure the lifetime of the interval fits entirely in the
-            // lifetime of its source.
-            if (currentInterval->isCheapCopy && currentInterval->relatedInterval->lastRefPosition->nodeLocation < currentInterval->lastRefPosition->nodeLocation)
+            if (currentInterval->isCheapCopy)
             {
-                currentInterval->isCheapCopy = false;
-                currentInterval->relatedInterval = nullptr;
+                // Because cheap copies must be block-local (i.e. all references to the interval occur in the same
+                // block), they can never affect the inter-block lifetime of their source interval and may be freely
+                // coalesced.
+                coalesceCheapCopy(currentInterval);
             }
         }
     }
@@ -6972,6 +7157,10 @@ void LinearScan::allocateRegisters()
     for (auto& refPosition : refPositions)
     {
         RefPosition* currentRefPosition = &refPosition;
+        if (currentRefPosition->isOrphaned)
+        {
+            continue;
+        }
 
 #ifdef DEBUG
         // Set the activeRefPosition to null until we're done with any boundary handling.
@@ -7179,6 +7368,12 @@ void LinearScan::allocateRegisters()
             else if (refType == RefTypeUpperVectorSaveDef || refType == RefTypeUpperVectorSaveUse)
             {
                 Interval* lclVarInterval = currentInterval->relatedInterval;
+                if (lclVarInterval->isCheapCopy)
+                {
+                    lclVarInterval = lclVarInterval->relatedInterval;
+                    currentInterval->relatedInterval = lclVarInterval;
+                }
+
                 if (lclVarInterval->physReg == REG_NA)
                 {
                     allocate = false;
@@ -7205,6 +7400,12 @@ void LinearScan::allocateRegisters()
             {
                 assert(!currentInterval->isLocalVar);
                 Interval* srcInterval = currentInterval->relatedInterval;
+                if (srcInterval->isCheapCopy)
+                {
+                    srcInterval = srcInterval->relatedInterval;
+                    currentInterval->relatedInterval = srcInterval;
+                }
+
                 assert(srcInterval->isLocalVar);
                 if (refType == RefTypeDef)
                 {
@@ -7269,8 +7470,8 @@ void LinearScan::allocateRegisters()
                 // was available for use so we kept the association.
                 if (RefTypeIsUse(refType))
                 {
-                    assert(inVarToRegMaps[curBBNum][currentInterval->getVarIndex(compiler)] == REG_STK &&
-                           previousRefPosition->nodeLocation <= curBBStartLocation);
+                    assert(inVarToRegMaps[curBBNum][currentInterval->getVarIndex(compiler)] == REG_STK);
+                    assert(previousRefPosition->nodeLocation <= curBBStartLocation);
                     isInRegister = false;
                 }
                 else
@@ -8117,6 +8318,12 @@ void LinearScan::insertCopyOrReload(BasicBlock* block, GenTreePtr tree, unsigned
 void LinearScan::insertUpperVectorSaveAndReload(GenTreePtr tree, RefPosition* refPosition, BasicBlock* block)
 {
     Interval* lclVarInterval = refPosition->getInterval()->relatedInterval;
+    if (lclVarInterval->isCheapCopy)
+    {
+        lclVarInterval = lclVarInterval->relatedInterval;
+        refPosition->getInterval()->relatedInterval = lclVarInterval;
+    }
+
     assert(lclVarInterval->isLocalVar == true);
     LclVarDsc* varDsc = compiler->lvaTable + lclVarInterval->varNum;
     assert(varDsc->lvType == LargeVectorType);
@@ -8479,6 +8686,11 @@ void LinearScan::resolveRegisters()
                currentRefPosition->refType != RefTypeDummyDef;
              ++currentRefPosition)
         {
+            if (currentRefPosition->isOrphaned)
+            {
+                continue;
+            }
+
             currentLocation = currentRefPosition->nodeLocation;
             JITDUMP("current : ");
             DBEXEC(VERBOSE, currentRefPosition->dump());
@@ -11760,6 +11972,12 @@ void LinearScan::verifyFinalAllocation()
         Interval*    interval           = nullptr;
         RegRecord*   regRecord          = nullptr;
         regNumber    regNum             = REG_NA;
+
+        if (currentRefPosition->isOrphaned)
+        {
+            continue;
+        }
+
         if (currentRefPosition->refType == RefTypeBB)
         {
             regsToFree |= delayRegsToFree;
