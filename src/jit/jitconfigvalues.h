@@ -242,6 +242,8 @@ CONFIG_INTEGER(JitDoValueNumber, W("JitDoValueNumber"), 1) // Perform value numb
 
 CONFIG_METHODSET(JitOptRepeat, W("JitOptRepeat"))            // Runs optimizer multiple times on the method
 CONFIG_INTEGER(JitOptRepeatCount, W("JitOptRepeatCount"), 2) // Number of times to repeat opts when repeating
+
+CONFIG_INTEGER(JitDoTrivialCopyProp, W("JitDoTrivialCopyProp"), 1); // Enables trivial copy propagation during LIR liveness.
 #endif                                                       // defined(OPT_CONFIG)
 
 CONFIG_INTEGER(JitRegisterFP, W("JitRegisterFP"), 3)           // Control FP enregistration

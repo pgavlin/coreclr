@@ -313,6 +313,13 @@ public:
     unsigned char lvLRACandidate : 1; // Tracked for linear scan register allocation purposes
 #endif                                // !LEGACY_BACKEND
 
+    // Liveness-related bits
+    unsigned char lvHasAnyDef : 1;   // True if any def of this local has been observed
+    unsigned char lvHasBlockNum : 1; // True if this local has been observed in some block
+    unsigned char lvBlockLocal : 1;  // True if this local is referenced in exactly one block
+    unsigned char lvCopy : 1;        // True if this local is a singly-defined copy from another local
+    unsigned char lvTrivialCopy : 1; // True if this local is a singly-defined, block-local copy from a local that is not redefined before this local dies.
+
 #ifdef FEATURE_SIMD
     // Note that both SIMD vector args and locals are marked as lvSIMDType = true, but the
     // type of an arg node is TYP_BYREF and a local node is TYP_SIMD*.
@@ -332,6 +339,12 @@ public:
     unsigned char lvFieldCnt; //  Number of fields in the promoted VarDsc.
     unsigned char lvFldOffset;
     unsigned char lvFldOrdinal;
+
+    // Liveness-related fields
+    unsigned lvBlockNum;     // The block in which this lclVar was first observed
+    unsigned lvFirstDef;     // The point at which this lclVar was first defined
+    unsigned lvLastDef;      // The point at which this lclVar was last defined
+    unsigned lvSourceLclNum; // The lclVar from which this lclVar was copied
 
 #if FEATURE_MULTIREG_ARGS
     regNumber lvRegNumForSlot(unsigned slotNum)
@@ -535,6 +548,26 @@ public:
         assert(_lvOtherArgReg == reg);
     }
 #endif // FEATURE_MULTIREG_ARGS
+
+    inline bool lvIsBlockLocal() const
+    {
+        return lvHasBlockNum && lvBlockLocal;
+    }
+
+    inline bool lvIsSingleDef() const
+    {
+        return lvHasAnyDef && lvSingleDef;
+    }
+
+    inline bool lvIsCopy() const
+    {
+        return lvHasAnyDef && lvCopy;
+    }
+
+    inline bool lvIsTrivialCopy() const
+    {
+        return lvHasAnyDef && lvTrivialCopy;
+    }
 
 #ifdef FEATURE_SIMD
     // Is this is a SIMD struct?
@@ -4705,7 +4738,12 @@ private:
     MemoryKindSet fgCurMemoryDef;   // True iff the current basic block modifies memory.
     MemoryKindSet fgCurMemoryHavoc; // True if  the current basic block is known to set memory to a "havoc" value.
 
+    unsigned fgWhereInBlock; // Location of current use or def in the current basic block. Increases monotonically with each use and def in the block.
+
     bool byrefStatesMatchGcHeapStates; // True iff GcHeap and ByrefExposed memory have all the same def points.
+
+    void ObserveLocalInBlock(LclVarDsc* const varDsc, unsigned bbNum, bool isDef, bool isCopy, unsigned sourceLclNum);
+    void ResetLocalState(LclVarDsc* const varDsc);
 
     void fgMarkUseDef(GenTreeLclVarCommon* tree);
 

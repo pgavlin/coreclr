@@ -15,6 +15,82 @@
 #include "decomposelongs.h"
 #endif
 
+void Compiler::ObserveLocalInBlock(LclVarDsc* const varDsc, unsigned bbNum, bool isDef, bool isCopy, unsigned sourceLclNum)
+{
+    if (!varDsc->lvHasBlockNum)
+    {
+        varDsc->lvBlockNum    = bbNum;
+        varDsc->lvHasBlockNum = true;
+        varDsc->lvBlockLocal  = isDef;
+    }
+    else if (bbNum != varDsc->lvBlockNum)
+    {
+        varDsc->lvBlockNum = bbNum;
+
+        if (varDsc->lvBlockLocal)
+        {
+            varDsc->lvBlockLocal  = false;
+            varDsc->lvTrivialCopy = false;
+        }
+    }
+
+    if (isDef)
+    {
+        varDsc->lvLastDef = fgWhereInBlock;
+
+        if (!varDsc->lvHasAnyDef)
+        {
+            varDsc->lvFirstDef  = fgWhereInBlock;
+            varDsc->lvHasAnyDef = true;
+            varDsc->lvSingleDef = true;
+
+            varDsc->lvCopy         = isCopy;
+            varDsc->lvSourceLclNum = sourceLclNum;
+
+            varDsc->lvTrivialCopy = isCopy && varDsc->lvBlockLocal;
+        }
+        else if (varDsc->lvSingleDef)
+        {
+            varDsc->lvSingleDef   = false;
+            varDsc->lvCopy        = false;
+            varDsc->lvTrivialCopy = false;
+        }
+    }
+
+    if (varDsc->lvIsTrivialCopy())
+    {
+        const LclVarDsc* const sourceVarDsc = &lvaTable[varDsc->lvSourceLclNum];
+        if ((sourceVarDsc->lvBlockNum == bbNum) && (sourceVarDsc->lvLastDef > sourceVarDsc->lvFirstDef))
+        {
+            varDsc->lvTrivialCopy = false;
+        }
+    }
+
+    if (varTypeIsStruct(varDsc) && (lvaGetPromotionType(varDsc) != PROMOTION_TYPE_NONE))
+    {
+        for (unsigned i = varDsc->lvFieldLclStart; i < varDsc->lvFieldLclStart + varDsc->lvFieldCnt; ++i)
+        {
+            ObserveLocalInBlock(&lvaTable[i], bbNum, isDef, false, 0);
+        }
+    }
+
+    fgWhereInBlock++;
+}
+
+void Compiler::ResetLocalState(LclVarDsc* const varDsc)
+{
+    varDsc->lvHasBlockNum = false;
+    varDsc->lvHasAnyDef   = false;
+
+    if (varTypeIsStruct(varDsc) && (lvaGetPromotionType(varDsc)  != PROMOTION_TYPE_NONE))
+    {
+        for (unsigned i = varDsc->lvFieldLclStart; i < varDsc->lvFieldLclStart + varDsc->lvFieldCnt; ++i)
+        {
+            ResetLocalState(&lvaTable[i]);
+        }
+    }
+}
+
 /*****************************************************************************
  *
  *  Helper for Compiler::fgPerBlockLocalVarLiveness().
@@ -39,6 +115,23 @@ void Compiler::fgMarkUseDef(GenTreeLclVarCommon* tree)
 
     const bool isDef = (tree->gtFlags & GTF_VAR_DEF) != 0;
     const bool isUse = !isDef || ((tree->gtFlags & (GTF_VAR_USEASG | GTF_VAR_USEDEF)) != 0);
+
+    if (compCurBB->IsLIR() && (JitConfig.JitDoTrivialCopyProp() != 0))
+    {
+        bool isCopy = false;
+        unsigned sourceLclNum = 0;
+        if (isDef && tree->OperIsLocalStore())
+        {
+            GenTreeLclVarCommon* const store = tree->AsLclVarCommon();
+            if (store->gtOp1->OperIsLocal())
+            {
+                isCopy = true;
+                sourceLclNum = store->gtOp1->AsLclVarCommon()->gtLclNum;
+            }
+        }
+
+        ObserveLocalInBlock(varDsc, compCurBB->bbNum, isDef, isCopy, sourceLclNum);
+    }
 
     if (varDsc->lvTracked)
     {
@@ -216,6 +309,8 @@ void Compiler::fgLocalVarLivenessInit()
     for (unsigned lclNum = 0; lclNum < lvaCount; ++lclNum)
     {
         lvaTable[lclNum].lvMustInit = false;
+
+        ResetLocalState(&lvaTable[lclNum]);
     }
 }
 
@@ -492,6 +587,8 @@ void Compiler::fgPerBlockLocalVarLiveness()
         fgCurMemoryUse   = emptyMemoryKindSet;
         fgCurMemoryDef   = emptyMemoryKindSet;
         fgCurMemoryHavoc = emptyMemoryKindSet;
+
+        fgWhereInBlock = 0;
 
         compCurBB = block;
         if (!block->IsLIR())
@@ -1859,6 +1956,7 @@ VARSET_VALRET_TP Compiler::fgComputeLife(VARSET_VALARG_TP lifeArg,
                 bool doAgain = false;
                 if (fgRemoveDeadStore(&tree, varDsc, life, &doAgain, pStmtInfoDirty DEBUGARG(treeModf)))
                 {
+                    ResetLocalState(varDsc);
                     assert(!doAgain);
                     break;
                 }
@@ -1902,13 +2000,69 @@ VARSET_VALRET_TP Compiler::fgComputeLifeLIR(VARSET_VALARG_TP lifeArg, BasicBlock
         }
         else if (node->OperIsNonPhiLocal() || node->OperIsLocalAddr())
         {
-            bool isDeadStore = fgComputeLifeLocal(life, keepAliveVars, node, node);
+            GenTreeLclVarCommon* const lclVarNode = node->AsLclVarCommon();
+
+            LclVarDsc* const varDsc = &lvaTable[lclVarNode->gtLclNum];
+            if (varDsc->lvIsTrivialCopy() && !varDsc->lvAddrExposed && !varDsc->lvDoNotEnregister)
+            {
+                assert(!node->OperIsLocalAddr());
+
+                LclVarDsc* sourceVarDsc = &lvaTable[varDsc->lvSourceLclNum];
+                while (sourceVarDsc->lvIsTrivialCopy())
+                {
+                    varDsc->lvSourceLclNum = sourceVarDsc->lvSourceLclNum;
+                    sourceVarDsc           = &lvaTable[varDsc->lvSourceLclNum];
+                }
+
+                if (node->OperIsLocalStore())
+                {
+                    JITDUMP("propagated trivial copy of V%02u to V%02u\n", varDsc->lvSourceLclNum, lclVarNode->gtLclNum);
+
+                    // This is the def. Remove it and the corresponding use of the source var and adjust
+                    // the lclVar ref counts.
+                    GenTree* const operand = lclVarNode->gtOp1;
+                    assert(operand->OperIsLocal());
+
+                    if (operand == next)
+                    {
+                        next = operand->gtPrev;
+                    }
+
+                    if ((node->gtFlags & GTF_LATE_ARG) != 0)
+                    {
+                        node->gtBashToNOP();
+                    }
+                    else
+                    {
+                        blockRange.Remove(node);
+                    }
+
+                    blockRange.Remove(operand);
+                    fgStmtRemoved = true;
+
+                    sourceVarDsc->lvRefCnt += varDsc->lvRefCnt;
+                    sourceVarDsc->lvRefCntWtd += varDsc->lvRefCntWtd;
+                    varDsc->lvRefCnt = varDsc->lvRefCntWtd = 0;
+                    continue;
+                }
+                else
+                {
+                    // This is a use. Rewrite its lclNum to that of the source for the copy.
+                    lclVarNode->SetLclNum(varDsc->lvSourceLclNum);
+                }
+            }
+
+            unsigned lclNum      = lclVarNode->gtLclNum;
+            bool     isDeadStore = fgComputeLifeLocal(life, keepAliveVars, node, node);
             if (isDeadStore && fgTryRemoveDeadLIRStore(blockRange, node, &next))
             {
+                ResetLocalState(&lvaTable[lclNum]);
                 fgStmtRemoved = true;
             }
         }
     }
+
+    blockRange.CheckLIR(this, false);
 
     return life;
 }
@@ -2997,7 +3151,7 @@ void Compiler::fgInterBlockLocalVarLiveness()
             // which may expose more dead stores.
             fgLocalVarLivenessChanged = true;
 
-            noway_assert(VarSetOps::Equal(this, VarSetOps::Intersection(this, life, block->bbLiveIn), life));
+            // noway_assert(VarSetOps::Equal(this, VarSetOps::Intersection(this, life, block->bbLiveIn), life));
 
             /* set the new bbLiveIn */
 
