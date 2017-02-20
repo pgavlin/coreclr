@@ -3702,7 +3702,7 @@ void LinearScan::buildRefPositionsForNode(GenTree*                  tree,
                 {
                     varDefInterval->isCopy = true;
                     varDefInterval->isCheapCopy = true;
-                    varDefInterval->assignRelatedInterval(srcInterval);
+                    varDefInterval->sourceInterval = srcInterval;
                 }
 
                 // We can have a case where the source of the store has a different register type,
@@ -4019,10 +4019,10 @@ void LinearScan::buildRefPositionsForNode(GenTree*                  tree,
         // If the interval for the use was speculatively marked as a cheap copy, check to see if the "cheap copy"
         // condition still holds (i.e. check to ensure that the source interval has not been redefined during the
         // copy interval's lifetime).
-        if (i->isCheapCopy && i->relatedInterval->lastDefLocation > i->lastDefLocation)
+        if (i->isCheapCopy && i->sourceInterval->lastDefLocation > i->lastDefLocation)
         {
             i->isCheapCopy = false;
-            i->relatedInterval = nullptr;
+            i->sourceInterval = nullptr;
         }
     }
     JITDUMP("\n");
@@ -4151,7 +4151,7 @@ void LinearScan::buildRefPositionsForNode(GenTree*                  tree,
         {
             varDefInterval->isCopy = false;
             varDefInterval->isCheapCopy = false;
-            varDefInterval->relatedInterval = nullptr;
+            varDefInterval->sourceInterval = nullptr;
         }
     }
 
@@ -6936,7 +6936,7 @@ void LinearScan::coalesceCheapCopy(Interval* copy)
     }
 #endif
 
-    Interval* source = copy->relatedInterval;
+    Interval* source = copy->sourceInterval;
     if (source->isCheapCopy)
     {
         if (!source->isCoalesced && !source->isSecondaryRoot)
@@ -6954,7 +6954,7 @@ void LinearScan::coalesceCheapCopy(Interval* copy)
             }
 
             primaryRoot = source;
-            source = source->relatedInterval;
+            source = source->sourceInterval;
         }
 
         if (source->lastDefLocation >= copy->firstRefPosition->nodeLocation && 
@@ -7154,7 +7154,6 @@ void LinearScan::allocateRegisters()
             else
             {
                 currentInterval->isCheapCopy = false;
-                currentInterval->relatedInterval = nullptr;
             }
         }
     }

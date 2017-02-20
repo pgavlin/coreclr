@@ -1234,6 +1234,8 @@ public:
     //    is currently preferenced (e.g. because they are related by a copy)
     Interval* relatedInterval;
 
+    Interval* sourceInterval;
+
     Interval* coalescedInterval;
 
     // The assignedReg is the RecRecord for the register to which this interval
