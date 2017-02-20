@@ -1234,6 +1234,8 @@ public:
     //    is currently preferenced (e.g. because they are related by a copy)
     Interval* relatedInterval;
 
+    Interval* coalescedInterval;
+
     // The assignedReg is the RecRecord for the register to which this interval
     // has been assigned at some point - if the interval is active, this is the
     // register it currently occupies.
@@ -1302,6 +1304,12 @@ public:
     // True iff this interval is a copy whose last ref position ends before the last ref position in the source interval.
     __declspec(property(get = getIsCheapCopy, put = setIsCheapCopy)) bool isCheapCopy;
 
+    // True iff this interval has been coalesced.
+    __declspec(property(get = getIsCoalesced, put = setIsCoalesced)) bool isCoalesced;
+
+    // Ture iff this interval is the is the secondary root for a cheap copy chain.
+    __declspec(property(get = getIsSecondaryRoot, put = setIsSecondaryRoot)) bool isSecondaryRoot;
+
 private:
     unsigned int m_varNum;
     LsraLocation m_lastDef;
@@ -1325,6 +1333,8 @@ private:
             unsigned m_isMultiDef : 1;
             unsigned m_isCopy : 1;
             unsigned m_isCheapCopy : 1;
+            unsigned m_isCoalesced : 1;
+            unsigned m_isSecondaryRoot : 1;
         };
     };
 
@@ -1404,6 +1414,12 @@ public:
 
     inline bool getIsCheapCopy() const { return m_isCheapCopy; }
     inline void setIsCheapCopy(bool isCheapCopy) { m_isCheapCopy = isCheapCopy; }
+
+    inline bool getIsCoalesced() const { return m_isCoalesced; }
+    inline void setIsCoalesced(bool isCoalesced) { m_isCoalesced = isCoalesced; }
+
+    inline bool getIsSecondaryRoot() const { return m_isSecondaryRoot; }
+    inline void setIsSecondaryRoot(bool isSecondaryRoot) { m_isSecondaryRoot = isSecondaryRoot; }
 
 #ifdef DEBUG
     // print out representation

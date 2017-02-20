@@ -5276,9 +5276,9 @@ regNumber LinearScan::tryAllocateFreeReg(Interval* currentInterval, RefPosition*
     Interval* relatedInterval = currentInterval->relatedInterval;
     if (relatedInterval != nullptr)
     {
-        if (relatedInterval->isCheapCopy)
+        if (relatedInterval->isCoalesced)
         {
-            relatedInterval = relatedInterval->relatedInterval;
+            relatedInterval = relatedInterval->coalescedInterval;
             currentInterval->relatedInterval = relatedInterval;
         }
 
@@ -6923,6 +6923,11 @@ void LinearScan::coalesceCheapCopy(Interval* copy)
 {
     assert(copy->isCheapCopy);
 
+    if (copy->isCoalesced || copy->isSecondaryRoot)
+    {
+        return;
+    }
+
 #ifdef DEBUG
     if (VERBOSE)
     {
@@ -6931,13 +6936,41 @@ void LinearScan::coalesceCheapCopy(Interval* copy)
     }
 #endif
 
-    // Skip through other cheap copies
     Interval* source = copy->relatedInterval;
-    while (source->isCheapCopy && compiler->lvaTable[source->varNum].lvCoalesced)
+    if (source->isCheapCopy)
     {
-        source = source->relatedInterval;
+        if (!source->isCoalesced && !source->isSecondaryRoot)
+        {
+            coalesceCheapCopy(source);
+        }
+
+        Interval* primaryRoot = nullptr;
+        Interval* secondaryRoot = nullptr;
+        while (source->isCheapCopy)
+        {
+            if (source->isSecondaryRoot)
+            {
+                secondaryRoot = source;
+            }
+
+            primaryRoot = source;
+            source = source->relatedInterval;
+        }
+
+        if (source->lastDefLocation >= copy->firstRefPosition->nodeLocation && 
+            copy->lastRefPosition->nodeLocation > primaryRoot->lastRefPosition->nodeLocation)
+        {
+            if (secondaryRoot == nullptr)
+            {
+                copy->isSecondaryRoot = true;
+                return;
+            }
+
+            source = secondaryRoot;
+        }
     }
-    copy->relatedInterval = source;
+
+    assert(!source->isCheapCopy || source->isSecondaryRoot);
 
 #ifdef DEBUG
     if (VERBOSE)
@@ -7072,7 +7105,8 @@ void LinearScan::coalesceCheapCopy(Interval* copy)
     prevRefPos->nextRefPosition = sourceUseRefPos->nextRefPosition;
     sourceUseRefPos->isOrphaned = true;
 
-    copy->firstRefPosition = copy->lastRefPosition = nullptr;
+    copy->coalescedInterval = source;
+    copy->isCoalesced = true;
 
 #ifdef DEBUG
     if (VERBOSE)
@@ -7115,9 +7149,6 @@ void LinearScan::allocateRegisters()
 
             if (currentInterval->isCheapCopy && coalesceCheapCopies)
             {
-                // Because cheap copies must be block-local (i.e. all references to the interval occur in the same
-                // block), they can never affect the inter-block lifetime of their source interval and may be freely
-                // coalesced.
                 coalesceCheapCopy(currentInterval);
             }
             else
@@ -7379,9 +7410,9 @@ void LinearScan::allocateRegisters()
             else if (refType == RefTypeUpperVectorSaveDef || refType == RefTypeUpperVectorSaveUse)
             {
                 Interval* lclVarInterval = currentInterval->relatedInterval;
-                if (lclVarInterval->isCheapCopy)
+                if (lclVarInterval->isCoalesced)
                 {
-                    lclVarInterval = lclVarInterval->relatedInterval;
+                    lclVarInterval = lclVarInterval->coalescedInterval;
                     currentInterval->relatedInterval = lclVarInterval;
                 }
 
@@ -7411,9 +7442,9 @@ void LinearScan::allocateRegisters()
             {
                 assert(!currentInterval->isLocalVar);
                 Interval* srcInterval = currentInterval->relatedInterval;
-                if (srcInterval->isCheapCopy)
+                if (srcInterval->isCoalesced)
                 {
-                    srcInterval = srcInterval->relatedInterval;
+                    srcInterval = srcInterval->coalescedInterval;
                     currentInterval->relatedInterval = srcInterval;
                 }
 
@@ -8329,9 +8360,9 @@ void LinearScan::insertCopyOrReload(BasicBlock* block, GenTreePtr tree, unsigned
 void LinearScan::insertUpperVectorSaveAndReload(GenTreePtr tree, RefPosition* refPosition, BasicBlock* block)
 {
     Interval* lclVarInterval = refPosition->getInterval()->relatedInterval;
-    if (lclVarInterval->isCheapCopy)
+    if (lclVarInterval->isCoalesced)
     {
-        lclVarInterval = lclVarInterval->relatedInterval;
+        lclVarInterval = lclVarInterval->coalescedInterval;
         refPosition->getInterval()->relatedInterval = lclVarInterval;
     }
 
@@ -9021,7 +9052,7 @@ void LinearScan::resolveRegisters()
                 {
                     firstRefPosition = firstRefPosition->nextRefPosition;
                 }
-                if (firstRefPosition == nullptr)
+                if (firstRefPosition == nullptr || interval->isCoalesced)
                 {
                     // Dead interval
                     varDsc->lvLRACandidate = false;
