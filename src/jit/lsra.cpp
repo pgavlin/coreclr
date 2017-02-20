@@ -7047,7 +7047,7 @@ void LinearScan::coalesceCheapCopy(Interval* copy)
             sourceRefPos->nextRefPosition->nodeLocation > copyRefPos->nodeLocation ||
             (sourceRefPos->nextRefPosition->nodeLocation == copyRefPos->nodeLocation && sourceRefPos->nextRefPosition->rpNum > copyRefPos->rpNum);
 
-        if (sourceRefPos->nextRefPosition == nullptr || sourceRefPos->nextRefPosition->nodeLocation >= copyRefPos->nodeLocation)
+        if (nextIsLater)
         {
             copyRefPos->referent = source;
             assert(!copyRefPos->lastUse || copyRefPos->nextRefPosition == nullptr);
