@@ -6980,15 +6980,8 @@ void LinearScan::coalesceCheapCopy(Interval* copy)
     }
 #endif
 
-    // Adjust lclVar ref counts
     LclVarDsc* const copyVar = &compiler->lvaTable[copy->varNum];
     LclVarDsc* const sourceVar = &compiler->lvaTable[source->varNum];
-
-    sourceVar->lvRefCnt += copyVar->lvRefCnt;
-    sourceVar->lvRefCntWtd += copyVar->lvRefCnt;
-    copyVar->lvRefCnt = copyVar->lvRefCntWtd = 0;
-    copyVar->lvCoalesced = true;
-    copyVar->lvCoalescedLcl = source->varNum;
 
     RefPosition* copyRefPos = copy->firstRefPosition;
     RefPosition* sourceRefPos = source->firstRefPosition;
@@ -7030,9 +7023,13 @@ void LinearScan::coalesceCheapCopy(Interval* copy)
     // had better correspond to the use of the lclVar that feeds the corresponding def. Both the use of `source`
     // and the def of `copy` will be removed.
 
-    LIR::Range& blockRange = LIR::AsRange(blockInfo[copyRefPos->bbNum].block);
+    const LsraBlockInfo& theBlockInfo = blockInfo[copyRefPos->bbNum];
+    LIR::Range& blockRange = LIR::AsRange(theBlockInfo.block);
     blockRange.Remove(copyDef);
     blockRange.Remove(sourceUse);
+
+    sourceVar->decRefCnts(theBlockInfo.weight, compiler);
+    copyVar->decRefCnts(theBlockInfo.weight, compiler);
 
     // Move to the second ref pos in the copy.
     copyRefPos->isOrphaned = true;
@@ -7068,6 +7065,8 @@ void LinearScan::coalesceCheapCopy(Interval* copy)
 
             lastCopyRefPos = copyRefPos;
             copyRefPos = nextCopyRefPos;
+
+            sourceVar->incRefCnts(theBlockInfo.weight, compiler);
         }
 
         sourceRefPos = sourceRefPos->nextRefPosition;
@@ -7084,6 +7083,8 @@ void LinearScan::coalesceCheapCopy(Interval* copy)
 
             lastCopyRefPos = copyRefPos;
             copyRefPos = copyRefPos->nextRefPosition;
+
+            sourceVar->incRefCnts(theBlockInfo.weight, compiler);
         } while (copyRefPos != nullptr);
 
         source->lastRefPosition = lastCopyRefPos;
@@ -7104,6 +7105,10 @@ void LinearScan::coalesceCheapCopy(Interval* copy)
     // Remove `sourceUseRefPos` from `source`.
     prevRefPos->nextRefPosition = sourceUseRefPos->nextRefPosition;
     sourceUseRefPos->isOrphaned = true;
+
+    copyVar->lvRefCnt = copyVar->lvRefCntWtd = 0;
+    copyVar->lvCoalesced = true;
+    copyVar->lvCoalescedLcl = source->varNum;
 
     copy->coalescedInterval = source;
     copy->isCoalesced = true;
