@@ -6,6 +6,10 @@
 #error CONFIG_INTEGER, CONFIG_STRING, and CONFIG_METHODSET must be defined before including this file.
 #endif // !defined(CONFIG_INTEGER) || !defined(CONFIG_STRING) || !defined(CONFIG_METHODSET)
 
+#ifdef DEBUG
+#define OPT_CONFIG // Enable optimization level configuration.
+#endif
+
 #if defined(DEBUG)
 CONFIG_INTEGER(AltJitLimit, W("AltJitLimit"), 0)               // Max number of functions to use altjit for (decimal)
 CONFIG_INTEGER(AltJitSkipOnAssert, W("AltJitSkipOnAssert"), 0) // If AltJit hits an assert, fall back to the fallback
@@ -17,10 +21,10 @@ CONFIG_INTEGER(DebugBreakOnVerificationFailure, W("DebugBreakOnVerificationFailu
                                                                                          // verification failure
 CONFIG_INTEGER(DiffableDasm, W("JitDiffableDasm"), 0)            // Make the disassembly diff-able
 CONFIG_INTEGER(DisplayLoopHoistStats, W("JitLoopHoistStats"), 0) // Display JIT loop hoisting statistics
-CONFIG_INTEGER(DisplayMemStats, W("JitMemStats"), 0)             // Display JIT memory usage statistics
-CONFIG_INTEGER(DumpJittedMethods, W("DumpJittedMethods"), 0)     // Prints all jitted methods to the console
-CONFIG_INTEGER(EnablePCRelAddr, W("JitEnablePCRelAddr"), 1)      // Whether absolute addr be encoded as PC-rel offset by
-                                                                 // RyuJIT where possible
+CONFIG_INTEGER(DisplayLsraStats, W("JitLsraStats"), 0)       // Display JIT Linear Scan Register Allocator statistics
+CONFIG_INTEGER(DumpJittedMethods, W("DumpJittedMethods"), 0) // Prints all jitted methods to the console
+CONFIG_INTEGER(EnablePCRelAddr, W("JitEnablePCRelAddr"), 1)  // Whether absolute addr be encoded as PC-rel offset by
+                                                             // RyuJIT where possible
 CONFIG_INTEGER(InterpreterFallback, W("InterpreterFallback"), 0) // Fallback to the interpreter when the JIT compiler
                                                                  // fails
 CONFIG_INTEGER(JitAssertOnMaxRAPasses, W("JitAssertOnMaxRAPasses"), 0)
@@ -36,13 +40,6 @@ CONFIG_INTEGER(JitDebugLogLoopCloning, W("JitDebugLogLoopCloning"), 0) // In deb
 CONFIG_INTEGER(JitDefaultFill, W("JitDefaultFill"), 0xff) // In debug builds, initialize the memory allocated by the nra
                                                           // with this byte.
 CONFIG_INTEGER(JitDirectAlloc, W("JitDirectAlloc"), 0)
-CONFIG_INTEGER(JitDoAssertionProp, W("JitDoAssertionProp"), 1) // Perform assertion propagation optimization
-CONFIG_INTEGER(JitDoCopyProp, W("JitDoCopyProp"), 1)   // Perform copy propagation on variables that appear redundant
-CONFIG_INTEGER(JitDoEarlyProp, W("JitDoEarlyProp"), 1) // Perform Early Value Propagataion
-CONFIG_INTEGER(JitDoLoopHoisting, W("JitDoLoopHoisting"), 1)   // Perform loop hoisting on loop invariant values
-CONFIG_INTEGER(JitDoRangeAnalysis, W("JitDoRangeAnalysis"), 1) // Perform range check analysis
-CONFIG_INTEGER(JitDoSsa, W("JitDoSsa"), 1) // Perform Static Single Assignment (SSA) numbering on the variables
-CONFIG_INTEGER(JitDoValueNumber, W("JitDoValueNumber"), 1) // Perform value numbering on method expressions
 CONFIG_INTEGER(JitDoubleAlign, W("JitDoubleAlign"), 1)
 CONFIG_INTEGER(JitDumpASCII, W("JitDumpASCII"), 1)         // Uses only ASCII characters in tree dumps
 CONFIG_INTEGER(JitDumpFgDot, W("JitDumpFgDot"), 0)         // Set to non-zero to emit Dot instead of Xml Flowgraph dump
@@ -186,6 +183,10 @@ CONFIG_STRING(NgenDumpIRFormat, W("NgenDumpIRFormat"))           // Same as JitD
 CONFIG_STRING(NgenDumpIRPhase, W("NgenDumpIRPhase"))             // Same as JitDumpIRPhase, but for ngen
 #endif                                                           // defined(DEBUG)
 
+#ifdef FEATURE_ENABLE_NO_RANGE_CHECKS
+CONFIG_INTEGER(JitNoRangeChks, W("JitNoRngChks"), 0) // If 1, don't generate range checks
+#endif
+
 // AltJitAssertOnNYI should be 0 on targets where JIT is under developement or bring up stage, so as to facilitate
 // fallback to main JIT on hitting a NYI.
 #if defined(_TARGET_ARM64_) || defined(_TARGET_X86_)
@@ -194,11 +195,18 @@ CONFIG_INTEGER(AltJitAssertOnNYI, W("AltJitAssertOnNYI"), 0) // Controls the Alt
 CONFIG_INTEGER(AltJitAssertOnNYI, W("AltJitAssertOnNYI"), 1) // Controls the AltJit behavior of NYI stuff
 #endif                                                       // defined(_TARGET_ARM64_) || defined(_TARGET_X86_)
 
-#if defined(_TARGET_AMD64_)
-CONFIG_INTEGER(EnableAVX, W("EnableAVX"), 1) // Enable AVX instruction set for wide operations as default
-#else                                        // !defined(_TARGET_AMD64_)
-CONFIG_INTEGER(EnableAVX, W("EnableAVX"), 0)                 // Enable AVX instruction set for wide operations as default
-#endif                                       // defined(_TARGET_AMD64_)
+#if defined(_TARGET_X86_) || defined(_TARGET_AMD64_)
+CONFIG_INTEGER(EnableSSE3_4, W("EnableSSE3_4"), 1) // Enable SSE3, SSSE3, SSE 4.1 and 4.2 instruction set as default
+#endif
+
+#if defined(_TARGET_AMD64_) || defined(_TARGET_X86_)
+// Enable AVX instruction set for wide operations as default. When both AVX and SSE3_4 are set, we will use the most
+// capable instruction set available which will prefer AVX over SSE3/4.
+CONFIG_INTEGER(EnableAVX, W("EnableAVX"), 1)
+#else  // !defined(_TARGET_AMD64_) && !defined(_TARGET_X86_)
+// Enable AVX instruction set for wide operations as default
+CONFIG_INTEGER(EnableAVX, W("EnableAVX"), 0)
+#endif // !defined(_TARGET_AMD64_) && !defined(_TARGET_X86_)
 
 #if !defined(DEBUG) && !defined(_DEBUG)
 CONFIG_INTEGER(JitEnableNoWayAssert, W("JitEnableNoWayAssert"), 0)
@@ -206,14 +214,44 @@ CONFIG_INTEGER(JitEnableNoWayAssert, W("JitEnableNoWayAssert"), 0)
 CONFIG_INTEGER(JitEnableNoWayAssert, W("JitEnableNoWayAssert"), 1)
 #endif // !defined(DEBUG) && !defined(_DEBUG)
 
+#if !defined(JIT32_GCENCODER)
+#if defined(_TARGET_AMD64_) && defined(FEATURE_CORECLR)
+#define JitMinOptsTrackGCrefs_Default 0 // Not tracking GC refs in MinOpts is new behavior
+#else
+#define JitMinOptsTrackGCrefs_Default 1
+#endif
+CONFIG_INTEGER(JitMinOptsTrackGCrefs, W("JitMinOptsTrackGCrefs"), JitMinOptsTrackGCrefs_Default) // Track GC roots
+#endif // !defined(JIT32_GCENCODER)
+
+// The following should be wrapped inside "#if MEASURE_MEM_ALLOC / #endif", but
+// some files include this one without bringing in the definitions from "jit.h"
+// so we don't always know what the "true" value of that flag should be. For now
+// we take the easy way out and always include the flag, even in release builds
+// (normally MEASURE_MEM_ALLOC is off for release builds but if it's toggled on
+// for release in "jit.h" the flag would be missing for some includers).
+// TODO-Cleanup: need to make 'MEASURE_MEM_ALLOC' well-defined here at all times.
+CONFIG_INTEGER(DisplayMemStats, W("JitMemStats"), 0) // Display JIT memory usage statistics
+
 CONFIG_INTEGER(JitAggressiveInlining, W("JitAggressiveInlining"), 0) // Aggressive inlining of all methods
-CONFIG_INTEGER(JitELTHookEnabled, W("JitELTHookEnabled"), 0) // On ARM, setting this will emit Enter/Leave/TailCall
-                                                             // callbacks
+CONFIG_INTEGER(JitELTHookEnabled, W("JitELTHookEnabled"), 0)         // If 1, emit Enter/Leave/TailCall callbacks
 CONFIG_INTEGER(JitInlineSIMDMultiplier, W("JitInlineSIMDMultiplier"), 3)
 
 #if defined(FEATURE_ENABLE_NO_RANGE_CHECKS)
 CONFIG_INTEGER(JitNoRngChks, W("JitNoRngChks"), 0) // If 1, don't generate range checks
 #endif                                             // defined(FEATURE_ENABLE_NO_RANGE_CHECKS)
+
+#if defined(OPT_CONFIG)
+CONFIG_INTEGER(JitDoAssertionProp, W("JitDoAssertionProp"), 1) // Perform assertion propagation optimization
+CONFIG_INTEGER(JitDoCopyProp, W("JitDoCopyProp"), 1)   // Perform copy propagation on variables that appear redundant
+CONFIG_INTEGER(JitDoEarlyProp, W("JitDoEarlyProp"), 1) // Perform Early Value Propagataion
+CONFIG_INTEGER(JitDoLoopHoisting, W("JitDoLoopHoisting"), 1)   // Perform loop hoisting on loop invariant values
+CONFIG_INTEGER(JitDoRangeAnalysis, W("JitDoRangeAnalysis"), 1) // Perform range check analysis
+CONFIG_INTEGER(JitDoSsa, W("JitDoSsa"), 1) // Perform Static Single Assignment (SSA) numbering on the variables
+CONFIG_INTEGER(JitDoValueNumber, W("JitDoValueNumber"), 1) // Perform value numbering on method expressions
+
+CONFIG_METHODSET(JitOptRepeat, W("JitOptRepeat"))            // Runs optimizer multiple times on the method
+CONFIG_INTEGER(JitOptRepeatCount, W("JitOptRepeatCount"), 2) // Number of times to repeat opts when repeating
+#endif                                                       // defined(OPT_CONFIG)
 
 CONFIG_INTEGER(JitRegisterFP, W("JitRegisterFP"), 3)           // Control FP enregistration
 CONFIG_INTEGER(JitTelemetry, W("JitTelemetry"), 1)             // If non-zero, gather JIT telemetry data
@@ -229,6 +267,9 @@ CONFIG_STRING(AltJitExcludeAssemblies,
               W("AltJitExcludeAssemblies")) // Do not use AltJit on this semicolon-delimited list of assemblies.
 #endif                                      // defined(ALT_JIT)
 
+CONFIG_INTEGER(JitMeasureIR, W("JitMeasureIR"), 0) // If set, measure the IR size after some phases and report it in
+                                                   // the time log.
+
 CONFIG_STRING(JitFuncInfoFile, W("JitFuncInfoLogFile")) // If set, gather JIT function info and write to this file.
 CONFIG_STRING(JitTimeLogCsv, W("JitTimeLogCsv")) // If set, gather JIT throughput data and write to a CSV file. This
                                                  // mode must be used in internal retail builds.
@@ -242,6 +283,8 @@ CONFIG_INTEGER(JitInlineLimit, W("JitInlineLimit"), -1)
 CONFIG_INTEGER(JitInlinePolicyDiscretionary, W("JitInlinePolicyDiscretionary"), 0)
 CONFIG_INTEGER(JitInlinePolicyFull, W("JitInlinePolicyFull"), 0)
 CONFIG_INTEGER(JitInlinePolicySize, W("JitInlinePolicySize"), 0)
+CONFIG_INTEGER(JitInlinePolicyRandom, W("JitInlinePolicyRandom"), 0) // nozero enables; value is the external random
+                                                                     // seed
 CONFIG_INTEGER(JitInlinePolicyReplay, W("JitInlinePolicyReplay"), 0)
 CONFIG_STRING(JitNoInlineRange, W("JitNoInlineRange"))
 CONFIG_STRING(JitInlineReplayFile, W("JitInlineReplayFile"))
@@ -249,6 +292,18 @@ CONFIG_STRING(JitInlineReplayFile, W("JitInlineReplayFile"))
 
 CONFIG_INTEGER(JitInlinePolicyLegacy, W("JitInlinePolicyLegacy"), 0)
 CONFIG_INTEGER(JitInlinePolicyModel, W("JitInlinePolicyModel"), 0)
+
+CONFIG_INTEGER(JitEECallTimingInfo, W("JitEECallTimingInfo"), 0)
+
+#if defined(DEBUG)
+#if defined(FEATURE_CORECLR)
+CONFIG_INTEGER(JitEnableFinallyCloning, W("JitEnableFinallyCloning"), 1)
+CONFIG_INTEGER(JitEnableRemoveEmptyTry, W("JitEnableRemoveEmptyTry"), 1)
+#else
+CONFIG_INTEGER(JitEnableFinallyCloning, W("JitEnableFinallyCloning"), 0)
+CONFIG_INTEGER(JitEnableRemoveEmptyTry, W("JitEnableRemoveEmptyTry"), 0)
+#endif // defined(FEATURE_CORECLR)
+#endif // DEBUG
 
 #undef CONFIG_INTEGER
 #undef CONFIG_STRING

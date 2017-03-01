@@ -48,7 +48,6 @@ public:
                                    unsigned* cnsPtr,
                                    bool      nogen = false);
 
-
 private:
 #if defined(_TARGET_XARCH_) && !FEATURE_STACK_FP_X87
     // Bit masks used in negating a float or double number.
@@ -123,7 +122,7 @@ private:
 
     void genRangeCheck(GenTree* node);
 
-    void genLockedInstructions(GenTree* node);
+    void genLockedInstructions(GenTreeOp* node);
 
     //-------------------------------------------------------------------------
     // Register-related methods
@@ -250,6 +249,8 @@ protected:
     void genDefineTempLabel(BasicBlock* label);
 
     void genAdjustSP(ssize_t delta);
+
+    void genAdjustStackLevel(BasicBlock* block);
 
     void genExitCode(BasicBlock* block);
 
@@ -389,6 +390,8 @@ protected:
     // Save/Restore callee saved float regs to stack
     void genPreserveCalleeSavedFltRegs(unsigned lclFrameSize);
     void genRestoreCalleeSavedFltRegs(unsigned lclFrameSize);
+    // Generate VZeroupper instruction to avoid AVX/SSE transition penalty
+    void genVzeroupperIfNeeded(bool check256bitOnly = true);
 
 #endif // _TARGET_XARCH_ && FEATURE_STACK_FP_X87
 
@@ -467,6 +470,9 @@ protected:
     void genSetPSPSym(regNumber initReg, bool* pInitRegZeroed);
 
     void genUpdateCurrentFunclet(BasicBlock* block);
+#if defined(_TARGET_ARM_)
+    void genInsertNopForUnwinder(BasicBlock* block);
+#endif
 
 #else // FEATURE_EH_FUNCLETS
 
@@ -475,6 +481,13 @@ protected:
     {
         return;
     }
+
+#if defined(_TARGET_ARM_)
+    void genInsertNopForUnwinder(BasicBlock* block)
+    {
+        return;
+    }
+#endif
 
 #endif // FEATURE_EH_FUNCLETS
 
@@ -488,15 +501,26 @@ protected:
     void genAmd64EmitterUnitTests();
 #endif
 
-//-------------------------------------------------------------------------
-//
-// End prolog/epilog generation
-//
-//-------------------------------------------------------------------------
+    //-------------------------------------------------------------------------
+    //
+    // End prolog/epilog generation
+    //
+    //-------------------------------------------------------------------------
 
-/*****************************************************************************/
-#ifdef DEBUGGING_SUPPORT
-/*****************************************************************************/
+    void      genSinglePush();
+    void      genSinglePop();
+    regMaskTP genPushRegs(regMaskTP regs, regMaskTP* byrefRegs, regMaskTP* noRefRegs);
+    void genPopRegs(regMaskTP regs, regMaskTP byrefRegs, regMaskTP noRefRegs);
+
+/*
+XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+XX                                                                           XX
+XX                           Debugging Support                               XX
+XX                                                                           XX
+XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+*/
 
 #ifdef DEBUG
     void genIPmappingDisp(unsigned mappingNum, Compiler::IPmappingDsc* ipMapping);
@@ -729,10 +753,6 @@ protected:
     TrnslLocalVarInfo* genTrnslLocalVarInfo;
     unsigned           genTrnslLocalVarCount;
 #endif
-
-/*****************************************************************************/
-#endif // DEBUGGING_SUPPORT
-/*****************************************************************************/
 
 #ifndef LEGACY_BACKEND
 #include "codegenlinear.h"

@@ -365,6 +365,14 @@ void BasicBlock::dspFlags()
     {
         printf("KEEP ");
     }
+    if (bbFlags & BBF_CLONED_FINALLY_BEGIN)
+    {
+        printf("cfb ");
+    }
+    if (bbFlags & BBF_CLONED_FINALLY_END)
+    {
+        printf("cfe ");
+    }
 }
 
 /*****************************************************************************
@@ -554,7 +562,9 @@ void BasicBlock::dspBlockHeader(Compiler* compiler,
     }
     if (showFlags)
     {
-        printf(" flags=0x%08x: ", bbFlags);
+        const unsigned lowFlags  = (unsigned)bbFlags;
+        const unsigned highFlags = (unsigned)(bbFlags >> 32);
+        printf(" flags=0x%08x.%08x: ", highFlags, lowFlags);
         dspFlags();
     }
     printf("\n");
@@ -562,13 +572,31 @@ void BasicBlock::dspBlockHeader(Compiler* compiler,
 
 #endif // DEBUG
 
-// Allocation function for HeapPhiArg.
-void* BasicBlock::HeapPhiArg::operator new(size_t sz, Compiler* comp)
+// Allocation function for MemoryPhiArg.
+void* BasicBlock::MemoryPhiArg::operator new(size_t sz, Compiler* comp)
 {
-    return comp->compGetMem(sz, CMK_HeapPhiArg);
+    return comp->compGetMem(sz, CMK_MemoryPhiArg);
 }
 
-void BasicBlock::CloneBlockState(Compiler* compiler, BasicBlock* to, const BasicBlock* from)
+//------------------------------------------------------------------------
+// CloneBlockState: Try to populate `to` block with a copy of `from` block's statements, replacing
+//                  uses of local `varNum` with IntCns `varVal`.
+//
+// Arguments:
+//    compiler - Jit compiler instance
+//    to - New/empty block to copy statements into
+//    from - Block to copy statements from
+//    varNum - lclVar uses with lclNum `varNum` will be replaced; can be ~0 to indicate no replacement.
+//    varVal - If replacing uses of `varNum`, replace them with int constants with value `varVal`.
+//
+// Return Value:
+//    Cloning may fail because this routine uses `gtCloneExpr` for cloning and it can't handle all
+//    IR nodes.  If cloning of any statement fails, `false` will be returned and block `to` may be
+//    partially populated.  If cloning of all statements succeeds, `true` will be returned and
+//    block `to` will be fully populated.
+
+bool BasicBlock::CloneBlockState(
+    Compiler* compiler, BasicBlock* to, const BasicBlock* from, unsigned varNum, int varVal)
 {
     assert(to->bbTreeList == nullptr);
 
@@ -595,9 +623,17 @@ void BasicBlock::CloneBlockState(Compiler* compiler, BasicBlock* to, const Basic
 
     for (GenTreePtr fromStmt = from->bbTreeList; fromStmt != nullptr; fromStmt = fromStmt->gtNext)
     {
-        compiler->fgInsertStmtAtEnd(to,
-                                    compiler->fgNewStmtFromTree(compiler->gtCloneExpr(fromStmt->gtStmt.gtStmtExpr)));
+        auto newExpr = compiler->gtCloneExpr(fromStmt->gtStmt.gtStmtExpr, 0, varNum, varVal);
+        if (!newExpr)
+        {
+            // gtCloneExpr doesn't handle all opcodes, so may fail to clone a statement.
+            // When that happens, it returns nullptr; abandon the rest of this block and
+            // return `false` to the caller to indicate that cloning was unsuccessful.
+            return false;
+        }
+        compiler->fgInsertStmtAtEnd(to, compiler->fgNewStmtFromTree(newExpr));
     }
+    return true;
 }
 
 // LIR helpers
@@ -636,7 +672,7 @@ bool BasicBlock::IsLIR()
 // Return Value:
 //    The first statement in the block's bbTreeList.
 //
-GenTreeStmt* BasicBlock::firstStmt()
+GenTreeStmt* BasicBlock::firstStmt() const
 {
     if (bbTreeList == nullptr)
     {
@@ -655,7 +691,7 @@ GenTreeStmt* BasicBlock::firstStmt()
 // Return Value:
 //    The last statement in the block's bbTreeList.
 //
-GenTreeStmt* BasicBlock::lastStmt()
+GenTreeStmt* BasicBlock::lastStmt() const
 {
     if (bbTreeList == nullptr)
     {
@@ -666,7 +702,6 @@ GenTreeStmt* BasicBlock::lastStmt()
     assert(result && result->gtNext == nullptr);
     return result->AsStmt();
 }
-
 
 //------------------------------------------------------------------------
 // BasicBlock::firstNode: Returns the first node in the block.
@@ -738,7 +773,7 @@ BasicBlock* BasicBlock::GetUniqueSucc()
 }
 
 // Static vars.
-BasicBlock::HeapPhiArg* BasicBlock::EmptyHeapPhiDef = (BasicBlock::HeapPhiArg*)0x1;
+BasicBlock::MemoryPhiArg* BasicBlock::EmptyMemoryPhiDef = (BasicBlock::MemoryPhiArg*)0x1;
 
 unsigned PtrKeyFuncs<BasicBlock>::GetHashCode(const BasicBlock* ptr)
 {

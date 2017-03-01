@@ -253,12 +253,14 @@ public:
 
 private:
     bool m_cgDoubleAlign;
-#else  // !DOUBLE_ALIGN
+#else // !DOUBLE_ALIGN
+
 public:
     bool doubleAlignOrFramePointerUsed() const
     {
         return isFramePointerUsed();
     }
+
 #endif // !DOUBLE_ALIGN
 
 #ifdef DEBUG
@@ -424,10 +426,8 @@ public:
 private:
     bool m_cgFullPtrRegMap;
 
-#ifdef DEBUGGING_SUPPORT
 public:
     virtual void siUpdate() = 0;
-#endif // DEBUGGING_SUPPORT
 
 #ifdef LATE_DISASM
 public:

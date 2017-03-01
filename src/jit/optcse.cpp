@@ -301,15 +301,15 @@ Compiler::fgWalkResult Compiler::optCSE_MaskHelper(GenTreePtr* pTree, fgWalkData
 
     if (IS_CSE_INDEX(tree->gtCSEnum))
     {
-        unsigned  cseIndex = GET_CSE_INDEX(tree->gtCSEnum);
-        EXPSET_TP cseBit   = genCSEnum2bit(cseIndex);
+        unsigned cseIndex = GET_CSE_INDEX(tree->gtCSEnum);
+        unsigned cseBit   = genCSEnum2bit(cseIndex);
         if (IS_CSE_DEF(tree->gtCSEnum))
         {
-            pUserData->CSE_defMask |= cseBit;
+            BitVecOps::AddElemD(comp->cseTraits, pUserData->CSE_defMask, cseBit);
         }
         else
         {
-            pUserData->CSE_useMask |= cseBit;
+            BitVecOps::AddElemD(comp->cseTraits, pUserData->CSE_useMask, cseBit);
         }
     }
 
@@ -321,8 +321,8 @@ Compiler::fgWalkResult Compiler::optCSE_MaskHelper(GenTreePtr* pTree, fgWalkData
 //
 void Compiler::optCSE_GetMaskData(GenTreePtr tree, optCSE_MaskData* pMaskData)
 {
-    pMaskData->CSE_defMask = 0;
-    pMaskData->CSE_useMask = 0;
+    pMaskData->CSE_defMask = BitVecOps::MakeCopy(cseTraits, cseEmpty);
+    pMaskData->CSE_useMask = BitVecOps::MakeCopy(cseTraits, cseEmpty);
     fgWalkTreePre(&tree, optCSE_MaskHelper, (void*)pMaskData);
 }
 
@@ -355,14 +355,14 @@ bool Compiler::optCSE_canSwap(GenTree* op1, GenTree* op2)
     optCSE_GetMaskData(op2, &op2MaskData);
 
     // We cannot swap if op1 contains a CSE def that is used by op2
-    if ((op1MaskData.CSE_defMask & op2MaskData.CSE_useMask) != 0)
+    if (!BitVecOps::IsEmptyIntersection(cseTraits, op1MaskData.CSE_defMask, op2MaskData.CSE_useMask))
     {
         canSwap = false;
     }
     else
     {
         // We also cannot swap if op2 contains a CSE def that is used by op1.
-        if ((op2MaskData.CSE_defMask & op1MaskData.CSE_useMask) != 0)
+        if (!BitVecOps::IsEmptyIntersection(cseTraits, op2MaskData.CSE_defMask, op1MaskData.CSE_useMask))
         {
             canSwap = false;
         }
@@ -495,12 +495,23 @@ void Compiler::optValnumCSE_Init()
     optCSEtab = nullptr;
 #endif
 
+    // Init traits and full/empty bitvectors.  This will be used to track the
+    // individual cse indexes.
+    cseTraits = new (getAllocator()) BitVecTraits(EXPSET_SZ, this);
+    cseFull   = BitVecOps::UninitVal();
+    cseEmpty  = BitVecOps::UninitVal();
+    BitVecOps::AssignNoCopy(cseTraits, cseFull, BitVecOps::MakeFull(cseTraits));
+    BitVecOps::AssignNoCopy(cseTraits, cseEmpty, BitVecOps::MakeEmpty(cseTraits));
+
     /* Allocate and clear the hash bucket table */
 
     optCSEhash = new (this, CMK_CSE) CSEdsc*[s_optCSEhashSize]();
 
     optCSECandidateCount = 0;
     optDoCSE             = false; // Stays false until we find duplicate CSE tree
+
+    // optCseArrLenMap is unused in most functions, allocated only when used
+    optCseArrLenMap = nullptr;
 }
 
 /*****************************************************************************
@@ -631,8 +642,8 @@ unsigned Compiler::optValnumCSE_Index(GenTreePtr tree, GenTreePtr stmt)
 
         C_ASSERT((signed char)MAX_CSE_CNT == MAX_CSE_CNT);
 
-        unsigned  CSEindex = ++optCSECandidateCount;
-        EXPSET_TP CSEmask  = genCSEnum2bit(CSEindex);
+        unsigned CSEindex = ++optCSECandidateCount;
+        // EXPSET_TP  CSEmask  = genCSEnum2bit(CSEindex);
 
         /* Record the new CSE index in the hashDsc */
         hashDsc->csdIndex = CSEindex;
@@ -649,10 +660,11 @@ unsigned Compiler::optValnumCSE_Index(GenTreePtr tree, GenTreePtr stmt)
 #ifdef DEBUG
         if (verbose)
         {
+            EXPSET_TP tempMask = BitVecOps::MakeSingleton(cseTraits, genCSEnum2bit(CSEindex));
             printf("\nCSE candidate #%02u, vn=", CSEindex);
             vnPrint(vnlib, 0);
-            printf(" cseMask=%s in BB%02u, [cost=%2u, size=%2u]: \n", genES2str(genCSEnum2bit(CSEindex)),
-                   compCurBB->bbNum, tree->gtCostEx, tree->gtCostSz);
+            printf(" cseMask=%s in BB%02u, [cost=%2u, size=%2u]: \n", genES2str(cseTraits, tempMask), compCurBB->bbNum,
+                   tree->gtCostEx, tree->gtCostSz);
             gtDispTree(tree);
         }
 #endif // DEBUG
@@ -691,8 +703,17 @@ unsigned Compiler::optValnumCSE_Locate()
             noway_assert(stmt->gtOper == GT_STMT);
 
             /* We walk the tree in the forwards direction (bottom up) */
+            bool stmtHasArrLenCandidate = false;
             for (tree = stmt->gtStmt.gtStmtList; tree; tree = tree->gtNext)
             {
+                if (tree->OperIsCompare() && stmtHasArrLenCandidate)
+                {
+                    // Check if this compare is a function of (one of) the arrary
+                    // length candidate(s); we may want to update its value number
+                    // if the array length gets CSEd
+                    optCseUpdateArrLenMap(tree);
+                }
+
                 if (!optIsCSEcandidate(tree))
                 {
                     continue;
@@ -721,6 +742,11 @@ unsigned Compiler::optValnumCSE_Locate()
                 {
                     noway_assert(((unsigned)tree->gtCSEnum) == CSEindex);
                 }
+
+                if (IS_CSE_INDEX(CSEindex) && (tree->OperGet() == GT_ARR_LENGTH))
+                {
+                    stmtHasArrLenCandidate = true;
+                }
             }
         }
     }
@@ -737,6 +763,102 @@ unsigned Compiler::optValnumCSE_Locate()
     optCSEstop();
 
     return 1;
+}
+
+//------------------------------------------------------------------------
+// optCseUpdateArrLenMap: Check if this compare is a tractable function of
+//                     an array length that is a CSE candidate, and insert
+//                     an entry in the optCseArrLenMap if so.  This facilitates
+//                     subsequently updating the compare's value number if
+//                     the array length gets CSEd.
+//
+// Arguments:
+//    compare - The compare node to check
+
+void Compiler::optCseUpdateArrLenMap(GenTreePtr compare)
+{
+    assert(compare->OperIsCompare());
+
+    ValueNum  compareVN = compare->gtVNPair.GetConservative();
+    VNFuncApp cmpVNFuncApp;
+
+    if (!vnStore->GetVNFunc(compareVN, &cmpVNFuncApp) ||
+        (cmpVNFuncApp.m_func != GetVNFuncForOper(compare->OperGet(), compare->IsUnsigned())))
+    {
+        // Value numbering inferred this compare as something other
+        // than its own operator; leave its value number alone.
+        return;
+    }
+
+    // Now look for an array length feeding the compare
+    ValueNumStore::ArrLenArithBoundInfo info;
+    GenTreePtr                          arrLenParent = nullptr;
+
+    if (vnStore->IsVNArrLenBound(compareVN))
+    {
+        // Simple compare of an array legnth against something else.
+
+        vnStore->GetArrLenBoundInfo(compareVN, &info);
+        arrLenParent = compare;
+    }
+    else if (vnStore->IsVNArrLenArithBound(compareVN))
+    {
+        // Compare of an array length +/- some offset to something else.
+
+        GenTreePtr op1 = compare->gtGetOp1();
+        GenTreePtr op2 = compare->gtGetOp2();
+
+        vnStore->GetArrLenArithBoundInfo(compareVN, &info);
+        if (GetVNFuncForOper(op1->OperGet(), op1->IsUnsigned()) == (VNFunc)info.arrOper)
+        {
+            // The arithmetic node is the array length's parent.
+            arrLenParent = op1;
+        }
+        else if (GetVNFuncForOper(op2->OperGet(), op2->IsUnsigned()) == (VNFunc)info.arrOper)
+        {
+            // The arithmetic node is the array length's parent.
+            arrLenParent = op2;
+        }
+    }
+
+    if (arrLenParent != nullptr)
+    {
+        GenTreePtr arrLen = nullptr;
+
+        // Find which child of arrLenParent is the array length.  Abort if its
+        // conservative value number doesn't match the one from the compare VN.
+
+        GenTreePtr child1 = arrLenParent->gtGetOp1();
+        if ((child1->OperGet() == GT_ARR_LENGTH) && IS_CSE_INDEX(child1->gtCSEnum) &&
+            (info.vnArray == child1->AsArrLen()->ArrRef()->gtVNPair.GetConservative()))
+        {
+            arrLen = child1;
+        }
+        else
+        {
+            GenTreePtr child2 = arrLenParent->gtGetOp2();
+            if ((child2->OperGet() == GT_ARR_LENGTH) && IS_CSE_INDEX(child2->gtCSEnum) &&
+                (info.vnArray == child2->AsArrLen()->ArrRef()->gtVNPair.GetConservative()))
+            {
+                arrLen = child2;
+            }
+        }
+
+        if (arrLen != nullptr)
+        {
+            // Found an arrayLen feeding a compare that is a tracatable function of it;
+            // record this in the map so we can update the compare VN if the array length
+            // node gets CSEd.
+
+            if (optCseArrLenMap == nullptr)
+            {
+                // Allocate map on first use.
+                optCseArrLenMap = new (getAllocator()) NodeToNodeMap(getAllocator());
+            }
+
+            optCseArrLenMap->Set(arrLen, compare);
+        }
+    }
 }
 
 /*****************************************************************************
@@ -773,19 +895,18 @@ void Compiler::optValnumCSE_InitDataFlow()
         if (init_to_zero)
         {
             /* Initialize to {ZERO} prior to dataflow */
-
-            block->bbCseIn = 0;
+            block->bbCseIn = BitVecOps::MakeCopy(cseTraits, cseEmpty);
         }
         else
         {
             /* Initialize to {ALL} prior to dataflow */
-
-            block->bbCseIn = EXPSET_ALL;
+            block->bbCseIn = BitVecOps::MakeCopy(cseTraits, cseFull);
         }
-        block->bbCseOut = EXPSET_ALL;
+
+        block->bbCseOut = BitVecOps::MakeCopy(cseTraits, cseFull);
 
         /* Initialize to {ZERO} prior to locating the CSE candidates */
-        block->bbCseGen = 0;
+        block->bbCseGen = BitVecOps::MakeCopy(cseTraits, cseEmpty);
     }
 
     // We walk the set of CSE candidates and set the bit corresponsing to the CSEindex
@@ -801,7 +922,7 @@ void Compiler::optValnumCSE_InitDataFlow()
         while (lst != nullptr)
         {
             BasicBlock* block = lst->tslBlock;
-            block->bbCseGen |= genCSEnum2bit(CSEindex);
+            BitVecOps::AddElemD(cseTraits, block->bbCseGen, genCSEnum2bit(CSEindex));
             lst = lst->tslNext;
         }
     }
@@ -814,7 +935,7 @@ void Compiler::optValnumCSE_InitDataFlow()
         bool headerPrinted = false;
         for (BasicBlock* block = fgFirstBB; block; block = block->bbNext)
         {
-            if (block->bbCseGen != 0)
+            if (block->bbCseGen != nullptr)
             {
                 if (!headerPrinted)
                 {
@@ -822,7 +943,7 @@ void Compiler::optValnumCSE_InitDataFlow()
                     headerPrinted = true;
                 }
                 printf("BB%02u", block->bbNum);
-                printf(" cseGen = %s\n", genES2str(block->bbCseGen));
+                printf(" cseGen = %s\n", genES2str(cseTraits, block->bbCseGen));
             }
         }
     }
@@ -857,21 +978,24 @@ public:
     // At the start of the merge function of the dataflow equations, initialize premerge state (to detect changes.)
     void StartMerge(BasicBlock* block)
     {
-        m_preMergeOut = block->bbCseOut;
+        m_preMergeOut = BitVecOps::MakeCopy(m_pCompiler->cseTraits, block->bbCseOut);
     }
 
     // During merge, perform the actual merging of the predecessor's (since this is a forward analysis) dataflow flags.
     void Merge(BasicBlock* block, BasicBlock* predBlock, flowList* preds)
     {
-        block->bbCseIn &= predBlock->bbCseOut;
+        BitVecOps::IntersectionD(m_pCompiler->cseTraits, block->bbCseIn, predBlock->bbCseOut);
     }
 
     // At the end of the merge store results of the dataflow equations, in a postmerge state.
     bool EndMerge(BasicBlock* block)
     {
-        EXPSET_TP mergeOut = block->bbCseOut & (block->bbCseIn | block->bbCseGen);
-        block->bbCseOut    = mergeOut;
-        return (mergeOut != m_preMergeOut);
+        BitVecTraits* traits   = m_pCompiler->cseTraits;
+        EXPSET_TP     mergeOut = BitVecOps::MakeCopy(traits, block->bbCseIn);
+        BitVecOps::UnionD(traits, mergeOut, block->bbCseGen);
+        BitVecOps::IntersectionD(traits, mergeOut, block->bbCseOut);
+        BitVecOps::Assign(traits, block->bbCseOut, mergeOut);
+        return (!BitVecOps::Equal(traits, mergeOut, m_preMergeOut));
     }
 };
 
@@ -905,8 +1029,8 @@ void Compiler::optValnumCSE_DataFlow()
         for (BasicBlock* block = fgFirstBB; block; block = block->bbNext)
         {
             printf("BB%02u", block->bbNum);
-            printf(" cseIn  = %s", genES2str(block->bbCseIn));
-            printf(" cseOut = %s", genES2str(block->bbCseOut));
+            printf(" cseIn  = %s", genES2str(cseTraits, block->bbCseIn));
+            printf(" cseOut = %s", genES2str(cseTraits, block->bbCseOut));
             printf("\n");
         }
 
@@ -946,7 +1070,7 @@ void Compiler::optValnumCSE_Availablity()
 
         compCurBB = block;
 
-        EXPSET_TP available_cses = block->bbCseIn;
+        EXPSET_TP available_cses = BitVecOps::MakeCopy(cseTraits, block->bbCseIn);
 
         optCSEweight = block->getBBWeight(this);
 
@@ -961,13 +1085,13 @@ void Compiler::optValnumCSE_Availablity()
             {
                 if (IS_CSE_INDEX(tree->gtCSEnum))
                 {
-                    EXPSET_TP mask = genCSEnum2bit(tree->gtCSEnum);
-                    CSEdsc*   desc = optCSEfindDsc(tree->gtCSEnum);
-                    unsigned  stmw = block->getBBWeight(this);
+                    unsigned int cseBit = genCSEnum2bit(tree->gtCSEnum);
+                    CSEdsc*      desc   = optCSEfindDsc(tree->gtCSEnum);
+                    unsigned     stmw   = block->getBBWeight(this);
 
                     /* Is this expression available here? */
 
-                    if (available_cses & mask)
+                    if (BitVecOps::IsMember(cseTraits, available_cses, cseBit))
                     {
                         /* This is a CSE use */
 
@@ -985,6 +1109,17 @@ void Compiler::optValnumCSE_Availablity()
 
                         /* This is a CSE def */
 
+                        if (desc->csdDefCount == 0)
+                        {
+                            // This is the first def visited, so copy its conservative VN
+                            desc->defConservativeVN = tree->gtVNPair.GetConservative();
+                        }
+                        else if (tree->gtVNPair.GetConservative() != desc->defConservativeVN)
+                        {
+                            // This candidate has defs with differing conservative VNs
+                            desc->defConservativeVN = ValueNumStore::NoVN;
+                        }
+
                         desc->csdDefCount += 1;
                         desc->csdDefWtCnt += stmw;
 
@@ -993,8 +1128,7 @@ void Compiler::optValnumCSE_Availablity()
                         tree->gtCSEnum = TO_CSE_DEF(tree->gtCSEnum);
 
                         /* This CSE will be available after this def */
-
-                        available_cses |= mask;
+                        BitVecOps::AddElemD(cseTraits, available_cses, cseBit);
                     }
 #ifdef DEBUG
                     if (verbose && IS_CSE_INDEX(tree->gtCSEnum))
@@ -1081,6 +1215,18 @@ public:
             {
                 continue;
             }
+
+#if FEATURE_FIXED_OUT_ARGS
+            // Skip the OutgoingArgArea in computing frame size, since
+            // its size is not yet known and it doesn't affect local
+            // offsets from the frame pointer (though it may affect
+            // them from the stack pointer).
+            noway_assert(m_pCompiler->lvaOutgoingArgSpaceVar != BAD_VAR_NUM);
+            if (lclNum == m_pCompiler->lvaOutgoingArgSpaceVar)
+            {
+                continue;
+            }
+#endif // FEATURE_FIXED_OUT_ARGS
 
             bool onStack = (regAvailEstimate == 0); // true when it is likely that this LclVar will have a stack home
 
@@ -1236,6 +1382,7 @@ public:
         {
             printf("\nSorted CSE candidates:\n");
             /* Print out the CSE candidates */
+            EXPSET_TP tempMask;
             for (unsigned cnt = 0; cnt < m_pCompiler->optCSECandidateCount; cnt++)
             {
                 Compiler::CSEdsc* dsc  = sortTab[cnt];
@@ -1255,8 +1402,9 @@ public:
                     use = dsc->csdUseWtCnt; // weighted use count (excluding the implicit uses at defs)
                 }
 
+                tempMask = BitVecOps::MakeSingleton(m_pCompiler->cseTraits, genCSEnum2bit(dsc->csdIndex));
                 printf("CSE #%02u,cseMask=%s,useCnt=%d: [def=%3u, use=%3u", dsc->csdIndex,
-                       genES2str(genCSEnum2bit(dsc->csdIndex)), dsc->csdUseCount, def, use);
+                       genES2str(m_pCompiler->cseTraits, tempMask), dsc->csdUseCount, def, use);
                 printf("] :: ");
                 m_pCompiler->gtDispTree(expr, nullptr, nullptr, true);
             }
@@ -1766,6 +1914,8 @@ public:
         m_addCSEcount++; // Record that we created a new LclVar for use as a CSE temp
         m_pCompiler->optCSEcount++;
 
+        ValueNum defConservativeVN = successfulCandidate->CseDsc()->defConservativeVN;
+
         /*  Walk all references to this CSE, adding an assignment
             to the CSE temp to all defs and changing all refs to
             a simple use of the CSE temp.
@@ -1878,6 +2028,46 @@ public:
                 //
                 cse           = m_pCompiler->gtNewLclvNode(cseLclVarNum, cseLclVarTyp);
                 cse->gtVNPair = exp->gtVNPair; // assign the proper Value Numbers
+                if (defConservativeVN != ValueNumStore::NoVN)
+                {
+                    // All defs of this CSE share the same conservative VN, and we are rewriting this
+                    // use to fetch the same value with no reload, so we can safely propagate that
+                    // conservative VN to this use.  This can help range check elimination later on.
+                    cse->gtVNPair.SetConservative(defConservativeVN);
+
+                    GenTreePtr cmp;
+                    if ((exp->OperGet() == GT_ARR_LENGTH) && (m_pCompiler->optCseArrLenMap != nullptr) &&
+                        (m_pCompiler->optCseArrLenMap->Lookup(exp, &cmp)))
+                    {
+                        // Propagate the new value number to this compare node as well, since
+                        // subsequent range check elimination will try to correlate it with
+                        // the other appearances that are getting CSEd.
+
+                        ValueNumStore*                      vnStore  = m_pCompiler->vnStore;
+                        ValueNum                            oldCmpVN = cmp->gtVNPair.GetConservative();
+                        ValueNumStore::ArrLenArithBoundInfo info;
+                        ValueNum                            newCmpArgVN;
+                        if (vnStore->IsVNArrLenBound(oldCmpVN))
+                        {
+                            // Comparison is against the array length directly.
+
+                            newCmpArgVN = defConservativeVN;
+                            vnStore->GetArrLenBoundInfo(oldCmpVN, &info);
+                        }
+                        else
+                        {
+                            // Comparison is against the array length +/- some offset.
+
+                            assert(vnStore->IsVNArrLenArithBound(oldCmpVN));
+                            vnStore->GetArrLenArithBoundInfo(oldCmpVN, &info);
+                            newCmpArgVN = vnStore->VNForFunc(vnStore->TypeOfVN(info.arrOp), (VNFunc)info.arrOper,
+                                                             info.arrOp, defConservativeVN);
+                        }
+                        ValueNum newCmpVN = vnStore->VNForFunc(vnStore->TypeOfVN(oldCmpVN), (VNFunc)info.cmpOper,
+                                                               info.cmpOp, newCmpArgVN);
+                        cmp->gtVNPair.SetConservative(newCmpVN);
+                    }
+                }
 #ifdef DEBUG
                 cse->gtDebugFlags |= GTF_DEBUG_VAR_CSE_REF;
 #endif // DEBUG
@@ -2038,7 +2228,7 @@ public:
             assert(m_pCompiler->fgRemoveRestOfBlock == false);
 
             /* re-morph the statement */
-            m_pCompiler->fgMorphBlockStmt(blk, stm DEBUGARG("optValnumCSE"));
+            m_pCompiler->fgMorphBlockStmt(blk, stm->AsStmt() DEBUGARG("optValnumCSE"));
 
         } while (lst != nullptr);
     }
@@ -2516,8 +2706,6 @@ void Compiler::optCleanupCSEs()
     //
     for (BasicBlock* block = fgFirstBB; block; block = block->bbNext)
     {
-        unsigned blkFlags = block->bbFlags;
-
         // And clear all the "visited" bits on the block
         //
         block->bbFlags &= ~(BBF_VISITED | BBF_MARKED);

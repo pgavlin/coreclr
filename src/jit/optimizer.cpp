@@ -822,6 +822,10 @@ bool Compiler::optCheckIterInLoopTest(
     if (limitOp->gtOper == GT_CNS_INT)
     {
         optLoopTable[loopInd].lpFlags |= LPFLG_CONST_LIMIT;
+        if ((limitOp->gtFlags & GTF_ICON_SIMD_COUNT) != 0)
+        {
+            optLoopTable[loopInd].lpFlags |= LPFLG_SIMD_LIMIT;
+        }
     }
     else if (limitOp->gtOper == GT_LCL_VAR && !optIsVarAssigned(from, to, nullptr, limitOp->gtLclVarCommon.gtLclNum))
     {
@@ -1081,9 +1085,24 @@ bool Compiler::optExtractInitTestIncr(
     // If it is a duplicated loop condition, skip it.
     if (init->gtFlags & GTF_STMT_CMPADD)
     {
-        // Must be a duplicated loop condition.
-        noway_assert(init->gtStmt.gtStmtExpr->gtOper == GT_JTRUE);
-        init = init->gtPrev;
+        bool doGetPrev = true;
+#ifdef DEBUG
+        if (opts.optRepeat)
+        {
+            // Previous optimization passes may have inserted compiler-generated
+            // statements other than duplicated loop conditions.
+            doGetPrev = (init->gtPrev != nullptr);
+        }
+        else
+        {
+            // Must be a duplicated loop condition.
+            noway_assert(init->gtStmt.gtStmtExpr->gtOper == GT_JTRUE);
+        }
+#endif // DEBUG
+        if (doGetPrev)
+        {
+            init = init->gtPrev;
+        }
         noway_assert(init != nullptr);
     }
 
@@ -1174,7 +1193,10 @@ void Compiler::optRecordLoop(BasicBlock*   head,
     optLoopTable[loopInd].lpFlags = 0;
 
     // We haven't yet recorded any side effects.
-    optLoopTable[loopInd].lpLoopHasHeapHavoc       = false;
+    for (MemoryKind memoryKind : allMemoryKinds())
+    {
+        optLoopTable[loopInd].lpLoopHasMemoryHavoc[memoryKind] = false;
+    }
     optLoopTable[loopInd].lpFieldsModified         = nullptr;
     optLoopTable[loopInd].lpArrayElemTypesModified = nullptr;
 
@@ -1217,10 +1239,14 @@ void Compiler::optRecordLoop(BasicBlock*   head,
         }
 
         // Make sure the "iterVar" initialization is never skipped,
-        // i.e. HEAD dominates the ENTRY.
-        if (!fgDominate(head, entry))
+        // i.e. every pred of ENTRY other than HEAD is in the loop.
+        for (flowList* predEdge = entry->bbPreds; predEdge; predEdge = predEdge->flNext)
         {
-            goto DONE_LOOP;
+            BasicBlock* predBlock = predEdge->flBlock;
+            if ((predBlock != head) && !optLoopTable[loopInd].lpContains(predBlock))
+            {
+                goto DONE_LOOP;
+            }
         }
 
         if (!optPopulateInitInfo(loopInd, init, iterVar))
@@ -2798,11 +2824,6 @@ void Compiler::optUnrollLoops()
     }
 #endif
 
-    if (optCanCloneLoops())
-    {
-        return;
-    }
-
 #ifdef DEBUG
     if (verbose)
     {
@@ -2811,276 +2832,266 @@ void Compiler::optUnrollLoops()
 #endif
     /* Look for loop unrolling candidates */
 
-    /*  Double loop so that after unrolling an inner loop we set change to true
-     *  and we then go back over all of the loop candidates and try to unroll
-     *  the next outer loop, until we don't unroll any loops,
-     *  then change will be false and we are done.
-     */
-    for (;;)
+    bool change = false;
+
+    // Visit loops from highest to lowest number to vist them in innermost
+    // to outermost order
+    for (unsigned lnum = optLoopCount - 1; lnum != ~0U; --lnum)
     {
-        bool change = false;
+        BasicBlock* block;
+        BasicBlock* head;
+        BasicBlock* bottom;
 
-        for (unsigned lnum = 0; lnum < optLoopCount; lnum++)
+        GenTree* loop;
+        GenTree* test;
+        GenTree* incr;
+        GenTree* phdr;
+        GenTree* init;
+
+        bool       dupCond;
+        int        lval;
+        int        lbeg;         // initial value for iterator
+        int        llim;         // limit value for iterator
+        unsigned   lvar;         // iterator lclVar #
+        int        iterInc;      // value to increment the iterator
+        genTreeOps iterOper;     // type of iterator increment (i.e. ADD, SUB, etc.)
+        var_types  iterOperType; // type result of the oper (for overflow instrs)
+        genTreeOps testOper;     // type of loop test (i.e. GT_LE, GT_GE, etc.)
+        bool       unsTest;      // Is the comparison u/int
+
+        unsigned loopRetCount;  // number of BBJ_RETURN blocks in loop
+        unsigned totalIter;     // total number of iterations in the constant loop
+        unsigned loopFlags;     // actual lpFlags
+        unsigned requiredFlags; // required lpFlags
+
+        static const int ITER_LIMIT[COUNT_OPT_CODE + 1] = {
+            10, // BLENDED_CODE
+            0,  // SMALL_CODE
+            20, // FAST_CODE
+            0   // COUNT_OPT_CODE
+        };
+
+        noway_assert(ITER_LIMIT[SMALL_CODE] == 0);
+        noway_assert(ITER_LIMIT[COUNT_OPT_CODE] == 0);
+
+        unsigned iterLimit = (unsigned)ITER_LIMIT[compCodeOpt()];
+
+#ifdef DEBUG
+        if (compStressCompile(STRESS_UNROLL_LOOPS, 50))
         {
-            BasicBlock* block;
-            BasicBlock* head;
-            BasicBlock* bottom;
-
-            GenTree* loop;
-            GenTree* test;
-            GenTree* incr;
-            GenTree* phdr;
-            GenTree* init;
-
-            bool       dupCond;
-            int        lval;
-            int        lbeg;         // initial value for iterator
-            int        llim;         // limit value for iterator
-            unsigned   lvar;         // iterator lclVar #
-            int        iterInc;      // value to increment the iterator
-            genTreeOps iterOper;     // type of iterator increment (i.e. ASG_ADD, ASG_SUB, etc.)
-            var_types  iterOperType; // type result of the oper (for overflow instrs)
-            genTreeOps testOper;     // type of loop test (i.e. GT_LE, GT_GE, etc.)
-            bool       unsTest;      // Is the comparison u/int
-
-            unsigned totalIter;     // total number of iterations in the constant loop
-            unsigned loopCostSz;    // Cost is size of one iteration
-            unsigned loopFlags;     // actual lpFlags
-            unsigned requiredFlags; // required lpFlags
-
-            GenTree* loopList; // new stmt list of the unrolled loop
-            GenTree* loopLast;
-
-            static const int ITER_LIMIT[COUNT_OPT_CODE + 1] = {
-                10, // BLENDED_CODE
-                0,  // SMALL_CODE
-                20, // FAST_CODE
-                0   // COUNT_OPT_CODE
-            };
-
-            noway_assert(ITER_LIMIT[SMALL_CODE] == 0);
-            noway_assert(ITER_LIMIT[COUNT_OPT_CODE] == 0);
-
-            unsigned iterLimit = (unsigned)ITER_LIMIT[compCodeOpt()];
-
-#ifdef DEBUG
-            if (compStressCompile(STRESS_UNROLL_LOOPS, 50))
-            {
-                iterLimit *= 10;
-            }
+            iterLimit *= 10;
+        }
 #endif
 
-            static const int UNROLL_LIMIT_SZ[COUNT_OPT_CODE + 1] = {
-                30, // BLENDED_CODE
-                0,  // SMALL_CODE
-                60, // FAST_CODE
-                0   // COUNT_OPT_CODE
-            };
+        static const int UNROLL_LIMIT_SZ[COUNT_OPT_CODE + 1] = {
+            300, // BLENDED_CODE
+            0,   // SMALL_CODE
+            600, // FAST_CODE
+            0    // COUNT_OPT_CODE
+        };
 
-            noway_assert(UNROLL_LIMIT_SZ[SMALL_CODE] == 0);
-            noway_assert(UNROLL_LIMIT_SZ[COUNT_OPT_CODE] == 0);
+        noway_assert(UNROLL_LIMIT_SZ[SMALL_CODE] == 0);
+        noway_assert(UNROLL_LIMIT_SZ[COUNT_OPT_CODE] == 0);
 
-            int unrollLimitSz = (unsigned)UNROLL_LIMIT_SZ[compCodeOpt()];
+        int unrollLimitSz = (unsigned)UNROLL_LIMIT_SZ[compCodeOpt()];
+
+        loopFlags = optLoopTable[lnum].lpFlags;
+        // Check for required flags:
+        // LPFLG_DO_WHILE - required because this transform only handles loops of this form
+        // LPFLG_CONST - required because this transform only handles full unrolls
+        // LPFLG_SIMD_LIMIT - included here as a heuristic, not for correctness/structural reasons
+        requiredFlags = LPFLG_DO_WHILE | LPFLG_CONST | LPFLG_SIMD_LIMIT;
 
 #ifdef DEBUG
-            if (compStressCompile(STRESS_UNROLL_LOOPS, 50))
-            {
-                unrollLimitSz *= 10;
-            }
+        if (compStressCompile(STRESS_UNROLL_LOOPS, 50))
+        {
+            // In stress mode, quadruple the size limit, and drop
+            // the restriction that loop limit must be Vector<T>.Count.
+
+            unrollLimitSz *= 4;
+            requiredFlags &= ~LPFLG_SIMD_LIMIT;
+        }
 #endif
 
-            loopFlags     = optLoopTable[lnum].lpFlags;
-            requiredFlags = LPFLG_DO_WHILE | LPFLG_ONE_EXIT | LPFLG_CONST;
+        /* Ignore the loop if we don't have a do-while
+        that has a constant number of iterations */
 
-            /* Ignore the loop if we don't have a do-while with a single exit
-               that has a constant number of iterations */
+        if ((loopFlags & requiredFlags) != requiredFlags)
+        {
+            continue;
+        }
 
-            if ((loopFlags & requiredFlags) != requiredFlags)
+        /* ignore if removed or marked as not unrollable */
+
+        if (loopFlags & (LPFLG_DONT_UNROLL | LPFLG_REMOVED))
+        {
+            continue;
+        }
+
+        head = optLoopTable[lnum].lpHead;
+        noway_assert(head);
+        bottom = optLoopTable[lnum].lpBottom;
+        noway_assert(bottom);
+
+        /* Get the loop data:
+            - initial constant
+            - limit constant
+            - iterator
+            - iterator increment
+            - increment operation type (i.e. ADD, SUB, etc...)
+            - loop test type (i.e. GT_GE, GT_LT, etc...)
+            */
+
+        lbeg     = optLoopTable[lnum].lpConstInit;
+        llim     = optLoopTable[lnum].lpConstLimit();
+        testOper = optLoopTable[lnum].lpTestOper();
+
+        lvar     = optLoopTable[lnum].lpIterVar();
+        iterInc  = optLoopTable[lnum].lpIterConst();
+        iterOper = optLoopTable[lnum].lpIterOper();
+
+        iterOperType = optLoopTable[lnum].lpIterOperType();
+        unsTest      = (optLoopTable[lnum].lpTestTree->gtFlags & GTF_UNSIGNED) != 0;
+
+        if (lvaTable[lvar].lvAddrExposed)
+        { // If the loop iteration variable is address-exposed then bail
+            continue;
+        }
+        if (lvaTable[lvar].lvIsStructField)
+        { // If the loop iteration variable is a promoted field from a struct then
+            // bail
+            continue;
+        }
+
+        /* Locate the pre-header and initialization and increment/test statements */
+
+        phdr = head->bbTreeList;
+        noway_assert(phdr);
+        loop = bottom->bbTreeList;
+        noway_assert(loop);
+
+        init = head->lastStmt();
+        noway_assert(init && (init->gtNext == nullptr));
+        test = bottom->lastStmt();
+        noway_assert(test && (test->gtNext == nullptr));
+        incr = test->gtPrev;
+        noway_assert(incr);
+
+        if (init->gtFlags & GTF_STMT_CMPADD)
+        {
+            /* Must be a duplicated loop condition */
+            noway_assert(init->gtStmt.gtStmtExpr->gtOper == GT_JTRUE);
+
+            dupCond = true;
+            init    = init->gtPrev;
+            noway_assert(init);
+        }
+        else
+        {
+            dupCond = false;
+        }
+
+        /* Find the number of iterations - the function returns false if not a constant number */
+
+        if (!optComputeLoopRep(lbeg, llim, iterInc, iterOper, iterOperType, testOper, unsTest, dupCond, &totalIter))
+        {
+            continue;
+        }
+
+        /* Forget it if there are too many repetitions or not a constant loop */
+
+        if (totalIter > iterLimit)
+        {
+            continue;
+        }
+
+        noway_assert(init->gtOper == GT_STMT);
+        init = init->gtStmt.gtStmtExpr;
+        noway_assert(test->gtOper == GT_STMT);
+        test = test->gtStmt.gtStmtExpr;
+        noway_assert(incr->gtOper == GT_STMT);
+        incr = incr->gtStmt.gtStmtExpr;
+
+        // Don't unroll loops we don't understand.
+        if (incr->gtOper != GT_ASG)
+        {
+            continue;
+        }
+        incr = incr->gtOp.gtOp2;
+
+        /* Make sure everything looks ok */
+        if ((init->gtOper != GT_ASG) || (init->gtOp.gtOp1->gtOper != GT_LCL_VAR) ||
+            (init->gtOp.gtOp1->gtLclVarCommon.gtLclNum != lvar) || (init->gtOp.gtOp2->gtOper != GT_CNS_INT) ||
+            (init->gtOp.gtOp2->gtIntCon.gtIconVal != lbeg) ||
+
+            !((incr->gtOper == GT_ADD) || (incr->gtOper == GT_SUB)) || (incr->gtOp.gtOp1->gtOper != GT_LCL_VAR) ||
+            (incr->gtOp.gtOp1->gtLclVarCommon.gtLclNum != lvar) || (incr->gtOp.gtOp2->gtOper != GT_CNS_INT) ||
+            (incr->gtOp.gtOp2->gtIntCon.gtIconVal != iterInc) ||
+
+            (test->gtOper != GT_JTRUE))
+        {
+            noway_assert(!"Bad precondition in Compiler::optUnrollLoops()");
+            continue;
+        }
+
+        /* heuristic - Estimated cost in code size of the unrolled loop */
+
+        {
+            ClrSafeInt<unsigned> loopCostSz; // Cost is size of one iteration
+
+            block         = head->bbNext;
+            auto tryIndex = block->bbTryIndex;
+
+            loopRetCount = 0;
+            for (;; block = block->bbNext)
             {
-                continue;
-            }
-
-            /* ignore if removed or marked as not unrollable */
-
-            if (optLoopTable[lnum].lpFlags & (LPFLG_DONT_UNROLL | LPFLG_REMOVED))
-            {
-                continue;
-            }
-
-            head = optLoopTable[lnum].lpHead;
-            noway_assert(head);
-            bottom = optLoopTable[lnum].lpBottom;
-            noway_assert(bottom);
-
-            /* The single exit must be at the bottom of the loop */
-            noway_assert(optLoopTable[lnum].lpExit);
-            if (optLoopTable[lnum].lpExit != bottom)
-            {
-                continue;
-            }
-
-            /* Unrolling loops with jumps in them is not worth the headache
-             * Later we might consider unrolling loops after un-switching */
-
-            block = head;
-            do
-            {
-                block = block->bbNext;
-                noway_assert(block);
-
-                if (block->bbJumpKind != BBJ_NONE)
+                if (block->bbTryIndex != tryIndex)
                 {
-                    if (block != bottom)
-                    {
-                        goto DONE_LOOP;
-                    }
+                    // Unrolling would require cloning EH regions
+                    goto DONE_LOOP;
                 }
-            } while (block != bottom);
 
-            /* Get the loop data:
-                - initial constant
-                - limit constant
-                - iterator
-                - iterator increment
-                - increment operation type (i.e. ASG_ADD, ASG_SUB, etc...)
-                - loop test type (i.e. GT_GE, GT_LT, etc...)
-             */
-
-            lbeg     = optLoopTable[lnum].lpConstInit;
-            llim     = optLoopTable[lnum].lpConstLimit();
-            testOper = optLoopTable[lnum].lpTestOper();
-
-            lvar     = optLoopTable[lnum].lpIterVar();
-            iterInc  = optLoopTable[lnum].lpIterConst();
-            iterOper = optLoopTable[lnum].lpIterOper();
-
-            iterOperType = optLoopTable[lnum].lpIterOperType();
-            unsTest      = (optLoopTable[lnum].lpTestTree->gtFlags & GTF_UNSIGNED) != 0;
-
-            if (lvaTable[lvar].lvAddrExposed)
-            { // If the loop iteration variable is address-exposed then bail
-                continue;
-            }
-            if (lvaTable[lvar].lvIsStructField)
-            { // If the loop iteration variable is a promoted field from a struct then
-                // bail
-                continue;
-            }
-
-            /* Locate the pre-header and initialization and increment/test statements */
-
-            phdr = head->bbTreeList;
-            noway_assert(phdr);
-            loop = bottom->bbTreeList;
-            noway_assert(loop);
-
-            init = head->lastStmt();
-            noway_assert(init && (init->gtNext == nullptr));
-            test = bottom->lastStmt();
-            noway_assert(test && (test->gtNext == nullptr));
-            incr = test->gtPrev;
-            noway_assert(incr);
-
-            if (init->gtFlags & GTF_STMT_CMPADD)
-            {
-                /* Must be a duplicated loop condition */
-                noway_assert(init->gtStmt.gtStmtExpr->gtOper == GT_JTRUE);
-
-                dupCond = true;
-                init    = init->gtPrev;
-                noway_assert(init);
-            }
-            else
-            {
-                dupCond = false;
-            }
-
-            /* Find the number of iterations - the function returns false if not a constant number */
-
-            if (!optComputeLoopRep(lbeg, llim, iterInc, iterOper, iterOperType, testOper, unsTest, dupCond, &totalIter))
-            {
-                continue;
-            }
-
-            /* Forget it if there are too many repetitions or not a constant loop */
-
-            if (totalIter > iterLimit)
-            {
-                continue;
-            }
-
-            noway_assert(init->gtOper == GT_STMT);
-            init = init->gtStmt.gtStmtExpr;
-            noway_assert(test->gtOper == GT_STMT);
-            test = test->gtStmt.gtStmtExpr;
-            noway_assert(incr->gtOper == GT_STMT);
-            incr = incr->gtStmt.gtStmtExpr;
-
-            // Don't unroll loops we don't understand.
-            if (incr->gtOper == GT_ASG)
-            {
-                continue;
-            }
-
-            /* Make sure everything looks ok */
-            if ((init->gtOper != GT_ASG) || (init->gtOp.gtOp1->gtOper != GT_LCL_VAR) ||
-                (init->gtOp.gtOp1->gtLclVarCommon.gtLclNum != lvar) || (init->gtOp.gtOp2->gtOper != GT_CNS_INT) ||
-                (init->gtOp.gtOp2->gtIntCon.gtIconVal != lbeg) ||
-
-                !((incr->gtOper == GT_ASG_ADD) || (incr->gtOper == GT_ASG_SUB)) ||
-                (incr->gtOp.gtOp1->gtOper != GT_LCL_VAR) || (incr->gtOp.gtOp1->gtLclVarCommon.gtLclNum != lvar) ||
-                (incr->gtOp.gtOp2->gtOper != GT_CNS_INT) || (incr->gtOp.gtOp2->gtIntCon.gtIconVal != iterInc) ||
-
-                (test->gtOper != GT_JTRUE))
-            {
-                noway_assert(!"Bad precondition in Compiler::optUnrollLoops()");
-                continue;
-            }
-
-            /* heuristic - Estimated cost in code size of the unrolled loop */
-
-            loopCostSz = 0;
-
-            block = head;
-
-            do
-            {
-                block = block->bbNext;
+                if (block->bbJumpKind == BBJ_RETURN)
+                {
+                    ++loopRetCount;
+                }
 
                 /* Visit all the statements in the block */
 
                 for (GenTreeStmt* stmt = block->firstStmt(); stmt; stmt = stmt->gtNextStmt)
                 {
-                    /* Get the expression and stop if end reached */
-
-                    GenTreePtr expr = stmt->gtStmtExpr;
-                    if (expr == incr)
-                    {
-                        break;
-                    }
-
                     /* Calculate gtCostSz */
                     gtSetStmtInfo(stmt);
 
                     /* Update loopCostSz */
                     loopCostSz += stmt->gtCostSz;
                 }
-            } while (block != bottom);
+
+                if (block == bottom)
+                {
+                    break;
+                }
+            }
+
+#ifdef JIT32_GCENCODER
+            if (fgReturnCount + loopRetCount * (totalIter - 1) > SET_EPILOGCNT_MAX)
+            {
+                // Jit32 GC encoder can't report more than SET_EPILOGCNT_MAX epilogs.
+                goto DONE_LOOP;
+            }
+#endif // !JIT32_GCENCODER
 
             /* Compute the estimated increase in code size for the unrolled loop */
 
-            unsigned int fixedLoopCostSz;
-            fixedLoopCostSz = 8;
+            ClrSafeInt<unsigned> fixedLoopCostSz(8);
 
-            int unrollCostSz;
-            unrollCostSz = (loopCostSz * totalIter) - (loopCostSz + fixedLoopCostSz);
+            ClrSafeInt<int> unrollCostSz = ClrSafeInt<int>(loopCostSz * ClrSafeInt<unsigned>(totalIter)) -
+                                           ClrSafeInt<int>(loopCostSz + fixedLoopCostSz);
 
             /* Don't unroll if too much code duplication would result. */
 
-            if (unrollCostSz > unrollLimitSz)
+            if (unrollCostSz.IsOverflow() || (unrollCostSz.Value() > unrollLimitSz))
             {
-                /* prevent this loop from being revisited */
-                optLoopTable[lnum].lpFlags |= LPFLG_DONT_UNROLL;
                 goto DONE_LOOP;
             }
 
@@ -3100,76 +3111,81 @@ void Compiler::optUnrollLoops()
                 printf("\n");
             }
 #endif
+        }
 
-            /* Create the unrolled loop statement list */
-
-            loopList = loopLast = nullptr;
+        /* Create the unrolled loop statement list */
+        {
+            BlockToBlockMap blockMap(getAllocator());
+            BasicBlock*     insertAfter = bottom;
 
             for (lval = lbeg; totalIter; totalIter--)
             {
-                block = head;
-
-                do
+                for (block = head->bbNext;; block = block->bbNext)
                 {
-                    GenTreeStmt* stmt;
-                    GenTree*     expr;
+                    BasicBlock* newBlock = insertAfter =
+                        fgNewBBafter(block->bbJumpKind, insertAfter, /*extendRegion*/ true);
+                    blockMap.Set(block, newBlock);
 
-                    block = block->bbNext;
-                    noway_assert(block);
-
-                    /* Visit all the statements in the block */
-
-                    for (stmt = block->firstStmt(); stmt; stmt = stmt->gtNextStmt)
+                    if (!BasicBlock::CloneBlockState(this, newBlock, block, lvar, lval))
                     {
-                        /* Stop if we've reached the end of the loop */
-
-                        if (stmt->gtStmtExpr == incr)
-                        {
-                            break;
-                        }
-
-                        /* Clone/substitute the expression */
-
-                        expr = gtCloneExpr(stmt, 0, lvar, lval);
-
                         // cloneExpr doesn't handle everything
+                        BasicBlock* oldBottomNext = insertAfter->bbNext;
+                        bottom->bbNext            = oldBottomNext;
+                        oldBottomNext->bbPrev     = bottom;
+                        optLoopTable[lnum].lpFlags |= LPFLG_DONT_UNROLL;
+                        goto DONE_LOOP;
+                    }
+                    // Block weight should no longer have the loop multiplier
+                    newBlock->modifyBBWeight(newBlock->bbWeight / BB_LOOP_WEIGHT);
+                    // Jump dests are set in a post-pass; make sure CloneBlockState hasn't tried to set them.
+                    assert(newBlock->bbJumpDest == nullptr);
 
-                        if (!expr)
+                    if (block == bottom)
+                    {
+                        // Remove the test; we're doing a full unroll.
+
+                        GenTreeStmt* testCopyStmt = newBlock->lastStmt();
+                        GenTreePtr   testCopyExpr = testCopyStmt->gtStmt.gtStmtExpr;
+                        assert(testCopyExpr->gtOper == GT_JTRUE);
+                        GenTreePtr sideEffList = nullptr;
+                        gtExtractSideEffList(testCopyExpr, &sideEffList, GTF_SIDE_EFFECT | GTF_ORDER_SIDEEFF);
+                        if (sideEffList == nullptr)
                         {
-                            optLoopTable[lnum].lpFlags |= LPFLG_DONT_UNROLL;
-                            goto DONE_LOOP;
-                        }
-
-                        /* Append the expression to our list */
-
-                        if (loopList)
-                        {
-                            loopLast->gtNext = expr;
+                            fgRemoveStmt(newBlock, testCopyStmt);
                         }
                         else
                         {
-                            loopList = expr;
+                            testCopyStmt->gtStmt.gtStmtExpr = sideEffList;
                         }
+                        newBlock->bbJumpKind = BBJ_NONE;
 
-                        expr->gtPrev = loopLast;
-                        loopLast     = expr;
+                        // Exit this loop; we've walked all the blocks.
+                        break;
                     }
-                } while (block != bottom);
+                }
+
+                // Now redirect any branches within the newly-cloned iteration
+                for (block = head->bbNext; block != bottom; block = block->bbNext)
+                {
+                    BasicBlock* newBlock = blockMap[block];
+                    optCopyBlkDest(block, newBlock);
+                    optRedirectBlock(newBlock, &blockMap);
+                }
 
                 /* update the new value for the unrolled iterator */
 
                 switch (iterOper)
                 {
-                    case GT_ASG_ADD:
+                    case GT_ADD:
                         lval += iterInc;
                         break;
 
-                    case GT_ASG_SUB:
+                    case GT_SUB:
                         lval -= iterInc;
                         break;
 
-                    case GT_ASG_RSH:
-                    case GT_ASG_LSH:
+                    case GT_RSH:
+                    case GT_LSH:
                         noway_assert(!"Unrolling not implemented for this loop iterator");
                         goto DONE_LOOP;
 
@@ -3179,46 +3195,22 @@ void Compiler::optUnrollLoops()
                 }
             }
 
-            /* Finish the linked list */
-
-            if (loopList)
+            // Gut the old loop body
+            for (block = head->bbNext;; block = block->bbNext)
             {
-                loopList->gtPrev = loopLast;
-                loopLast->gtNext = nullptr;
-            }
-
-            /* Replace the body with the unrolled one */
-
-            block = head;
-
-            do
-            {
-                block = block->bbNext;
-                noway_assert(block);
                 block->bbTreeList = nullptr;
                 block->bbJumpKind = BBJ_NONE;
-                block->bbFlags &= ~BBF_NEEDS_GCPOLL;
-            } while (block != bottom);
+                block->bbFlags &= ~(BBF_NEEDS_GCPOLL | BBF_LOOP_HEAD);
+                if (block->bbJumpDest != nullptr)
+                {
+                    block->bbJumpDest = nullptr;
+                }
 
-            bottom->bbJumpKind = BBJ_NONE;
-            bottom->bbTreeList = loopList;
-            bottom->bbFlags &= ~BBF_NEEDS_GCPOLL;
-            bottom->modifyBBWeight(bottom->bbWeight / BB_LOOP_WEIGHT);
-
-            bool dummy;
-
-            fgMorphStmts(bottom, &dummy, &dummy, &dummy);
-
-            /* Update bbRefs and bbPreds */
-            /* Here head->bbNext is bottom !!! - Replace it */
-
-            fgRemoveRefPred(head->bbNext, bottom);
-
-            /* Now change the initialization statement in the HEAD to "lvar = lval;"
-             * (the last value of the iterator in the loop)
-             * and drop the jump condition since the unrolled loop will always execute */
-
-            init->gtOp.gtOp2->gtIntCon.gtIconVal = lval;
+                if (block == bottom)
+                {
+                    break;
+                }
+            }
 
             /* if the HEAD is a BBJ_COND drop the condition (and make HEAD a BBJ_NONE block) */
 
@@ -3240,10 +3232,6 @@ void Compiler::optUnrollLoops()
                 phdr->gtPrev     = init;
                 head->bbJumpKind = BBJ_NONE;
                 head->bbFlags &= ~BBF_NEEDS_GCPOLL;
-
-                /* Update bbRefs and bbPreds */
-
-                fgRemoveRefPred(head->bbJumpDest, head);
             }
             else
             {
@@ -3256,18 +3244,9 @@ void Compiler::optUnrollLoops()
             {
                 printf("Whole unrolled loop:\n");
 
-                GenTreePtr s = loopList;
-
-                while (s)
-                {
-                    noway_assert(s->gtOper == GT_STMT);
-                    gtDispTree(s);
-                    s = s->gtNext;
-                }
-                printf("\n");
-
                 gtDispTree(init);
                 printf("\n");
+                fgDumpTrees(head->bbNext, insertAfter);
             }
 #endif
 
@@ -3278,22 +3257,25 @@ void Compiler::optUnrollLoops()
             /* Make sure to update loop table */
 
             /* Use the LPFLG_REMOVED flag and update the bbLoopMask acordingly
-             * (also make head and bottom NULL - to hit an assert or GPF) */
+                * (also make head and bottom NULL - to hit an assert or GPF) */
 
             optLoopTable[lnum].lpFlags |= LPFLG_REMOVED;
             optLoopTable[lnum].lpHead = optLoopTable[lnum].lpBottom = nullptr;
 
-        DONE_LOOP:;
+            // Note if we created new BBJ_RETURNs
+            fgReturnCount += loopRetCount * (totalIter - 1);
         }
 
-        if (!change)
-        {
-            break;
-        }
+    DONE_LOOP:;
+    }
+
+    if (change)
+    {
+        fgUpdateChangedFlowGraph();
     }
 
 #ifdef DEBUG
-    fgDebugCheckBBlist();
+    fgDebugCheckBBlist(true);
 #endif
 }
 #ifdef _PREFAST_
@@ -3639,12 +3621,10 @@ void Compiler::fgOptWhileLoop(BasicBlock* block)
 
     copyOfCondStmt->gtFlags |= GTF_STMT_CMPADD;
 
-#ifdef DEBUGGING_SUPPORT
     if (opts.compDbgInfo)
     {
         copyOfCondStmt->gtStmt.gtStmtILoffsx = condStmt->gtStmt.gtStmtILoffsx;
     }
-#endif
 
     // Flag the block that received the copy as potentially having an array/vtable
     // reference if the block copied from did; this is a conservative guess.
@@ -4265,7 +4245,7 @@ void Compiler::optDebugLogLoopCloning(BasicBlock* block, GenTreePtr insertBefore
     GenTreePtr logCall = gtNewHelperCallNode(CORINFO_HELP_DEBUG_LOG_LOOP_CLONING, TYP_VOID);
     GenTreePtr stmt    = fgNewStmtFromTree(logCall);
     fgInsertStmtBefore(block, insertBefore, stmt);
-    fgMorphBlockStmt(block, stmt DEBUGARG("Debug log loop cloning"));
+    fgMorphBlockStmt(block, stmt->AsStmt() DEBUGARG("Debug log loop cloning"));
 }
 #endif
 
@@ -4394,14 +4374,18 @@ bool Compiler::optIsLoopClonable(unsigned loopInd)
     }
 
     // We've previously made a decision whether to have separate return epilogs, or branch to one.
-    // There's a GCInfo limitation in the x86 case, so that there can be no more than 4 separate epilogs.
-    // (I thought this was x86-specific, but it's not if-d.  On other architectures, the decision should be made as a
-    // heuristic tradeoff; perhaps we're just choosing to live with 4 as the limit.)
-    if (fgReturnCount + loopRetCount > 4)
+    // There's a GCInfo limitation in the x86 case, so that there can be no more than SET_EPILOGCNT_MAX separate
+    // epilogs.  Other architectures have a limit of 4 here for "historical reasons", but this should be revisited
+    // (or return blocks should not be considered part of the loop, rendering this issue moot).
+    unsigned epilogLimit = 4;
+#ifdef JIT32_GCENCODER
+    epilogLimit = SET_EPILOGCNT_MAX;
+#endif // JIT32_GCENCODER
+    if (fgReturnCount + loopRetCount > epilogLimit)
     {
         JITDUMP("Loop cloning: rejecting loop because it has %d returns; if added to previously-existing %d returns, "
-                "would exceed the limit of 4.\n",
-                loopRetCount, fgReturnCount);
+                "would exceed the limit of %d.\n",
+                loopRetCount, fgReturnCount, epilogLimit);
         return false;
     }
 
@@ -4642,7 +4626,11 @@ void Compiler::optCloneLoop(unsigned loopInd, LoopCloneContext* context)
         BasicBlock* newBlk = fgNewBBafter(blk->bbJumpKind, newPred,
                                           /*extendRegion*/ true);
 
-        BasicBlock::CloneBlockState(this, newBlk, blk);
+        // Call CloneBlockState to make a copy of the block's statements (and attributes), and assert that it
+        // has a return value indicating success, because optCanOptimizeByLoopCloningVisitor has already
+        // checked them to guarantee they are clonable.
+        bool cloneOk = BasicBlock::CloneBlockState(this, newBlk, blk);
+        noway_assert(cloneOk);
         // TODO-Cleanup: The above clones the bbNatLoopNum, which is incorrect.  Eventually, we should probably insert
         // the cloned loop in the loop table.  For now, however, we'll just make these blocks be part of the surrounding
         // loop, if one exists -- the parent of the loop we're cloning.
@@ -4715,6 +4703,12 @@ void Compiler::optCloneLoop(unsigned loopInd, LoopCloneContext* context)
         optUpdateLoopHead(loopInd, optLoopTable[loopInd].lpHead, condLast);
     }
     assert(foundIt && e2 != nullptr);
+
+    // Don't unroll loops that we've cloned -- the unroller expects any loop it should unroll to
+    // initialize the loop counter immediately before entering the loop, but we've left a shared
+    // initialization of the loop counter up above the test that determines which version of the
+    // loop to take.
+    optLoopTable[loopInd].lpFlags |= LPFLG_DONT_UNROLL;
 
     fgUpdateChangedFlowGraph();
 }
@@ -6226,9 +6220,28 @@ bool Compiler::optHoistLoopExprsForTree(
         // be hoisted so that they are evaluated in the same order as they would have been in the loop,
         // and therefore throw exceptions in the same order.  (So we don't use GTF_GLOBALLY_VISIBLE_SIDE_EFFECTS
         // here, since that includes exceptions.)
-        if (tree->gtFlags & GTF_CALL)
+        if (tree->IsCall())
         {
-            *pFirstBlockAndBeforeSideEffect = false;
+            // If it's a call, it must be a helper call that does not mutate the heap.
+            // Further, if it may run a cctor, it must be labeled as "Hoistable"
+            // (meaning it won't run a cctor because the class is not precise-init).
+            GenTreeCall* call = tree->AsCall();
+            if (call->gtCallType != CT_HELPER)
+            {
+                *pFirstBlockAndBeforeSideEffect = false;
+            }
+            else
+            {
+                CorInfoHelpFunc helpFunc = eeGetHelperNum(call->gtCallMethHnd);
+                if (s_helperCallProperties.MutatesHeap(helpFunc))
+                {
+                    *pFirstBlockAndBeforeSideEffect = false;
+                }
+                else if (s_helperCallProperties.MayRunCctor(helpFunc) && (call->gtFlags & GTF_CALL_HOISTABLE) == 0)
+                {
+                    *pFirstBlockAndBeforeSideEffect = false;
+                }
+            }
         }
         else if (tree->OperIsAssignment())
         {
@@ -6387,7 +6400,7 @@ bool Compiler::optVNIsLoopInvariant(ValueNum vn, unsigned lnum, VNToBoolMap* loo
                 res                  = !optLoopContains(lnum, ssaDef->m_defLoc.m_blk->bbNatLoopNum);
             }
         }
-        else if (funcApp.m_func == VNF_PhiHeapDef)
+        else if (funcApp.m_func == VNF_PhiMemoryDef)
         {
             BasicBlock* defnBlk = reinterpret_cast<BasicBlock*>(vnStore->ConstantValue<ssize_t>(funcApp.m_args[0]));
             res                 = !optLoopContains(lnum, defnBlk->bbNatLoopNum);
@@ -6748,15 +6761,17 @@ void Compiler::fgCreateLoopPreHeader(unsigned lnum)
 
 bool Compiler::optBlockIsLoopEntry(BasicBlock* blk, unsigned* pLnum)
 {
-    unsigned lnum = blk->bbNatLoopNum;
-    while (lnum != BasicBlock::NOT_IN_LOOP)
+    for (unsigned lnum = blk->bbNatLoopNum; lnum != BasicBlock::NOT_IN_LOOP; lnum = optLoopTable[lnum].lpParent)
     {
+        if (optLoopTable[lnum].lpFlags & LPFLG_REMOVED)
+        {
+            continue;
+        }
         if (optLoopTable[lnum].lpEntry == blk)
         {
             *pLnum = lnum;
             return true;
         }
-        lnum = optLoopTable[lnum].lpParent;
     }
     return false;
 }
@@ -6825,7 +6840,8 @@ void Compiler::optComputeLoopSideEffectsOfBlock(BasicBlock* blk)
 
     AddVariableLivenessAllContainingLoops(mostNestedLoop, blk);
 
-    bool heapHavoc = false; // True ==> there's a call or a memory store that has arbitrary heap effects.
+    // MemoryKinds for which an in-loop call or store has arbitrary effects.
+    MemoryKindSet memoryHavoc = emptyMemoryKindSet;
 
     // Now iterate over the remaining statements, and their trees.
     for (GenTreePtr stmts = blk->FirstNonPhiDef(); (stmts != nullptr); stmts = stmts->gtNext)
@@ -6834,8 +6850,8 @@ void Compiler::optComputeLoopSideEffectsOfBlock(BasicBlock* blk)
         {
             genTreeOps oper = tree->OperGet();
 
-            // Even after we set heapHavoc we still may want to know if a loop contains calls
-            if (heapHavoc)
+            // Even after we set memoryHavoc we still may want to know if a loop contains calls
+            if (memoryHavoc == fullMemoryKindSet)
             {
                 if (oper == GT_CALL)
                 {
@@ -6846,18 +6862,18 @@ void Compiler::optComputeLoopSideEffectsOfBlock(BasicBlock* blk)
                 // If we just set lpContainsCall or it was previously set
                 if (optLoopTable[mostNestedLoop].lpContainsCall)
                 {
-                    // We can early exit after both heapHavoc and lpContainsCall are both set to true.
+                    // We can early exit after both memoryHavoc and lpContainsCall are both set to true.
                     break;
                 }
 
-                // We are just looking for GT_CALL nodes after heapHavoc was set.
+                // We are just looking for GT_CALL nodes after memoryHavoc was set.
                 continue;
             }
 
-            // otherwise heapHavoc is not set
-            assert(!heapHavoc);
+            // otherwise memoryHavoc is not set for at least one heap ID
+            assert(memoryHavoc != fullMemoryKindSet);
 
-            // This body is a distillation of the heap-side effect code of value numbering.
+            // This body is a distillation of the memory side-effect code of value numbering.
             // We also do a very limited analysis if byref PtrTo values, to cover some cases
             // that the compiler creates.
 
@@ -6872,7 +6888,7 @@ void Compiler::optComputeLoopSideEffectsOfBlock(BasicBlock* blk)
 
                     if ((tree->gtFlags & GTF_IND_VOLATILE) != 0)
                     {
-                        heapHavoc = true;
+                        memoryHavoc |= memoryKindSet(GcHeap, ByrefExposed);
                         continue;
                     }
 
@@ -6894,12 +6910,14 @@ void Compiler::optComputeLoopSideEffectsOfBlock(BasicBlock* blk)
                                 CORINFO_CLASS_HANDLE elemType =
                                     CORINFO_CLASS_HANDLE(vnStore->ConstantValue<size_t>(funcApp.m_args[0]));
                                 AddModifiedElemTypeAllContainingLoops(mostNestedLoop, elemType);
-                                // Don't set heapHavoc below.
+                                // Don't set memoryHavoc for GcHeap below.  Do set memoryHavoc for ByrefExposed
+                                // (conservatively assuming that a byref may alias the array element)
+                                memoryHavoc |= memoryKindSet(ByrefExposed);
                                 continue;
                             }
                         }
                         // Otherwise...
-                        heapHavoc = true;
+                        memoryHavoc |= memoryKindSet(GcHeap, ByrefExposed);
                     }
                     // Is the LHS an array index expression?
                     else if (lhs->ParseArrayElemForm(this, &arrInfo, &fldSeqArrElem))
@@ -6908,6 +6926,8 @@ void Compiler::optComputeLoopSideEffectsOfBlock(BasicBlock* blk)
                         // field of "S", will lose all information about the array type.
                         CORINFO_CLASS_HANDLE elemTypeEq = EncodeElemType(arrInfo.m_elemType, arrInfo.m_elemStructType);
                         AddModifiedElemTypeAllContainingLoops(mostNestedLoop, elemTypeEq);
+                        // Conservatively assume byrefs may alias this array element
+                        memoryHavoc |= memoryKindSet(ByrefExposed);
                     }
                     else
                     {
@@ -6920,7 +6940,7 @@ void Compiler::optComputeLoopSideEffectsOfBlock(BasicBlock* blk)
                         if (arg->IsFieldAddr(this, &obj, &staticOffset, &fldSeq) &&
                             (fldSeq != FieldSeqStore::NotAField()))
                         {
-                            // Get the first (object) field from field seq.  Heap[field] will yield the "field map".
+                            // Get the first (object) field from field seq.  GcHeap[field] will yield the "field map".
                             assert(fldSeq != nullptr);
                             if (fldSeq->IsFirstElemFieldSeq())
                             {
@@ -6929,10 +6949,12 @@ void Compiler::optComputeLoopSideEffectsOfBlock(BasicBlock* blk)
                             }
 
                             AddModifiedFieldAllContainingLoops(mostNestedLoop, fldSeq->m_fieldHnd);
+                            // Conservatively assume byrefs may alias this object.
+                            memoryHavoc |= memoryKindSet(ByrefExposed);
                         }
                         else
                         {
-                            heapHavoc = true;
+                            memoryHavoc |= memoryKindSet(GcHeap, ByrefExposed);
                         }
                     }
                 }
@@ -6942,13 +6964,19 @@ void Compiler::optComputeLoopSideEffectsOfBlock(BasicBlock* blk)
                     bool                 isEntire;
                     if (!tree->DefinesLocal(this, &lclVarTree, &isEntire))
                     {
-                        // For now, assume arbitrary side effects on the heap...
-                        heapHavoc = true;
+                        // For now, assume arbitrary side effects on GcHeap/ByrefExposed...
+                        memoryHavoc |= memoryKindSet(GcHeap, ByrefExposed);
+                    }
+                    else if (lvaVarAddrExposed(lclVarTree->gtLclNum))
+                    {
+                        memoryHavoc |= memoryKindSet(ByrefExposed);
                     }
                 }
                 else if (lhs->OperGet() == GT_CLS_VAR)
                 {
                     AddModifiedFieldAllContainingLoops(mostNestedLoop, lhs->gtClsVar.gtClsVarHnd);
+                    // Conservatively assume byrefs may alias this static field
+                    memoryHavoc |= memoryKindSet(ByrefExposed);
                 }
                 // Otherwise, must be local lhs form.  I should assert that.
                 else if (lhs->OperGet() == GT_LCL_VAR)
@@ -6966,6 +6994,11 @@ void Compiler::optComputeLoopSideEffectsOfBlock(BasicBlock* blk)
                                 .GetPerSsaData(lhsLcl->GetSsaNum())
                                 ->m_vnPair.SetLiberal(rhsVN);
                         }
+                    }
+                    // If the local is address-exposed, count this as ByrefExposed havoc
+                    if (lvaVarAddrExposed(lhsLcl->gtLclNum))
+                    {
+                        memoryHavoc |= memoryKindSet(ByrefExposed);
                     }
                 }
             }
@@ -7007,7 +7040,7 @@ void Compiler::optComputeLoopSideEffectsOfBlock(BasicBlock* blk)
                     case GT_XCHG:    // Binop
                     case GT_CMPXCHG: // Specialop
                     {
-                        heapHavoc = true;
+                        memoryHavoc |= memoryKindSet(GcHeap, ByrefExposed);
                     }
                     break;
 
@@ -7023,7 +7056,7 @@ void Compiler::optComputeLoopSideEffectsOfBlock(BasicBlock* blk)
                             CorInfoHelpFunc helpFunc = eeGetHelperNum(call->gtCallMethHnd);
                             if (s_helperCallProperties.MutatesHeap(helpFunc))
                             {
-                                heapHavoc = true;
+                                memoryHavoc |= memoryKindSet(GcHeap, ByrefExposed);
                             }
                             else if (s_helperCallProperties.MayRunCctor(helpFunc))
                             {
@@ -7033,33 +7066,39 @@ void Compiler::optComputeLoopSideEffectsOfBlock(BasicBlock* blk)
                                 // and might have arbitrary side effects.
                                 if ((tree->gtFlags & GTF_CALL_HOISTABLE) == 0)
                                 {
-                                    heapHavoc = true;
+                                    memoryHavoc |= memoryKindSet(GcHeap, ByrefExposed);
                                 }
                             }
                         }
                         else
                         {
-                            heapHavoc = true;
+                            memoryHavoc |= memoryKindSet(GcHeap, ByrefExposed);
                         }
                         break;
                     }
 
                     default:
-                        // All other gtOper node kinds, leave 'heapHavoc' unchanged (i.e. false)
+                        // All other gtOper node kinds, leave 'memoryHavoc' unchanged (i.e. false)
                         break;
                 }
             }
         }
     }
 
-    if (heapHavoc)
+    if (memoryHavoc != emptyMemoryKindSet)
     {
-        // Record that all loops containing this block have heap havoc effects.
+        // Record that all loops containing this block have memory havoc effects.
         unsigned lnum = mostNestedLoop;
         while (lnum != BasicBlock::NOT_IN_LOOP)
         {
-            optLoopTable[lnum].lpLoopHasHeapHavoc = true;
-            lnum                                  = optLoopTable[lnum].lpParent;
+            for (MemoryKind memoryKind : allMemoryKinds())
+            {
+                if ((memoryHavoc & memoryKindSet(memoryKind)) != 0)
+                {
+                    optLoopTable[lnum].lpLoopHasMemoryHavoc[memoryKind] = true;
+                }
+            }
+            lnum = optLoopTable[lnum].lpParent;
         }
     }
 }
@@ -7239,7 +7278,7 @@ void Compiler::optRemoveRangeCheck(
 
     noway_assert(stmt->gtOper == GT_STMT);
     noway_assert(tree->gtOper == GT_COMMA);
-    noway_assert(tree->gtOp.gtOp1->gtOper == GT_ARR_BOUNDS_CHECK);
+    noway_assert(tree->gtOp.gtOp1->OperIsBoundsCheck());
     noway_assert(forceRemove || optIsRangeCheckRemovable(tree->gtOp.gtOp1));
 
     GenTreeBoundsChk* bndsChk = tree->gtOp.gtOp1->AsBoundsChk();
@@ -7413,57 +7452,6 @@ GenTreePtr Compiler::optFindLocalInit(BasicBlock* block,
 
     return rhs;
 }
-
-/*****************************************************************************
- *
- *  Return true if "op1" is guaranteed to be less then or equal to "op2".
- */
-
-#if FANCY_ARRAY_OPT
-
-bool Compiler::optIsNoMore(GenTreePtr op1, GenTreePtr op2, int add1, int add2)
-{
-    if (op1->gtOper == GT_CNS_INT && op2->gtOper == GT_CNS_INT)
-    {
-        add1 += op1->gtIntCon.gtIconVal;
-        add2 += op2->gtIntCon.gtIconVal;
-    }
-    else
-    {
-        /* Check for +/- constant on either operand */
-
-        if (op1->gtOper == GT_ADD && op1->gtOp.gtOp2->gtOper == GT_CNS_INT)
-        {
-            add1 += op1->gtOp.gtOp2->gtIntCon.gtIconVal;
-            op1 = op1->gtOp.gtOp1;
-        }
-
-        if (op2->gtOper == GT_ADD && op2->gtOp.gtOp2->gtOper == GT_CNS_INT)
-        {
-            add2 += op2->gtOp.gtOp2->gtIntCon.gtIconVal;
-            op2 = op2->gtOp.gtOp1;
-        }
-
-        /* We only allow local variable references */
-
-        if (op1->gtOper != GT_LCL_VAR)
-            return false;
-        if (op2->gtOper != GT_LCL_VAR)
-            return false;
-        if (op1->gtLclVarCommon.gtLclNum != op2->gtLclVarCommon.gtLclNum)
-            return false;
-
-        /* NOTE: Caller ensures that this variable has only one def */
-
-        // printf("limit [%d]:\n", add1); gtDispTree(op1);
-        // printf("size  [%d]:\n", add2); gtDispTree(op2);
-        // printf("\n");
-    }
-
-    return (bool)(add1 <= add2);
-}
-
-#endif
 
 //------------------------------------------------------------------------------
 // optObtainLoopCloningOpts: Identify optimization candidates and update
@@ -7650,11 +7638,11 @@ bool Compiler::optExtractArrIndex(GenTreePtr tree, ArrIndex* result, unsigned lh
         return false;
     }
     GenTreeBoundsChk* arrBndsChk = before->AsBoundsChk();
-    if (arrBndsChk->gtArrLen->gtGetOp1()->gtOper != GT_LCL_VAR)
+    if (arrBndsChk->gtIndex->gtOper != GT_LCL_VAR)
     {
         return false;
     }
-    if (arrBndsChk->gtIndex->gtOper != GT_LCL_VAR)
+    if (arrBndsChk->gtArrLen->gtGetOp1()->gtOper != GT_LCL_VAR)
     {
         return false;
     }

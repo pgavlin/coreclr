@@ -270,16 +270,14 @@ struct insGroup
 #define IGF_FINALLY_TARGET 0x0004 // this group is the start of a basic block that is returned to after a finally.
 #endif                            // FEATURE_EH_FUNCLETS && defined(_TARGET_ARM_)
 #define IGF_FUNCLET_PROLOG 0x0008 // this group belongs to a funclet prolog
-#ifdef DEBUG
-#define IGF_FUNCLET_EPILOG 0x0010 // this group belongs to a funclet epilog. Currently, this is only needed for DEBUG.
-#endif
-#define IGF_EPILOG 0x0020        // this group belongs to a main function epilog
-#define IGF_NOGCINTERRUPT 0x0040 // this IG is is a no-interrupt region (prolog, epilog, etc.)
-#define IGF_UPD_ISZ 0x0080       // some instruction sizes updated
-#define IGF_PLACEHOLDER 0x0100   // this is a placeholder group, to be filled in later
-#define IGF_EMIT_ADD 0x0200      // this is a block added by the emitter
-                                 // because the codegen block was too big. Also used for
-                                 // placeholder IGs that aren't also labels.
+#define IGF_FUNCLET_EPILOG 0x0010 // this group belongs to a funclet epilog.
+#define IGF_EPILOG 0x0020         // this group belongs to a main function epilog
+#define IGF_NOGCINTERRUPT 0x0040  // this IG is is a no-interrupt region (prolog, epilog, etc.)
+#define IGF_UPD_ISZ 0x0080        // some instruction sizes updated
+#define IGF_PLACEHOLDER 0x0100    // this is a placeholder group, to be filled in later
+#define IGF_EMIT_ADD 0x0200       // this is a block added by the emitter
+                                  // because the codegen block was too big. Also used for
+                                  // placeholder IGs that aren't also labels.
 
 // Mask of IGF_* flags that should be propagated to new blocks when they are created.
 // This allows prologs and epilogs to be any number of IGs, but still be
@@ -427,6 +425,11 @@ public:
         // There seem to be some cases where this is used without being initialized via CodeGen::inst_set_SV_var().
         emitVarRefOffs = 0;
 #endif // DEBUG
+
+#ifdef _TARGET_XARCH_
+        SetUseSSE3_4(false);
+#endif // _TARGET_XARCH_
+
 #ifdef FEATURE_AVX_SUPPORT
         SetUseAVX(false);
 #endif // FEATURE_AVX_SUPPORT
@@ -486,12 +489,11 @@ protected:
         return (ig != nullptr) && ((ig->igFlags & IGF_FUNCLET_PROLOG) != 0);
     }
 
-#ifdef DEBUG
     bool emitIGisInFuncletEpilog(const insGroup* ig)
     {
         return (ig != nullptr) && ((ig->igFlags & IGF_FUNCLET_EPILOG) != 0);
     }
-#endif // DEBUG
+
 #endif // FEATURE_EH_FUNCLETS
 
     // If "ig" corresponds to the start of a basic block that is the
@@ -1516,14 +1518,20 @@ protected:
     // IG of the epilog, and use it to find the epilog offset at the end of code generation.
     struct EpilogList
     {
-        EpilogList* elNext;
-        insGroup*   elIG;
+        EpilogList*  elNext;
+        emitLocation elLoc;
+
+        EpilogList() : elNext(nullptr), elLoc()
+        {
+        }
     };
 
     EpilogList* emitEpilogList; // per method epilog list - head
     EpilogList* emitEpilogLast; // per method epilog list - tail
 
 public:
+    void emitStartEpilog();
+
     bool emitHasEpilogEnd();
 
     size_t emitGenEpilogLst(size_t (*fp)(void*, unsigned), void* cp);
@@ -1532,8 +1540,6 @@ public:
 
     void emitBegPrologEpilog(insGroup* igPh);
     void emitEndPrologEpilog();
-
-    emitLocation emitEpilogBegLoc;
 
     void emitBegFnEpilog(insGroup* igPh);
     void emitEndFnEpilog();
@@ -1659,6 +1665,18 @@ private:
     unsigned char emitOutputLong(BYTE* dst, ssize_t val);
     unsigned char emitOutputSizeT(BYTE* dst, ssize_t val);
 
+#if !defined(LEGACY_BACKEND) && defined(_TARGET_X86_)
+    unsigned char emitOutputByte(BYTE* dst, size_t val);
+    unsigned char emitOutputWord(BYTE* dst, size_t val);
+    unsigned char emitOutputLong(BYTE* dst, size_t val);
+    unsigned char emitOutputSizeT(BYTE* dst, size_t val);
+
+    unsigned char emitOutputByte(BYTE* dst, unsigned __int64 val);
+    unsigned char emitOutputWord(BYTE* dst, unsigned __int64 val);
+    unsigned char emitOutputLong(BYTE* dst, unsigned __int64 val);
+    unsigned char emitOutputSizeT(BYTE* dst, unsigned __int64 val);
+#endif // !defined(LEGACY_BACKEND) && defined(_TARGET_X86_)
+
     size_t emitIssue1Instr(insGroup* ig, instrDesc* id, BYTE** dp);
     size_t emitOutputInstr(insGroup* ig, instrDesc* id, BYTE** dp);
 
@@ -1742,8 +1760,8 @@ private:
     BYTE* emitCurIGfreeEndp; // one byte past the last available byte in buffer
     BYTE* emitCurIGfreeBase; // first byte address
 
-    unsigned emitCurIGinsCnt; // # of collected instr's in buffer
-    unsigned emitCurIGsize;   // estimated code size of current group in bytes
+    unsigned       emitCurIGinsCnt;   // # of collected instr's in buffer
+    unsigned       emitCurIGsize;     // estimated code size of current group in bytes
     UNATIVE_OFFSET emitCurCodeOffset; // current code offset within group
     UNATIVE_OFFSET emitTotalCodeSize; // bytes of code in entire method
 
@@ -1822,8 +1840,12 @@ private:
     void emitInsertIGAfter(insGroup* insertAfterIG, insGroup* ig);
 
     void emitNewIG();
+
+#if !defined(JIT32_GCENCODER)
     void emitDisableGC();
     void emitEnableGC();
+#endif // !defined(JIT32_GCENCODER)
+
     void emitGenIG(insGroup* ig);
     insGroup* emitSavIG(bool emitAdd = false);
     void emitNxtIG(bool emitAdd = false);
@@ -2707,6 +2729,7 @@ inline void emitter::emitNewIG()
     emitGenIG(ig);
 }
 
+#if !defined(JIT32_GCENCODER)
 // Start a new instruction group that is not interruptable
 inline void emitter::emitDisableGC()
 {
@@ -2736,6 +2759,7 @@ inline void emitter::emitEnableGC()
     // instruction groups.
     emitForceNewIG = true;
 }
+#endif // !defined(JIT32_GCENCODER)
 
 /*****************************************************************************/
 #endif // _EMIT_H_

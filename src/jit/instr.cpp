@@ -149,8 +149,6 @@ const char* CodeGen::genSizeStr(emitAttr attr)
         nullptr,
         "xmmword ptr ",
         nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
-        nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
-        nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
         nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
         "ymmword ptr"
     };
@@ -2328,7 +2326,7 @@ void CodeGen::inst_RV_TT(instruction ins,
 #if CPU_LOAD_STORE_ARCH
     if (ins == INS_mov)
     {
-#if defined(_TARGET_ARM_)
+#if defined(_TARGET_ARM_) && CPU_LONG_USES_REGPAIR
         if (tree->TypeGet() != TYP_LONG)
         {
             ins = ins_Move_Extend(tree->TypeGet(), (tree->gtFlags & GTF_REG_VAL) != 0);
@@ -2343,7 +2341,7 @@ void CodeGen::inst_RV_TT(instruction ins,
             ins = ins_Move_Extend(TYP_INT,
                                   (tree->gtFlags & GTF_REG_VAL) != 0 && genRegPairHi(tree->gtRegPair) != REG_STK);
         }
-#elif defined(_TARGET_ARM64_)
+#elif defined(_TARGET_ARM_) || defined(_TARGET_ARM64_)
         ins = ins_Move_Extend(tree->TypeGet(), (tree->gtFlags & GTF_REG_VAL) != 0);
 #else
         NYI("CodeGen::inst_RV_TT with INS_mov");
@@ -2487,9 +2485,11 @@ AGAIN:
                 default:
                     regNumber regTmp;
 #ifndef LEGACY_BACKEND
+#if CPU_LONG_USES_REGPAIR
                     if (tree->TypeGet() == TYP_LONG)
                         regTmp = (offs == 0) ? genRegPairLo(tree->gtRegPair) : genRegPairHi(tree->gtRegPair);
                     else
+#endif // CPU_LONG_USES_REGPAIR
                         regTmp = tree->gtRegNum;
 #else  // LEGACY_BACKEND
                     if (varTypeIsFloating(tree))
@@ -2597,17 +2597,6 @@ AGAIN:
                 constVal = (ssize_t)(tree->gtLngCon.gtLconVal >> 32);
                 size     = EA_4BYTE;
             }
-#ifndef LEGACY_BACKEND
-#ifdef _TARGET_ARM_
-            if ((ins != INS_mov) && !arm_Valid_Imm_For_Instr(ins, constVal, flags))
-            {
-                regNumber constReg = (offs == 0) ? genRegPairLo(tree->gtRegPair) : genRegPairHi(tree->gtRegPair);
-                instGen_Set_Reg_To_Imm(size, constReg, constVal);
-                getEmitter()->emitIns_R_R(ins, size, reg, constReg, flags);
-                break;
-            }
-#endif // _TARGET_ARM_
-#endif // !LEGACY_BACKEND
 
             inst_RV_IV(ins, reg, constVal, size, flags);
             break;
@@ -3054,7 +3043,7 @@ bool CodeGenInterface::validImmForBL(ssize_t addr)
     return
         // If we are running the altjit for NGEN, then assume we can use the "BL" instruction.
         // This matches the usual behavior for NGEN, since we normally do generate "BL".
-        (!compiler->info.compMatchedVM && (compiler->opts.eeFlags & CORJIT_FLG_PREJIT)) ||
+        (!compiler->info.compMatchedVM && compiler->opts.jitFlags->IsSet(JitFlags::JIT_FLAG_PREJIT)) ||
         (compiler->eeGetRelocTypeHint((void*)addr) == IMAGE_REL_BASED_THUMB_BRANCH24);
 }
 bool CodeGen::arm_Valid_Imm_For_BL(ssize_t addr)
@@ -3240,7 +3229,7 @@ instruction CodeGen::ins_Move_Extend(var_types srcType, bool srcInReg)
  *
  *  Parameters
  *      srcType   - source type
- *      aligned   - whether source is 16-byte aligned if srcType is a SIMD type
+ *      aligned   - whether source is properly aligned if srcType is a SIMD type
  */
 instruction CodeGenInterface::ins_Load(var_types srcType, bool aligned /*=false*/)
 {
@@ -3258,8 +3247,7 @@ instruction CodeGenInterface::ins_Load(var_types srcType, bool aligned /*=false*
 #endif // FEATURE_SIMD
             if (compiler->canUseAVX())
         {
-            // TODO-CQ: consider alignment of AVX vectors.
-            return INS_movupd;
+            return (aligned) ? INS_movapd : INS_movupd;
         }
         else
         {
@@ -3404,7 +3392,7 @@ instruction CodeGen::ins_Copy(var_types dstType)
  *
  *  Parameters
  *      dstType   - destination type
- *      aligned   - whether destination is 16-byte aligned if dstType is a SIMD type
+ *      aligned   - whether destination is properly aligned if dstType is a SIMD type
  */
 instruction CodeGenInterface::ins_Store(var_types dstType, bool aligned /*=false*/)
 {
@@ -3422,8 +3410,7 @@ instruction CodeGenInterface::ins_Store(var_types dstType, bool aligned /*=false
 #endif // FEATURE_SIMD
             if (compiler->canUseAVX())
         {
-            // TODO-CQ: consider alignment of AVX vectors.
-            return INS_movupd;
+            return (aligned) ? INS_movapd : INS_movupd;
         }
         else
         {
@@ -3517,6 +3504,12 @@ instruction CodeGen::ins_CopyIntToFloat(var_types srcType, var_types dstType)
 {
     // On SSE2/AVX - the same instruction is used for moving double/quad word to XMM/YMM register.
     assert((srcType == TYP_INT) || (srcType == TYP_UINT) || (srcType == TYP_LONG) || (srcType == TYP_ULONG));
+
+#if !defined(_TARGET_64BIT_)
+    // No 64-bit registers on x86.
+    assert((srcType != TYP_LONG) && (srcType != TYP_ULONG));
+#endif // !defined(_TARGET_64BIT_)
+
     return INS_mov_i2xmm;
 }
 
@@ -3524,6 +3517,12 @@ instruction CodeGen::ins_CopyFloatToInt(var_types srcType, var_types dstType)
 {
     // On SSE2/AVX - the same instruction is used for moving double/quad word of XMM/YMM to an integer register.
     assert((dstType == TYP_INT) || (dstType == TYP_UINT) || (dstType == TYP_LONG) || (dstType == TYP_ULONG));
+
+#if !defined(_TARGET_64BIT_)
+    // No 64-bit registers on x86.
+    assert((dstType != TYP_LONG) && (dstType != TYP_ULONG));
+#endif // !defined(_TARGET_64BIT_)
+
     return INS_mov_xmm2i;
 }
 
@@ -3565,9 +3564,13 @@ instruction CodeGen::ins_FloatSqrt(var_types type)
     {
         ins = INS_sqrtsd;
     }
+    else if (type == TYP_FLOAT)
+    {
+        ins = INS_sqrtss;
+    }
     else
     {
-        // Right now sqrt of scalar single is not needed.
+        assert(!"ins_FloatSqrt: Unsupported type");
         unreached();
     }
 

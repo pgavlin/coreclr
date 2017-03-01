@@ -16,6 +16,10 @@ void genCodeForTreeNode(GenTreePtr treeNode);
 
 void genCodeForBinary(GenTreePtr treeNode);
 
+#if defined(_TARGET_X86_)
+void genCodeForLongUMod(GenTreeOp* node);
+#endif // _TARGET_X86_
+
 void genCodeForDivMod(GenTreeOp* treeNode);
 
 void genCodeForMulHi(GenTreeOp* treeNode);
@@ -23,6 +27,10 @@ void genCodeForMulHi(GenTreeOp* treeNode);
 void genLeaInstruction(GenTreeAddrMode* lea);
 
 void genSetRegToCond(regNumber dstReg, GenTreePtr tree);
+
+#if !defined(_TARGET_64BIT_)
+void genLongToIntCast(GenTreePtr treeNode);
+#endif
 
 void genIntToIntCast(GenTreePtr treeNode);
 
@@ -36,7 +44,7 @@ void genCkfinite(GenTreePtr treeNode);
 
 void genIntrinsic(GenTreePtr treeNode);
 
-void genPutArgStk(GenTreePtr treeNode);
+void genPutArgStk(GenTreePutArgStk* treeNode);
 unsigned getBaseVarForPutArgStk(GenTreePtr treeNode);
 
 #if defined(_TARGET_XARCH_) || defined(_TARGET_ARM64_)
@@ -49,7 +57,6 @@ void genCompareInt(GenTreePtr treeNode);
 
 #if !defined(_TARGET_64BIT_)
 void genCompareLong(GenTreePtr treeNode);
-void genJTrueLong(GenTreePtr treeNode);
 #endif
 
 #ifdef FEATURE_SIMD
@@ -61,7 +68,8 @@ enum SIMDScalarMoveType
 };
 
 instruction getOpForSIMDIntrinsic(SIMDIntrinsicID intrinsicId, var_types baseType, unsigned* ival = nullptr);
-void genSIMDScalarMove(var_types type, regNumber target, regNumber src, SIMDScalarMoveType moveType);
+void genSIMDScalarMove(
+    var_types targetType, var_types type, regNumber target, regNumber src, SIMDScalarMoveType moveType);
 void genSIMDZero(var_types targetType, var_types baseType, regNumber targetReg);
 void genSIMDIntrinsicInit(GenTreeSIMD* simdNode);
 void genSIMDIntrinsicInitN(GenTreeSIMD* simdNode);
@@ -85,9 +93,13 @@ void genSIMDCheck(GenTree* treeNode);
 // their size rounded to TARGET_POINTER_SIZE (which is 8 bytes on 64-bit targets) and hence
 // Vector3 locals could be treated as TYP_SIMD16 while reading/writing.
 void genStoreIndTypeSIMD12(GenTree* treeNode);
-void genStoreLclFldTypeSIMD12(GenTree* treeNode);
 void genLoadIndTypeSIMD12(GenTree* treeNode);
-void genLoadLclFldTypeSIMD12(GenTree* treeNode);
+void genStoreLclTypeSIMD12(GenTree* treeNode);
+void genLoadLclTypeSIMD12(GenTree* treeNode);
+#ifdef _TARGET_X86_
+void genStoreSIMD12ToStack(regNumber operandReg, regNumber tmpReg);
+void genPutArgStkSIMD12(GenTree* treeNode);
+#endif // _TARGET_X86_
 #endif // FEATURE_SIMD
 
 #if !defined(_TARGET_64BIT_)
@@ -104,6 +116,7 @@ void genUnspillRegIfNeeded(GenTree* tree);
 
 regNumber genConsumeReg(GenTree* tree);
 
+void genCopyRegIfNeeded(GenTree* tree, regNumber needReg);
 void genConsumeRegAndCopy(GenTree* tree, regNumber needReg);
 
 void genConsumeIfReg(GenTreePtr tree)
@@ -122,15 +135,14 @@ void genConsumeAddress(GenTree* addr);
 
 void genConsumeAddrMode(GenTreeAddrMode* mode);
 
-void genConsumeBlockSize(GenTreeBlk* blkNode, regNumber sizeReg);
-void genConsumeBlockDst(GenTreeBlk* blkNode);
-GenTree* genConsumeBlockSrc(GenTreeBlk* blkNode);
+void genSetBlockSize(GenTreeBlk* blkNode, regNumber sizeReg);
+void genConsumeBlockSrc(GenTreeBlk* blkNode);
+void genSetBlockSrc(GenTreeBlk* blkNode, regNumber srcReg);
 void genConsumeBlockOp(GenTreeBlk* blkNode, regNumber dstReg, regNumber srcReg, regNumber sizeReg);
 
-#ifdef FEATURE_UNIX_AMD64_STRUCT_PASSING
-void genConsumePutStructArgStk(
-    GenTreePutArgStk* putArgStkNode, regNumber dstReg, regNumber srcReg, regNumber sizeReg, unsigned baseVarNum);
-#endif // FEATURE_UNIX_AMD64_STRUCT_PASSING
+#ifdef FEATURE_PUT_STRUCT_ARG_STK
+void genConsumePutStructArgStk(GenTreePutArgStk* putArgStkNode, regNumber dstReg, regNumber srcReg, regNumber sizeReg);
+#endif // FEATURE_PUT_STRUCT_ARG_STK
 
 void genConsumeRegs(GenTree* tree);
 
@@ -141,6 +153,10 @@ void genEmitGSCookieCheck(bool pushReg);
 void genSetRegToIcon(regNumber reg, ssize_t val, var_types type = TYP_INT, insFlags flags = INS_FLAGS_DONT_CARE);
 
 void genCodeForShift(GenTreePtr tree);
+
+#if defined(_TARGET_X86_)
+void genCodeForShiftLong(GenTreePtr tree);
+#endif
 
 #ifdef _TARGET_XARCH_
 void genCodeForShiftRMW(GenTreeStoreInd* storeInd);
@@ -154,12 +170,23 @@ void genCodeForCpBlkRepMovs(GenTreeBlk* cpBlkNode);
 
 void genCodeForCpBlkUnroll(GenTreeBlk* cpBlkNode);
 
-#ifdef FEATURE_UNIX_AMD64_STRUCT_PASSING
-void genPutStructArgStk(GenTreePtr treeNode, unsigned baseVarNum);
+#ifdef FEATURE_PUT_STRUCT_ARG_STK
+#ifdef _TARGET_X86_
+bool genAdjustStackForPutArgStk(GenTreePutArgStk* putArgStk);
+void genPushReg(var_types type, regNumber srcReg);
+void genPutArgStkFieldList(GenTreePutArgStk* putArgStk);
+#endif // _TARGET_X86_
 
-void genStructPutArgRepMovs(GenTreePutArgStk* putArgStkNode, unsigned baseVarNum);
-void genStructPutArgUnroll(GenTreePutArgStk* putArgStkNode, unsigned baseVarNum);
-#endif // FEATURE_UNIX_AMD64_STRUCT_PASSING
+void genPutStructArgStk(GenTreePutArgStk* treeNode);
+
+int genMove8IfNeeded(unsigned size, regNumber tmpReg, GenTree* srcAddr, unsigned offset);
+int genMove4IfNeeded(unsigned size, regNumber tmpReg, GenTree* srcAddr, unsigned offset);
+int genMove2IfNeeded(unsigned size, regNumber tmpReg, GenTree* srcAddr, unsigned offset);
+int genMove1IfNeeded(unsigned size, regNumber tmpReg, GenTree* srcAddr, unsigned offset);
+void genStructPutArgRepMovs(GenTreePutArgStk* putArgStkNode);
+void genStructPutArgUnroll(GenTreePutArgStk* putArgStkNode);
+void genStoreRegToStackArg(var_types type, regNumber reg, int offset);
+#endif // FEATURE_PUT_STRUCT_ARG_STK
 
 void genCodeForLoadOffset(instruction ins, emitAttr size, regNumber dst, GenTree* base, unsigned offset);
 
@@ -191,6 +218,14 @@ void genCallInstruction(GenTreePtr call);
 
 void genJmpMethod(GenTreePtr jmp);
 
+BasicBlock* genCallFinally(BasicBlock* block);
+
+#if FEATURE_EH_FUNCLETS
+void genEHCatchRet(BasicBlock* block);
+#else  // !FEATURE_EH_FUNCLETS
+void genEHFinallyOrFilterRet(BasicBlock* block);
+#endif // !FEATURE_EH_FUNCLETS
+
 void genMultiRegCallStoreToLocal(GenTreePtr treeNode);
 
 // Deals with codegen for muti-register struct returns.
@@ -212,9 +247,19 @@ bool genIsRegCandidateLocal(GenTreePtr tree)
     return (varDsc->lvIsRegCandidate());
 }
 
+#ifdef FEATURE_PUT_STRUCT_ARG_STK
+#ifdef _TARGET_X86_
+bool m_pushStkArg;
+#else  // !_TARGET_X86_
+unsigned m_stkArgVarNum;
+unsigned m_stkArgOffset;
+#endif // !_TARGET_X86_
+#endif // !FEATURE_PUT_STRUCT_ARG_STK
+
 #ifdef DEBUG
 GenTree* lastConsumedNode;
-void genCheckConsumeNode(GenTree* treeNode);
+void genNumberOperandUse(GenTree* const operand, int& useNum) const;
+void genCheckConsumeNode(GenTree* const node);
 #else  // !DEBUG
 inline void genCheckConsumeNode(GenTree* treeNode)
 {

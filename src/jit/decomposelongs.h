@@ -35,13 +35,14 @@ private:
     }
 
     // Driver functions
-    void DecomposeRangeHelper();
-    GenTree* DecomposeNode(LIR::Use& use);
+    void     DecomposeRangeHelper();
+    GenTree* DecomposeNode(GenTree* tree);
 
     // Per-node type decompose cases
     GenTree* DecomposeLclVar(LIR::Use& use);
     GenTree* DecomposeLclFld(LIR::Use& use);
     GenTree* DecomposeStoreLclVar(LIR::Use& use);
+    GenTree* DecomposeStoreLclFld(LIR::Use& use);
     GenTree* DecomposeCast(LIR::Use& use);
     GenTree* DecomposeCnsLng(LIR::Use& use);
     GenTree* DecomposeCall(LIR::Use& use);
@@ -51,10 +52,17 @@ private:
     GenTree* DecomposeNeg(LIR::Use& use);
     GenTree* DecomposeArith(LIR::Use& use);
     GenTree* DecomposeShift(LIR::Use& use);
+    GenTree* DecomposeRotate(LIR::Use& use);
+    GenTree* DecomposeMul(LIR::Use& use);
+    GenTree* DecomposeUMod(LIR::Use& use);
+    GenTree* DecomposeSimd(LIR::Use& use);
+    GenTree* DecomposeSimdGetItem(LIR::Use& use);
 
     // Helper functions
-    GenTree* FinalizeDecomposition(LIR::Use& use, GenTree* loResult, GenTree* hiResult);
+    GenTree* FinalizeDecomposition(LIR::Use& use, GenTree* loResult, GenTree* hiResult, GenTree* insertResultAfter);
+    GenTree* RepresentOpAsLocalVar(GenTree* op, GenTree* user, GenTree** edge);
 
+    GenTree* StoreNodeToVar(LIR::Use& use);
     static genTreeOps GetHiOper(genTreeOps oper);
     static genTreeOps GetLoOper(genTreeOps oper);
 

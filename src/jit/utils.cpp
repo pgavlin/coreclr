@@ -657,7 +657,7 @@ void dumpILRange(const BYTE* const codeAddr, unsigned codeSize) // in bytes
     for (IL_OFFSET offs = 0; offs < codeSize;)
     {
         char prefix[100];
-        sprintf(prefix, "IL_%04x ", offs);
+        sprintf_s(prefix, _countof(prefix), "IL_%04x ", offs);
         unsigned codeBytesDumped = dumpSingleInstr(codeAddr, offs, prefix);
         offs += codeBytesDumped;
     }
@@ -665,11 +665,9 @@ void dumpILRange(const BYTE* const codeAddr, unsigned codeSize) // in bytes
 
 /*****************************************************************************
  *
- *  Display a variable set (which may be a 32-bit or 64-bit number); only
- *  one or two of these can be used at once.
+ *  Display a variable set.
  */
-
-const char* genES2str(EXPSET_TP set)
+const char* genES2str(BitVecTraits* traits, EXPSET_TP set)
 {
     const int   bufSize = 17;
     static char num1[bufSize];
@@ -682,11 +680,7 @@ const char* genES2str(EXPSET_TP set)
 
     nump = (nump == num1) ? num2 : num1;
 
-#if EXPSET_SZ == 32
-    sprintf_s(temp, bufSize, "%08X", set);
-#else
-    sprintf_s(temp, bufSize, "%08X%08X", (int)(set >> 32), (int)set);
-#endif
+    sprintf_s(temp, bufSize, "%s", BitVecOps::ToString(traits, set));
 
     return temp;
 }
@@ -876,7 +870,7 @@ void ConfigMethodRange::InitRanges(const wchar_t* rangeStr, unsigned capacity)
 
 #endif // defined(DEBUG) || defined(INLINE_DATA)
 
-#if CALL_ARG_STATS || COUNT_BASIC_BLOCKS || COUNT_LOOPS || EMITTER_STATS || MEASURE_NODE_SIZE
+#if CALL_ARG_STATS || COUNT_BASIC_BLOCKS || COUNT_LOOPS || EMITTER_STATS || MEASURE_NODE_SIZE || MEASURE_MEM_ALLOC
 
 /*****************************************************************************
  *  Histogram class.
@@ -896,7 +890,10 @@ Histogram::Histogram(IAllocator* allocator, const unsigned* const sizeTable)
 
 Histogram::~Histogram()
 {
-    m_allocator->Free(m_counts);
+    if (m_counts != nullptr)
+    {
+        m_allocator->Free(m_counts);
+    }
 }
 
 // We need to lazy allocate the histogram data so static `Histogram` variables don't try to
@@ -1361,6 +1358,7 @@ void HelperCallProperties::init()
             case CORINFO_HELP_ISINSTANCEOFCLASS:
             case CORINFO_HELP_ISINSTANCEOFANY:
             case CORINFO_HELP_READYTORUN_ISINSTANCEOF:
+            case CORINFO_HELP_TYPEHANDLE_TO_RUNTIMETYPE:
 
                 isPure  = true;
                 noThrow = true; // These return null for a failing cast
@@ -1414,6 +1412,9 @@ void HelperCallProperties::init()
             case CORINFO_HELP_GETGENERICS_GCSTATIC_BASE:
             case CORINFO_HELP_GETGENERICS_NONGCSTATIC_BASE:
             case CORINFO_HELP_READYTORUN_STATIC_BASE:
+#if COR_JIT_EE_VERSION > 460
+            case CORINFO_HELP_READYTORUN_GENERIC_STATIC_BASE:
+#endif // COR_JIT_EE_VERSION > 460
 
                 // These may invoke static class constructors
                 // These can throw InvalidProgram exception if the class can not be constructed
@@ -1747,7 +1748,7 @@ double FloatingPointUtils::round(double x)
 {
     // If the number has no fractional part do nothing
     // This shortcut is necessary to workaround precision loss in borderline cases on some platforms
-    if (x == ((double)((__int64)x)))
+    if (x == (double)((INT64)x))
     {
         return x;
     }
@@ -1764,4 +1765,44 @@ double FloatingPointUtils::round(double x)
     }
 
     return _copysign(flrTempVal, x);
+}
+
+// Windows x86 and Windows ARM/ARM64 may not define _copysignf() but they do define _copysign().
+// We will redirect the macro to this other functions if the macro is not defined for the platform.
+// This has the side effect of a possible implicit upcasting for arguments passed in and an explicit
+// downcasting for the _copysign() call.
+#if (defined(_TARGET_X86_) || defined(_TARGET_ARM_) || defined(_TARGET_ARM64_)) && !defined(FEATURE_PAL)
+
+#if !defined(_copysignf)
+#define _copysignf (float)_copysign
+#endif
+
+#endif
+
+// Rounds a single-precision floating-point value to the nearest integer,
+// and rounds midpoint values to the nearest even number.
+// Note this should align with classlib in floatsingle.cpp
+// Specializing for x86 using a x87 instruction is optional since
+// this outcome is identical across targets.
+float FloatingPointUtils::round(float x)
+{
+    // If the number has no fractional part do nothing
+    // This shortcut is necessary to workaround precision loss in borderline cases on some platforms
+    if (x == (float)((INT32)x))
+    {
+        return x;
+    }
+
+    // We had a number that was equally close to 2 integers.
+    // We need to return the even one.
+
+    float tempVal    = (x + 0.5f);
+    float flrTempVal = floorf(tempVal);
+
+    if ((flrTempVal == tempVal) && (fmodf(tempVal, 2.0f) != 0))
+    {
+        flrTempVal -= 1.0f;
+    }
+
+    return _copysignf(flrTempVal, x);
 }

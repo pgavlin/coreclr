@@ -1376,7 +1376,7 @@ void CodeGen::genCodeForTreeStackFP_Asg(GenTreePtr tree)
     emitAttr   size;
     unsigned   offs;
     GenTreePtr op1 = tree->gtOp.gtOp1;
-    GenTreePtr op2 = tree->gtGetOp2();
+    GenTreePtr op2 = tree->gtGetOp2IfPresent();
 
     assert(tree->OperGet() == GT_ASG);
 
@@ -1406,8 +1406,6 @@ void CodeGen::genCodeForTreeStackFP_Asg(GenTreePtr tree)
         assert(!varDsc->lvTracked || compiler->opts.MinOpts() || !(op1NonCom->gtFlags & GTF_VAR_DEATH));
 #endif
 
-#ifdef DEBUGGING_SUPPORT
-
         /* For non-debuggable code, every definition of a lcl-var has
          * to be checked to see if we need to open a new scope for it.
          */
@@ -1416,7 +1414,6 @@ void CodeGen::genCodeForTreeStackFP_Asg(GenTreePtr tree)
         {
             siCheckVarScope(op1NonCom->gtLclVarCommon.gtLclNum, op1NonCom->gtLclVar.gtLclILoffs);
         }
-#endif
     }
 
     assert(op2);
@@ -1696,14 +1693,14 @@ void CodeGen::genCodeForTreeStackFP_Arithm(GenTreePtr tree)
     if (tree->gtFlags & GTF_REVERSE_OPS)
     {
         bReverse = true;
-        op1      = tree->gtGetOp2();
+        op1      = tree->gtGetOp2IfPresent();
         op2      = tree->gtOp.gtOp1;
     }
     else
     {
         bReverse = false;
         op1      = tree->gtOp.gtOp1;
-        op2      = tree->gtGetOp2();
+        op2      = tree->gtGetOp2IfPresent();
     }
 
     regNumber result;
@@ -1931,7 +1928,7 @@ void CodeGen::genCodeForTreeStackFP_AsgArithm(GenTreePtr tree)
     GenTreePtr op1, op2;
 
     op1 = tree->gtOp.gtOp1;
-    op2 = tree->gtGetOp2();
+    op2 = tree->gtGetOp2IfPresent();
 
     genSetupForOpStackFP(op1, op2, (tree->gtFlags & GTF_REVERSE_OPS) ? true : false, true, false, true);
 
@@ -2211,7 +2208,7 @@ void CodeGen::genCodeForTreeStackFP_SmpOp(GenTreePtr tree)
         case GT_COMMA:
         {
             GenTreePtr op1 = tree->gtOp.gtOp1;
-            GenTreePtr op2 = tree->gtGetOp2();
+            GenTreePtr op2 = tree->gtGetOp2IfPresent();
 
             if (tree->gtFlags & GTF_REVERSE_OPS)
             {
@@ -2827,7 +2824,7 @@ void CodeGen::genCondJumpFltStackFP(GenTreePtr cond, BasicBlock* jumpTrue, Basic
 BasicBlock* CodeGen::genTransitionBlockStackFP(FlatFPStateX87* pState, BasicBlock* pFrom, BasicBlock* pTarget)
 {
     // Fast paths where a transition block is not necessary
-    if (pTarget->bbFPStateX87 && FlatFPStateX87::AreEqual(pState, pTarget->bbFPStateX87) || pState->IsEmpty())
+    if ((pTarget->bbFPStateX87 && FlatFPStateX87::AreEqual(pState, pTarget->bbFPStateX87)) || pState->IsEmpty())
     {
         return pTarget;
     }
@@ -4143,8 +4140,26 @@ void Compiler::raEnregisterVarsPostPassStackFP()
                 {
                     raSetRegLclBirthDeath(tree, lastlife, false);
                 }
+
+                // Model implicit use (& hence last use) of frame list root at pinvokes.
+                if (tree->gtOper == GT_CALL)
+                {
+                    GenTreeCall* call = tree->AsCall();
+                    if (call->IsUnmanaged() && !opts.ShouldUsePInvokeHelpers())
+                    {
+                        LclVarDsc* frameVarDsc = &lvaTable[info.compLvFrameListRoot];
+
+                        if (frameVarDsc->lvTracked && ((call->gtCallMoreFlags & GTF_CALL_M_FRAME_VAR_DEATH) != 0))
+                        {
+                            // Frame var dies here
+                            unsigned varIndex = frameVarDsc->lvVarIndex;
+                            VarSetOps::RemoveElemD(this, lastlife, varIndex);
+                        }
+                    }
+                }
             }
         }
+
         assert(VarSetOps::Equal(this, lastlife, block->bbLiveOut));
     }
     compCurBB = NULL;
