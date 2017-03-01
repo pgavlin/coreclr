@@ -58,6 +58,3 @@ target_link_libraries(clrjit
 
 # add the install targets
 install_clr(clrjit)
-
-# Enable profile guided optimization
-add_pgo(clrjit)
