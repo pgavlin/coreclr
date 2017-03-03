@@ -1391,7 +1391,7 @@ VOID UMThunkMarshInfo::RunTimeInit()
     // Lookup NGened stub - currently we only support ngening of reverse delegate invoke interop stubs
     if (pMD != NULL && pMD->IsEEImpl())
     {
-        DWORD dwStubFlags = NDIRECTSTUB_FL_NGENEDSTUB | NDIRECTSTUB_FL_REVERSE_INTEROP | NDIRECTSTUB_FL_DELEGATE;
+        volatile DWORD dwStubFlags = NDIRECTSTUB_FL_NGENEDSTUB | NDIRECTSTUB_FL_REVERSE_INTEROP | NDIRECTSTUB_FL_DELEGATE;
 
 #if defined(DEBUGGING_SUPPORTED)
         if (GetDebuggerCompileFlags(GetModule(), CORJIT_FLAGS()).IsSet(CORJIT_FLAGS::CORJIT_FLAG_DEBUG_CODE))
