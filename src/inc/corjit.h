@@ -261,7 +261,7 @@ public:
         corJitFlags &= ~(1ULL << (unsigned __int64)flag);
     }
 
-    bool IsSet(CorJitFlag flag) const
+    bool __fastcall IsSet(CorJitFlag flag) const
     {
         return (corJitFlags & (1ULL << (unsigned __int64)flag)) != 0;
     }
@@ -276,7 +276,7 @@ public:
         corJitFlags &= ~other.corJitFlags;
     }
 
-    bool IsEmpty() const
+    bool __fastcall IsEmpty() const
     {
         return corJitFlags == 0;
     }
