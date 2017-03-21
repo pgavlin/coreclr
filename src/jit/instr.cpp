@@ -1771,6 +1771,7 @@ AGAIN:
         unsigned varNum;
 
         case GT_LCL_VAR:
+        case GT_STORE_LCL_VAR:
 
 #ifdef LEGACY_BACKEND
             if (tree->gtType == TYP_LONG && !(tree->gtFlags & GTF_REG_VAL))

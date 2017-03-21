@@ -758,8 +758,11 @@ void CodeGen::genSpillVar(GenTreePtr tree)
             tree->SetOper(GT_REG_VAR);
         }
 
-        genUpdateRegLife(varDsc, /*isBorn*/ false, /*isDying*/ true DEBUGARG(tree));
-        gcInfo.gcMarkRegSetNpt(varDsc->lvRegMask());
+        if ((tree->gtFlags & GTF_REG_DEATH) != 0)
+        {
+            genUpdateRegLife(varDsc, /*isBorn*/ false, /*isDying*/ true DEBUGARG(tree));
+            gcInfo.gcMarkRegSetNpt(varDsc->lvRegMask());
+        }
 
         if (VarSetOps::IsMember(compiler, gcInfo.gcTrkStkPtrLcls, varDsc->lvVarIndex))
         {
@@ -778,7 +781,11 @@ void CodeGen::genSpillVar(GenTreePtr tree)
     }
 
     tree->gtFlags &= ~GTF_SPILL;
-    varDsc->lvRegNum = REG_STK;
+    if ((tree->gtFlags & GTF_REG_DEATH) != 0)
+    {
+        varDsc->lvRegNum = REG_STK;
+    }
+
     if (varTypeIsMultiReg(tree))
     {
         varDsc->lvOtherReg = REG_STK;
@@ -1231,7 +1238,8 @@ void CodeGen::genConsumeRegs(GenTree* tree)
             unsigned   varNum = tree->AsLclVarCommon()->GetLclNum();
             LclVarDsc* varDsc = compiler->lvaTable + varNum;
 
-            noway_assert(varDsc->lvRegNum == REG_STK);
+            // TODO(pdg): this assert might be tricky with spill-at-def.
+            //noway_assert(varDsc->lvRegNum == REG_STK);
             noway_assert(tree->IsRegOptional() || !varDsc->lvLRACandidate);
 
             // Update the life of the lcl var.
@@ -1604,11 +1612,17 @@ void CodeGen::genProduceReg(GenTree* tree)
         {
             // Store local variable to its home location.
             tree->gtFlags &= ~GTF_REG_VAL;
+
             // Ensure that lclVar stores are typed correctly.
             unsigned varNum = tree->gtLclVarCommon.gtLclNum;
             assert(!compiler->lvaTable[varNum].lvNormalizeOnStore() ||
                    (tree->TypeGet() == genActualType(compiler->lvaTable[varNum].TypeGet())));
             inst_TT_RV(ins_Store(tree->gtType, compiler->isSIMDTypeLocalAligned(varNum)), tree, tree->gtRegNum);
+
+            if ((tree->gtFlags & GTF_REG_DEATH) == 0)
+            {
+                tree->gtFlags |= GTF_REG_VAL;
+            }
         }
         else
         {

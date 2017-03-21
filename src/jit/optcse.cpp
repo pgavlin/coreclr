@@ -966,9 +966,10 @@ public:
     }
 
     // At the start of the merge function of the dataflow equations, initialize premerge state (to detect changes.)
-    void StartMerge(BasicBlock* block)
+    bool StartMerge(BasicBlock* block)
     {
         BitVecOps::Assign(m_pBitVecTraits, m_preMergeOut, block->bbCseOut);
+        return true;
     }
 
     // During merge, perform the actual merging of the predecessor's (since this is a forward analysis) dataflow flags.

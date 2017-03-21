@@ -31,7 +31,7 @@ public:
     public:
         Callback(Compiler* pCompiler);
 
-        void StartMerge(BasicBlock* block);
+        bool StartMerge(BasicBlock* block);
         void Merge(BasicBlock* block, BasicBlock* pred, flowList* preds);
         bool EndMerge(BasicBlock* block);
 
@@ -51,15 +51,78 @@ private:
 template <typename TCallback>
 void DataFlow::ForwardAnalysis(TCallback& callback)
 {
-    jitstd::list<BasicBlock*> worklist(jitstd::allocator<void>(m_pCompiler->getAllocator()));
-
-    worklist.insert(worklist.begin(), m_pCompiler->fgFirstBB);
-    while (!worklist.empty())
+    class Worklist final
     {
-        BasicBlock* block = *(worklist.begin());
-        worklist.erase(worklist.begin());
+        BasicBlock* m_head;
+        BasicBlock* m_tail;
 
-        callback.StartMerge(block);
+    public:
+        Worklist()
+            : m_head(nullptr), m_tail(nullptr)
+        {
+        }
+
+        bool IsEmpty() const
+        {
+            return m_head == nullptr;
+        }
+
+        bool Contains(BasicBlock* block) const
+        {
+            return (block->bbFlags & BBF_ON_WORKLIST) != 0;
+        }
+
+        void PushBack(BasicBlock* block)
+        {
+            if (!Contains(block))
+            {
+                if (m_head == nullptr)
+                {
+                    block->bbWorklistPrev = block->bbWorklistNext = m_head = m_tail = block;
+                }
+                else
+                {
+                    block->bbWorklistPrev  = m_tail;
+                    m_tail->bbWorklistNext = block;
+                    block->bbWorklistNext  = m_head;
+                    m_head->bbWorklistPrev = block;
+                    m_tail = block;
+                }
+
+                block->bbFlags |= BBF_ON_WORKLIST;
+            }
+        }
+
+        BasicBlock* PopFront()
+        {
+            assert(!IsEmpty());
+
+            BasicBlock* block = m_head;
+            if (block == m_tail)
+            {
+                m_head = m_tail = nullptr;
+            }
+            else
+            {
+                m_head = block->bbWorklistNext;
+
+                m_head->bbWorklistPrev = m_tail;
+                m_tail->bbWorklistNext = m_head;
+            }
+
+            block->bbWorklistPrev = block->bbWorklistNext = nullptr;
+            block->bbFlags &= ~BBF_ON_WORKLIST;
+            return block;
+        }
+    };
+
+    Worklist worklist;
+    worklist.PushBack(m_pCompiler->fgFirstBB);
+    while (!worklist.IsEmpty())
+    {
+        BasicBlock* block = worklist.PopFront();
+
+        if (callback.StartMerge(block))
         {
             flowList* preds = m_pCompiler->BlockPredsWithEH(block);
             for (flowList* pred = preds; pred; pred = pred->flNext)
@@ -70,11 +133,9 @@ void DataFlow::ForwardAnalysis(TCallback& callback)
 
         if (callback.EndMerge(block))
         {
-            AllSuccessorIter succsBegin = block->GetAllSuccs(m_pCompiler).begin();
-            AllSuccessorIter succsEnd   = block->GetAllSuccs(m_pCompiler).end();
-            for (AllSuccessorIter succ = succsBegin; succ != succsEnd; ++succ)
+            for (BasicBlock* block : block->GetAllSuccs(m_pCompiler))
             {
-                worklist.insert(worklist.end(), *succ);
+                worklist.PushBack(block);
             }
         }
     }

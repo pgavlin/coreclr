@@ -1011,22 +1011,31 @@ void Compiler::compUpdateLifeVar(GenTreePtr tree, VARSET_TP* pLastUseVars)
     }
 
 #ifndef LEGACY_BACKEND
-    if (ForCodeGen && spill)
+    if (ForCodeGen)
     {
-        assert(!varDsc->lvPromoted);
-        codeGen->genSpillVar(tree);
-        if (VarSetOps::IsMember(this, codeGen->gcInfo.gcTrkStkPtrLcls, varDsc->lvVarIndex))
+        if (spill)
         {
-            if (!VarSetOps::IsMember(this, codeGen->gcInfo.gcVarPtrSetCur, varDsc->lvVarIndex))
+            assert(!varDsc->lvPromoted);
+            codeGen->genSpillVar(tree);
+            if (VarSetOps::IsMember(this, codeGen->gcInfo.gcTrkStkPtrLcls, varDsc->lvVarIndex))
             {
-                VarSetOps::AddElemD(this, codeGen->gcInfo.gcVarPtrSetCur, varDsc->lvVarIndex);
-#ifdef DEBUG
-                if (verbose)
+                if (!VarSetOps::IsMember(this, codeGen->gcInfo.gcVarPtrSetCur, varDsc->lvVarIndex))
                 {
-                    printf("\t\t\t\t\t\t\tVar V%02u becoming live\n", varDsc - lvaTable);
-                }
+                    VarSetOps::AddElemD(this, codeGen->gcInfo.gcVarPtrSetCur, varDsc->lvVarIndex);
+#ifdef DEBUG
+                    if (verbose)
+                    {
+                        printf("\t\t\t\t\t\t\tVar V%02u becoming live\n", varDsc - lvaTable);
+                    }
 #endif // DEBUG
+                }
             }
+        }
+        else if ((tree->gtFlags & GTF_REG_DEATH) != 0)
+        {
+            codeGen->genUpdateRegLife(varDsc, /*isBorn*/ false, /*isDying*/ true DEBUGARG(tree));
+            codeGen->gcInfo.gcMarkRegSetNpt(genRegMask(varDsc->lvRegNum));
+            varDsc->lvRegNum = REG_STK;
         }
     }
 #endif // !LEGACY_BACKEND
@@ -9049,6 +9058,25 @@ void CodeGen::genFnProlog()
     //
     genCodeForPrologStackFP();
 #endif
+
+    // Spill any "spill on entry" vars
+    VARSET_ITER_INIT(compiler, iter, compiler->fgFirstBB->bbLiveIn, varIndex);
+    while (iter.NextElem(compiler, &varIndex))
+    {
+        const unsigned varNum = compiler->lvaTrackedToVarNum[varIndex];
+        LclVarDsc* const varDsc = &compiler->lvaTable[varNum];
+        if (varDsc->lvSpillOnEntry && (!varDsc->lvIsParam || varDsc->lvIsRegArg) && varDsc->lvIsInReg())
+        {
+            JITDUMP("\nSpilling V%02u at entry\n", varNum);
+
+            assert(!varTypeIsStruct(varDsc));
+
+            var_types storeType = genActualType(varDsc->TypeGet());
+            emitAttr size = emitActualTypeSize(storeType);
+
+            getEmitter()->emitIns_S_R(ins_Store(storeType), size, varDsc->lvRegNum, varNum, 0);
+        }
+    }
 
     //-----------------------------------------------------------------------------
 

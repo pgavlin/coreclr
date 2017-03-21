@@ -901,6 +901,7 @@ public:
 //         We should consider using it more generally for VAR_BIRTH, instead of
 //         GTF_VAR_DEF && !GTF_VAR_USEASG
 #define GTF_REG_BIRTH 0x04000000 // GT_REG_VAR -- enregistered variable born here
+#define GTF_REG_DEATH 0x20000000 // GT_LCL_VAR -- the register this lclVar is using dies at this node
 #define GTF_VAR_DEATH 0x02000000 // GT_LCL_VAR, GT_REG_VAR -- variable dies here (last use)
 
 #define GTF_VAR_ARR_INDEX 0x00000020 // The variable is part of (the index portion of) an array index expression.
@@ -3019,11 +3020,11 @@ struct ReturnTypeDesc
 private:
     var_types m_regType[MAX_RET_REG_COUNT];
 
+public:
 #ifdef DEBUG
     bool m_inited;
 #endif
 
-public:
     ReturnTypeDesc()
     {
         Reset();

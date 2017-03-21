@@ -11058,6 +11058,11 @@ void Compiler::gtDispLeaf(GenTree* tree, IndentStack* indentStack)
                     printf(" (last use)");
                 }
             }
+
+            if ((tree->gtFlags & GTF_REG_DEATH) != 0)
+            {
+                printf(" (reg death)");
+            }
             break;
 
         case GT_REG_VAR:
@@ -11623,7 +11628,7 @@ void Compiler::gtDispTree(GenTreePtr   tree,
             }
 
             gtDispVN(call);
-            if (call->IsMultiRegCall())
+            if (call->IsMultiRegCall() && call->GetReturnTypeDesc()->m_inited)
             {
                 gtDispRegVal(call);
             }

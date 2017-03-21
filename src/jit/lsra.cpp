@@ -105,6 +105,110 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 const char* LinearScan::resolveTypeName[] = {"Split", "Join", "Critical", "SharedCritical"};
 #endif // DEBUG
 
+class ReachingDefs final
+{
+    friend class DataFlow;
+
+    LinearScan& m_lsra;
+    BasicBlock* m_block;
+
+    HashTable<unsigned, LsraBlockInfo::DefSet>* m_curLiveInDefs;
+    bool m_changed;
+
+    ReachingDefs(LinearScan& lsra)
+        : m_lsra(lsra)
+        , m_curLiveInDefs(nullptr)
+    {
+        // TODO(pdg): this is a hack.
+        m_lsra.compiler->GetBlockToEHPreds()->RemoveAll();
+    }
+
+    bool StartMerge(BasicBlock* block)
+    {
+        m_block = block;
+        m_curLiveInDefs = m_lsra.blockInfo[block->bbNum].liveInDefs;
+
+        m_changed = false;
+        if (!m_lsra.blockInfo[block->bbNum].visitedReachingDefs)
+        {
+            HashTable<unsigned, LsraBlockInfo::DefSet>& liveOutDefs = *m_lsra.blockInfo[block->bbNum].liveOutDefs;
+
+            VARSET_ITER_INIT(m_lsra.compiler, iter, m_block->bbLiveIn, varIndex);
+            while (iter.NextElem(m_lsra.compiler, &varIndex))
+            {
+                const unsigned lclNum = m_lsra.compiler->lvaTrackedToVarNum[varIndex];
+
+                LsraBlockInfo::DefSet defSet;
+                defSet.hasSingleDef = false;
+                defSet.defs = new (m_lsra.compiler, CMK_LSRA) HashTable<DefLoc, bool, LsraBlockInfo::DefSet::DefLocHashTableInfo>(m_lsra.compiler, 4);
+                m_curLiveInDefs->AddOrUpdate(lclNum, defSet);
+
+                if (!VarSetOps::IsMember(m_lsra.compiler, m_block->bbVarDef, varIndex) && VarSetOps::IsMember(m_lsra.compiler, m_block->bbLiveOut, varIndex))
+                {
+                    liveOutDefs.AddOrUpdate(lclNum, defSet);
+                }
+            }
+
+            m_lsra.blockInfo[block->bbNum].visitedReachingDefs = true;
+            m_changed = true;
+        }
+
+        return m_curLiveInDefs != nullptr;
+    }
+
+    void Merge(BasicBlock* block, BasicBlock* pred, flowList* preds)
+    {
+        assert(m_curLiveInDefs != nullptr);
+
+        if (!m_lsra.blockInfo[pred->bbNum].liveOutDefsChanged)
+        {
+            return;
+        }
+
+        HashTable<unsigned, LsraBlockInfo::DefSet>& predLiveOutDefs = *m_lsra.blockInfo[pred->bbNum].liveOutDefs;
+        for (auto kvp : *m_curLiveInDefs)
+        {
+            const unsigned lclNum = kvp.Key();
+            LsraBlockInfo::DefSet defSet = kvp.Value();
+
+            LsraBlockInfo::DefSet predDefSet;
+            if (predLiveOutDefs.TryGetValue(lclNum, &predDefSet))
+            {
+                if (predDefSet.hasSingleDef)
+                {
+                    if (defSet.defs->AddOrUpdate(predDefSet.singleDef, true))
+                    {
+                        m_changed = true;
+                    }
+                }
+                else
+                {
+                    for (auto kvp : *predDefSet.defs)
+                    {
+                        if (defSet.defs->AddOrUpdate(kvp.Key(), true))
+                        {
+                            m_changed = true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    bool EndMerge(BasicBlock* block)
+    {
+        m_lsra.blockInfo[block->bbNum].liveOutDefsChanged = m_changed;
+        return m_changed;
+    }
+
+public:
+    static void Run(LinearScan& lsra)
+    {
+        ReachingDefs state(lsra);
+        DataFlow(lsra.compiler).ForwardAnalysis(state);
+    }
+};
+
 /*XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 XX                                                                           XX
@@ -730,6 +834,10 @@ void LinearScan::associateRefPosWithInterval(RefPosition* rp)
                         prevRP->lastUse = false;
                     }
                 }
+                else if (rp->refType == RefTypeDef)
+                {
+                    theInterval->lastDefPosition = rp;
+                }
 
                 rp->lastUse = (rp->refType != RefTypeExpUse) && (rp->refType != RefTypeParamDef) &&
                               (rp->refType != RefTypeZeroInit) && !extendLifetimes();
@@ -1343,6 +1451,10 @@ void LinearScan::setBlockSequence()
         blockInfo[block->bbNum].hasCriticalOutEdge = false;
         blockInfo[block->bbNum].weight             = block->bbWeight;
 
+        blockInfo[block->bbNum].visitedReachingDefs = false;
+        blockInfo[block->bbNum].liveOutDefsChanged = true;
+        block->bbFlags &= ~BBF_ON_WORKLIST;
+
 #if TRACK_LSRA_STATS
         blockInfo[block->bbNum].spillCount         = 0;
         blockInfo[block->bbNum].copyRegCount       = 0;
@@ -1779,7 +1891,8 @@ void LinearScan::doLinearScan()
 void LinearScan::recordVarLocationsAtStartOfBB(BasicBlock* bb)
 {
     JITDUMP("Recording Var Locations at start of BB%02u\n", bb->bbNum);
-    VarToRegMap map   = getInVarToRegMap(bb->bbNum);
+    SplitEdgeInfo info = {0, 0, RBM_NONE};
+    VarToRegMap map   = getInVarToRegMap(bb->bbNum, info);
     unsigned    count = 0;
 
     VARSET_ITER_INIT(compiler, iter, bb->bbLiveIn, varIndex);
@@ -1788,9 +1901,10 @@ void LinearScan::recordVarLocationsAtStartOfBB(BasicBlock* bb)
         unsigned   varNum = compiler->lvaTrackedToVarNum[varIndex];
         LclVarDsc* varDsc = &(compiler->lvaTable[varNum]);
         regNumber  regNum = getVarReg(map, varNum);
+        const bool usedFromStack = (regNum == REG_STK) || (info.usedFromStackRegs & genRegMask(regNum)) != 0;
 
         regNumber oldRegNum = varDsc->lvRegNum;
-        regNumber newRegNum = regNum;
+        regNumber newRegNum = usedFromStack ? REG_STK : regNum;
 
         if (oldRegNum != newRegNum)
         {
@@ -2325,6 +2439,7 @@ void LinearScan::initVarRegMaps()
 
     inVarToRegMaps  = new (compiler, CMK_LSRA) regNumber*[bbCount];
     outVarToRegMaps = new (compiler, CMK_LSRA) regNumber*[bbCount];
+    outVarOnStackSets = new (compiler, CMK_LSRA) VARSET_TP[bbCount];
 
     if (varCount > 0)
     {
@@ -2343,6 +2458,8 @@ void LinearScan::initVarRegMaps()
             }
             inVarToRegMaps[i]  = inVarToRegMap;
             outVarToRegMaps[i] = outVarToRegMap;
+
+            VarSetOps::AssignNoCopy(compiler, outVarOnStackSets[i], VarSetOps::MakeEmpty(compiler));
         }
     }
     else
@@ -2382,12 +2499,19 @@ LinearScan::SplitEdgeInfo LinearScan::getSplitEdgeInfo(unsigned int bbNum)
 
 VarToRegMap LinearScan::getInVarToRegMap(unsigned int bbNum)
 {
+    SplitEdgeInfo unused;
+    return getInVarToRegMap(bbNum, unused);
+}
+
+VarToRegMap LinearScan::getInVarToRegMap(unsigned int bbNum, SplitEdgeInfo& splitEdgeInfo)
+{
     assert(bbNum <= compiler->fgBBNumMax);
+
     // For the blocks inserted to split critical edges, the inVarToRegMap is
     // equal to the outVarToRegMap at the "from" block.
     if (bbNum > bbNumMaxBeforeResolution)
     {
-        SplitEdgeInfo splitEdgeInfo = getSplitEdgeInfo(bbNum);
+        splitEdgeInfo = getSplitEdgeInfo(bbNum);
         unsigned      fromBBNum     = splitEdgeInfo.fromBBNum;
         if (fromBBNum == 0)
         {
@@ -4731,6 +4855,45 @@ void LinearScan::buildIntervals()
 
         // Clear the "last use" flag on any vars that are live-out from this block.
         {
+            if (!VarSetOps::IsEmpty(compiler, block->bbLiveIn))
+            {
+                blockInfo[block->bbNum].liveInDefs = new (compiler, CMK_LSRA) HashTable<unsigned, LsraBlockInfo::DefSet>(compiler);
+                if (block == compiler->fgFirstBB)
+                {
+                    HashTable<unsigned, LsraBlockInfo::DefSet>& liveInDefs = *blockInfo[block->bbNum].liveInDefs;
+
+                    // Insert null entries for all vars that are live in to the first block
+                    VARSET_ITER_INIT(compiler, iter, block->bbLiveIn, varIndex);
+                    while (iter.NextElem(compiler, &varIndex))
+                    {
+                        LsraBlockInfo::DefSet defSet;
+                        defSet.hasSingleDef = false;
+                        defSet.defs = new (compiler, CMK_LSRA) HashTable<DefLoc, bool, LsraBlockInfo::DefSet::DefLocHashTableInfo>(compiler, 4);
+
+                        DefLoc loc;
+                        loc.m_tree = nullptr;
+                        loc.m_blk = nullptr;
+
+                        defSet.defs->AddOrUpdate(loc, true);
+
+                        liveInDefs.AddOrUpdate(compiler->lvaTrackedToVarNum[varIndex], defSet);
+                    }
+                }
+            }
+            else
+            {
+                blockInfo[block->bbNum].liveInDefs = nullptr;
+            }
+
+            if (!VarSetOps::IsEmpty(compiler, block->bbLiveOut))
+            {
+                blockInfo[block->bbNum].liveOutDefs = new (compiler, CMK_LSRA) HashTable<unsigned, LsraBlockInfo::DefSet>(compiler);
+            }
+            else
+            {
+                blockInfo[block->bbNum].liveOutDefs = nullptr;
+            }
+
             VARSET_ITER_INIT(compiler, iter, block->bbLiveOut, varIndex);
             while (iter.NextElem(compiler, &varIndex))
             {
@@ -4738,10 +4901,22 @@ void LinearScan::buildIntervals()
                 LclVarDsc* const varDsc = &compiler->lvaTable[varNum];
                 if (isCandidateVar(varDsc))
                 {
-                    RefPosition* const lastRP = getIntervalForLocalVar(varNum)->lastRefPosition;
+                    Interval* const interval = getIntervalForLocalVar(varNum);
+
+                    RefPosition* const lastRP = interval->lastRefPosition;
                     if ((lastRP != nullptr) && (lastRP->bbNum == block->bbNum))
                     {
                         lastRP->lastUse = false;
+                    }
+
+                    RefPosition* const lastDef = interval->lastDefPosition;
+                    if ((lastDef != nullptr) && (lastDef->bbNum == block->bbNum))
+                    {
+                        LsraBlockInfo::DefSet defSet;
+                        defSet.singleDef.m_blk = block;
+                        defSet.singleDef.m_tree = lastDef->treeNode;
+                        defSet.hasSingleDef = true;
+                        blockInfo[block->bbNum].liveOutDefs->AddOrUpdate(varNum, defSet);
                     }
                 }
             }
@@ -4776,6 +4951,67 @@ void LinearScan::buildIntervals()
                 newRefPosition(interval, currentLoc, RefTypeExpUse, nullptr, allRegs(interval->registerType));
         }
     }
+
+    ReachingDefs::Run(*this);
+
+#ifdef DEBUG
+    JITDUMP("\n# Live-in/live-out defs:");
+    auto displayDefSets = [this](HashTable<unsigned, LsraBlockInfo::DefSet>* defSets)
+    {
+        if (defSets == nullptr)
+        {
+            JITDUMP(" (none)");
+            return;
+        }
+        else if (defSets->Count() == 0)
+        {
+            JITDUMP(" (all param defs/zero-inits/etc.)");
+            return;
+        }
+
+        for (auto kvp : *defSets)
+        {
+            JITDUMP("\n        V%02u:", kvp.Key());
+
+            LsraBlockInfo::DefSet defSet = kvp.Value();
+            if (defSet.hasSingleDef)
+            {
+                JITDUMP(" BB%02u:[%06d]", defSet.singleDef.m_blk->bbNum, compiler->dspTreeID(defSet.singleDef.m_tree));
+            }
+            else if (defSet.defs == nullptr)
+            {
+                JITDUMP(" (missing)");
+            }
+            else
+            {
+                const char* pred = " ";
+                for (auto kvp : *defSet.defs)
+                {
+                    if (kvp.Key().m_tree == nullptr)
+                    {
+                        assert(kvp.Key().m_blk == nullptr);
+                        JITDUMP("%sprolog", pred);
+                    }
+                    else
+                    {
+                        JITDUMP("%sBB%02u:[%06d]", pred, kvp.Key().m_blk->bbNum, compiler->dspTreeID(kvp.Key().m_tree));
+                    }
+                    pred = ", ";
+                }
+            }
+        }
+    };
+
+    for (BasicBlock* block = compiler->fgFirstBB; block != nullptr; block = block->bbNext)
+    {
+        JITDUMP("\nBB%02u:", block->bbNum);
+        JITDUMP("\n    Live-in defs:");
+        displayDefSets(blockInfo[block->bbNum].liveInDefs);
+        JITDUMP("\n    Live-out defs:");
+        displayDefSets(blockInfo[block->bbNum].liveOutDefs);
+    }
+    JITDUMP("\n");
+#endif
 
 #ifdef DEBUG
     if (getLsraExtendLifeTimes())
@@ -6722,6 +6958,54 @@ void LinearScan::processBlockStartLocations(BasicBlock* currentBlock, bool alloc
     INDEBUG(dumpLsraAllocationEvent(LSRA_EVENT_START_BB, nullptr, REG_NA, currentBlock));
 }
 
+bool LinearScan::isLiveOutOnStack(unsigned bbNum, unsigned varNum)
+{
+    if (getVarReg(getOutVarToRegMap(bbNum), varNum) == REG_STK)
+    {
+        return true;
+    }
+
+    LsraBlockInfo::DefSet defs;
+    if (!blockInfo[bbNum].liveOutDefs->TryGetValue(varNum, &defs))
+    {
+        return false;
+    }
+
+    LclVarDsc* const varDsc = &compiler->lvaTable[varNum];
+
+    unsigned allDefFlags = GTF_SPILL;
+    if (defs.hasSingleDef)
+    {
+        if (defs.singleDef.m_tree == nullptr)
+        {
+            assert(defs.singleDef.m_blk == nullptr);
+            allDefFlags = varDsc->lvSpillOnEntry ? GTF_SPILL : 0;
+        }
+        else
+        {
+            allDefFlags = defs.singleDef.m_tree->gtFlags;
+        }
+    }
+    else
+    {
+        for (auto kvp : *defs.defs)
+        {
+            if (kvp.Key().m_tree == nullptr)
+            {
+                assert(kvp.Key().m_blk == nullptr);
+                allDefFlags &= varDsc->lvSpillOnEntry ? GTF_SPILL : 0;
+            }
+            else
+            {
+                allDefFlags &= kvp.Key().m_tree->gtFlags;
+            }
+        }
+    }
+
+    // If all defs that reach the end of the block are spilled, the variable is live-out on the stack.
+    return (allDefFlags & GTF_SPILL) != 0;
+}
+
 //------------------------------------------------------------------------
 // processBlockEndLocations: Record the variables occupying registers after completing the current block.
 //
@@ -7641,6 +7925,138 @@ void LinearScan::allocateRegisters()
 #endif // DEBUG
 }
 
+void LinearScan::placeLclVarSpill(BasicBlock* block, Interval* interval, GenTree* node)
+{
+    // No matter what, the register this node is using dies at this node.
+    node->gtFlags |= GTF_REG_DEATH;
+
+    // Spill placement is not available for defs.
+    if ((node->gtFlags & GTF_VAR_DEF) != 0)
+    {
+        node->gtFlags |= GTF_SPILL;
+        return;
+    }
+
+    // Okay, this is a use. Was the last def in this block? If so, spill there if it has a node.
+    RefPosition* const lastDefPosition = interval->lastDefPosition;
+    if ((lastDefPosition != nullptr) && (lastDefPosition->bbNum == block->bbNum))
+    {
+        GenTree* const defNode = lastDefPosition->treeNode;
+        if (defNode == nullptr)
+        {
+            node->gtFlags |= GTF_SPILL;
+        }
+        else
+        {
+            defNode->gtFlags |= GTF_SPILL;
+        }
+        return;
+    }
+
+    // The last def of this local was not in this block. This local must be live-in. Estimate the cost of
+    // spilling at the reaching defs rather than at the use.
+
+    LsraBlockInfo::DefSet defs;
+    if (!blockInfo[block->bbNum].liveInDefs->TryGetValue(interval->varNum, &defs))
+    {
+        // No reaching-def info. Spill here.
+        node->gtFlags |= GTF_SPILL;
+        return;
+    }
+
+    LclVarDsc* const varDsc = interval->getLocalVar(compiler);
+
+    bool spilledAtAllDefs = true;
+    BasicBlock::weight_t defSpillWeight = 0;
+    if (defs.hasSingleDef)
+    {
+        if (defs.singleDef.m_tree == nullptr)
+        {
+            assert(defs.singleDef.m_blk == nullptr);
+            if (!varDsc->lvSpillOnEntry)
+            {
+                defSpillWeight = BB_UNITY_WEIGHT;
+                spilledAtAllDefs = false;
+            }
+        }
+        else
+        {
+            if ((defs.singleDef.m_tree->gtFlags & GTF_SPILL) == 0)
+            {
+                defSpillWeight = blockInfo[defs.singleDef.m_blk->bbNum].weight;
+                spilledAtAllDefs = false;
+            }
+        }
+    }
+    else
+    {
+        auto addWeight = [](BasicBlock::weight_t x, BasicBlock::weight_t y) -> BasicBlock::weight_t
+        {
+            return ((BB_MAX_WEIGHT - x) < y) ? BB_MAX_WEIGHT : x + y;
+        };
+
+        for (auto kvp : *defs.defs)
+        {
+            if (kvp.Key().m_tree == nullptr)
+            {
+                assert(kvp.Key().m_blk == nullptr);
+                if (!varDsc->lvSpillOnEntry)
+                {
+                    defSpillWeight = addWeight(defSpillWeight, BB_UNITY_WEIGHT);
+                    spilledAtAllDefs = false;
+                }
+            }
+            else
+            {
+                if ((kvp.Key().m_tree->gtFlags & GTF_SPILL) == 0)
+                {
+                    defSpillWeight = addWeight(defSpillWeight, blockInfo[kvp.Key().m_blk->bbNum].weight);
+                    spilledAtAllDefs = false;
+                }
+            }
+        }
+    }
+
+    if (spilledAtAllDefs)
+    {
+        JITDUMP("\nNot spilling V%02u at use [%06d]: already spilled at all reaching defs\n", interval->varNum, compiler->dspTreeID(node));
+    }
+    else if (blockInfo[block->bbNum].weight < defSpillWeight)
+    {
+        JITDUMP("\nSpilling V%02u at use [%06d]: %d < %d\n", interval->varNum, compiler->dspTreeID(node), blockInfo[block->bbNum].weight, defSpillWeight);
+        node->gtFlags |= GTF_SPILL;
+    }
+    else
+    {
+        JITDUMP("\nSpilling V%02u at defs [%06d]: %d >= %d\n", interval->varNum, compiler->dspTreeID(node), blockInfo[block->bbNum].weight, defSpillWeight);
+        if (defs.hasSingleDef)
+        {
+            if (defs.singleDef.m_tree == nullptr)
+            {
+                varDsc->lvSpillOnEntry = true;
+            }
+            else
+            {
+                defs.singleDef.m_tree->gtFlags |= GTF_SPILL;
+            }
+        }
+        else
+        {
+            for (auto kvp : *defs.defs)
+            {
+                if (kvp.Key().m_tree == nullptr)
+                {
+                    varDsc->lvSpillOnEntry = true;
+                }
+                else
+                {
+                    kvp.Key().m_tree->gtFlags |= GTF_SPILL;
+                }
+            }
+        }
+    }
+}
+
 // LinearScan::resolveLocalRef
 // Description:
 //      Update the graph for a local reference.
@@ -7693,6 +8109,11 @@ void LinearScan::resolveLocalRef(BasicBlock* block, GenTreePtr treeNode, RefPosi
     }
     interval->recentRefPosition = currentRefPosition;
     LclVarDsc* varDsc           = interval->getLocalVar(compiler);
+
+    if (RefTypeIsDef(currentRefPosition->refType))
+    {
+        interval->lastDefPosition = currentRefPosition;
+    }
 
     // NOTE: we set the GTF_VAR_DEATH flag here unless we are extending lifetimes, in which case we write
     // this bit in checkLastUses. This is a bit of a hack, but is necessary because codegen requires
@@ -7796,7 +8217,7 @@ void LinearScan::resolveLocalRef(BasicBlock* block, GenTreePtr treeNode, RefPosi
                 }
                 else
                 {
-                    treeNode->gtFlags |= GTF_SPILL;
+                    placeLclVarSpill(block, interval, treeNode);
                 }
             }
         }
@@ -7879,7 +8300,7 @@ void LinearScan::resolveLocalRef(BasicBlock* block, GenTreePtr treeNode, RefPosi
         {
             if (treeNode != nullptr)
             {
-                treeNode->gtFlags |= GTF_SPILL;
+                placeLclVarSpill(block, interval, treeNode);
             }
             assert(interval->isSpilled);
             interval->physReg = REG_NA;
@@ -8101,7 +8522,7 @@ void LinearScan::insertUpperVectorSaveAndReload(GenTreePtr tree, RefPosition* re
     simdNode->gtRegNum               = spillReg;
     if (spillToMem)
     {
-        simdNode->gtFlags |= GTF_SPILL;
+        simdNode->gtFlags |= (GTF_SPILL | GTF_REG_DEATH);
     }
 
     blockRange.InsertBefore(tree, LIR::SeqTree(compiler, simdNode));
@@ -8860,7 +9281,7 @@ void LinearScan::resolveRegisters()
 //    If fromReg or toReg is REG_STK, then move from/to memory, respectively.
 
 void LinearScan::insertMove(
-    BasicBlock* block, GenTreePtr insertionPoint, unsigned lclNum, regNumber fromReg, regNumber toReg)
+    BasicBlock* block, GenTreePtr insertionPoint, unsigned lclNum, regNumber fromReg, regNumber toReg, bool killRegOnly)
 {
     LclVarDsc* varDsc = compiler->lvaTable + lclNum;
     // the lclVar must be a register candidate
@@ -8896,7 +9317,7 @@ void LinearScan::insertMove(
     }
     else if (toReg == REG_STK)
     {
-        src->gtFlags |= GTF_SPILL;
+        src->gtFlags |= ((killRegOnly ? 0 : GTF_SPILL) | GTF_REG_DEATH);
         src->SetInReg();
         src->gtRegNum = fromReg;
     }
@@ -9100,7 +9521,7 @@ regNumber LinearScan::getTempRegForResolution(BasicBlock* fromBlock, BasicBlock*
 //    in which case fromReg will be REG_STK, and we insert at the top.
 
 void LinearScan::addResolution(
-    BasicBlock* block, GenTreePtr insertionPoint, Interval* interval, regNumber toReg, regNumber fromReg)
+    BasicBlock* block, GenTreePtr insertionPoint, Interval* interval, regNumber toReg, regNumber fromReg, bool killRegOnly)
 {
 #ifdef DEBUG
     const char* insertionPointString = "top";
@@ -9115,10 +9536,10 @@ void LinearScan::addResolution(
     JITDUMP("   BB%02u %s: move V%02u from ", block->bbNum, insertionPointString, interval->varNum);
     JITDUMP("%s to %s", getRegName(fromReg), getRegName(toReg));
 
-    insertMove(block, insertionPoint, interval->varNum, fromReg, toReg);
+    insertMove(block, insertionPoint, interval->varNum, fromReg, toReg, killRegOnly);
     if (fromReg == REG_STK || toReg == REG_STK)
     {
-        assert(interval->isSpilled);
+        assert(interval->isSpilled || ((toReg == REG_STK) && killRegOnly));
     }
     else
     {
@@ -9163,11 +9584,14 @@ void LinearScan::handleOutgoingCriticalEdges(BasicBlock* block)
     VarToRegMap firstSuccInVarToRegMap = nullptr;
     BasicBlock* firstSucc              = nullptr;
 
+    VARSET_TP& outVarsOnStack = outVarOnStackSets[block->bbNum];
+
     // First, determine the live regs at the end of this block so that we know what regs are
     // available to copy into.
     // Note that for this purpose we use the full live-out set, because we must ensure that
     // even the registers that remain the same across the edge are preserved correctly.
     regMaskTP liveOutRegs = RBM_NONE;
+    regMaskTP liveOutOnStackRegs = RBM_NONE;
     VARSET_ITER_INIT(compiler, iter1, block->bbLiveOut, varIndex1);
     while (iter1.NextElem(compiler, &varIndex1))
     {
@@ -9175,7 +9599,12 @@ void LinearScan::handleOutgoingCriticalEdges(BasicBlock* block)
         regNumber fromReg = getVarReg(outVarToRegMap, varNum);
         if (fromReg != REG_STK)
         {
-            liveOutRegs |= genRegMask(fromReg);
+            regMaskTP fromRegMask = genRegMask(fromReg);
+            if (VarSetOps::IsMember(compiler, outVarsOnStack, varIndex1))
+            {
+                liveOutOnStackRegs |= fromRegMask;
+            }
+            liveOutRegs |= fromRegMask;
         }
     }
 
@@ -9201,6 +9630,7 @@ void LinearScan::handleOutgoingCriticalEdges(BasicBlock* block)
     VarToRegMap sameVarToRegMap = sharedCriticalVarToRegMap;
     regMaskTP   sameWriteRegs   = RBM_NONE;
     regMaskTP   diffReadRegs    = RBM_NONE;
+    regMaskTP   sameUsedFromStackRegs = RBM_NONE;
 
     // For each var that may require resolution, classify them as:
     // - in the same register at the end of this block and at each target (no resolution needed)
@@ -9216,6 +9646,7 @@ void LinearScan::handleOutgoingCriticalEdges(BasicBlock* block)
     {
         unsigned  varNum              = compiler->lvaTrackedToVarNum[varIndex];
         regNumber fromReg             = getVarReg(outVarToRegMap, varNum);
+        bool      isLiveOutOnStack    = (fromReg == REG_STK) || (liveOutOnStackRegs & genRegMask(fromReg)) != 0;
         bool      isMatch             = true;
         bool      isSame              = false;
         bool      maybeSingleTarget   = false;
@@ -9300,6 +9731,10 @@ void LinearScan::handleOutgoingCriticalEdges(BasicBlock* block)
             {
                 sameWriteRegs |= genRegMask(sameToReg);
             }
+            else if (isLiveOutOnStack)
+            {
+                sameUsedFromStackRegs |= genRegMask(fromReg);
+            }
         }
     }
 
@@ -9335,7 +9770,7 @@ void LinearScan::handleOutgoingCriticalEdges(BasicBlock* block)
 
             // Now collect the resolution set for just this edge, if any.
             // Check only the vars in diffResolutionSet that are live-in to this successor.
-            bool        needsResolution   = false;
+            regMaskTP   usedFromStackRegs = sameUsedFromStackRegs;
             VarToRegMap succInVarToRegMap = getInVarToRegMap(succBlock->bbNum);
             VARSET_TP   VARSET_INIT_NOCOPY(edgeResolutionSet,
                                          VarSetOps::Intersection(compiler, diffResolutionSet, succBlock->bbLiveIn));
@@ -9351,10 +9786,21 @@ void LinearScan::handleOutgoingCriticalEdges(BasicBlock* block)
                 {
                     VarSetOps::RemoveElemD(compiler, edgeResolutionSet, varIndex);
                 }
+                else if ((toReg == REG_STK) && ((liveOutOnStackRegs & genRegMask(fromReg)) != 0))
+                {
+                    VarSetOps::RemoveElemD(compiler, edgeResolutionSet, varIndex);
+                    usedFromStackRegs |= genRegMask(fromReg);
+                }
             }
             if (!VarSetOps::IsEmpty(compiler, edgeResolutionSet))
             {
-                resolveEdge(block, succBlock, ResolveCritical, edgeResolutionSet);
+                BasicBlock* resolutionBlock = resolveEdge(block, succBlock, ResolveCritical, edgeResolutionSet);
+
+                if (usedFromStackRegs != RBM_NONE)
+                {
+                    SplitEdgeInfo info = {0, 0, usedFromStackRegs};
+                    getSplitBBNumToTargetBBNumMap()->Set(resolutionBlock->bbNum, info);
+                }
             }
         }
     }
@@ -9394,6 +9840,28 @@ void LinearScan::resolveEdges()
     }
 
     BasicBlock *block, *prevBlock = nullptr;
+
+    foreach_block(compiler, block)
+    {
+        VARSET_ITER_INIT(compiler, iter, block->bbLiveOut, varIndex);
+        while (iter.NextElem(compiler, &varIndex))
+        {
+            unsigned varNum = compiler->lvaTrackedToVarNum[varIndex];
+            if (isLiveOutOnStack(block->bbNum, varNum))
+            {
+                VarSetOps::AddElemD(compiler, outVarOnStackSets[block->bbNum], varIndex);
+            }
+        }
+
+#if DEBUG
+        if (VERBOSE)
+        {
+            printf("Stack live-out from BB%02u: ", block->bbNum);
+            dumpConvertedVarSet(compiler, outVarOnStackSets[block->bbNum]);
+            printf("\n");
+        }
+#endif
+    }
 
     // Handle all the critical edges first.
     // We will try to avoid resolution across critical edges in cases where all the critical-edge
@@ -9524,8 +9992,18 @@ void LinearScan::resolveEdges()
                 {
                     assert((succBBNum <= bbNumMaxBeforeResolution) && (predBBNum <= bbNumMaxBeforeResolution));
                 }
-                SplitEdgeInfo info = {predBBNum, succBBNum};
-                getSplitBBNumToTargetBBNumMap()->Set(block->bbNum, info);
+
+                SplitEdgeInfo* info = getSplitBBNumToTargetBBNumMap()->LookupPointer(block->bbNum);
+                if (info != nullptr)
+                {
+                    info->fromBBNum = predBBNum;
+                    info->toBBNum = succBBNum;
+                }
+                else
+                {
+                    SplitEdgeInfo info = {predBBNum, succBBNum, RBM_NONE};
+                    splitBBNumToTargetBBNumMap->Set(block->bbNum, info);
+                }
             }
         }
     }
@@ -9550,7 +10028,7 @@ void LinearScan::resolveEdges()
                 unsigned  varNum  = compiler->lvaTrackedToVarNum[varIndex];
                 regNumber fromReg = getVarReg(fromVarToRegMap, varNum);
                 regNumber toReg   = getVarReg(toVarToRegMap, varNum);
-                if (fromReg != toReg)
+                if ((fromReg != toReg) && !((toReg == REG_STK) && VarSetOps::IsMember(compiler, outVarOnStackSets[predBlock->bbNum], varIndex)))
                 {
                     Interval* interval = getIntervalForLocalVar(varNum);
                     if (!foundMismatch)
@@ -9592,7 +10070,7 @@ void LinearScan::resolveEdges()
 //    registers), then the register to register moves, ensuring that the target register
 //    is free before the move, and then finally the stack to register moves.
 
-void LinearScan::resolveEdge(BasicBlock*      fromBlock,
+BasicBlock* LinearScan::resolveEdge(BasicBlock*      fromBlock,
                              BasicBlock*      toBlock,
                              ResolveType      resolveType,
                              VARSET_VALARG_TP liveSet)
@@ -9706,6 +10184,7 @@ void LinearScan::resolveEdge(BasicBlock*      fromBlock,
         Interval* interval  = getIntervalForLocalVar(varNum);
         regNumber fromReg   = getVarReg(fromVarToRegMap, varNum);
         regNumber toReg     = getVarReg(toVarToRegMap, varNum);
+        bool      isLiveOutOnStack = VarSetOps::IsMember(compiler, outVarOnStackSets[fromBlock->bbNum], varIndex);
         if (fromReg == toReg)
         {
             continue;
@@ -9736,7 +10215,7 @@ void LinearScan::resolveEdge(BasicBlock*      fromBlock,
             else if (toReg == REG_STK)
             {
                 // Do the reg to stack moves now
-                addResolution(block, insertionPoint, interval, REG_STK, fromReg);
+                addResolution(block, insertionPoint, interval, REG_STK, fromReg, isLiveOutOnStack);
                 JITDUMP(" (%s)\n", resolveTypeName[resolveType]);
             }
             else
@@ -9921,6 +10400,8 @@ void LinearScan::resolveEdge(BasicBlock*      fromBlock,
         addResolution(block, insertionPoint, interval, targetReg, REG_STK);
         JITDUMP(" (%s)\n", resolveTypeName[resolveType]);
     }
+
+    return block;
 }
 
 void TreeNodeInfo::Initialize(LinearScan* lsra, GenTree* node, LsraLocation location)
@@ -11788,7 +12269,7 @@ void LinearScan::verifyFinalAllocation()
                         unsigned  varNum = compiler->lvaTrackedToVarNum[varIndex];
                         regNumber regNum = getVarReg(outVarToRegMap, varNum);
                         interval         = getIntervalForLocalVar(varNum);
-                        assert(interval->physReg == regNum || (interval->physReg == REG_NA && regNum == REG_STK));
+                        assert(interval->physReg == regNum || (interval->physReg == REG_NA && regNum == REG_STK) || (VarSetOps::IsMember(compiler, outVarOnStackSets[currentBlock->bbNum], varIndex) && (regNum == REG_STK)));
                         interval->physReg     = REG_NA;
                         interval->assignedReg = nullptr;
                         interval->isActive    = false;
@@ -12077,6 +12558,8 @@ void LinearScan::verifyFinalAllocation()
 
             // Verify the outgoing register assignments
             {
+                VARSET_TP& liveInOnStack = outVarOnStackSets[currentBlock->bbPreds->flBlock->bbNum];
+
                 VarToRegMap outVarToRegMap = getOutVarToRegMap(currentBlock->bbNum);
                 VARSET_ITER_INIT(compiler, iter, currentBlock->bbLiveOut, varIndex);
                 while (iter.NextElem(compiler, &varIndex))
@@ -12084,7 +12567,7 @@ void LinearScan::verifyFinalAllocation()
                     unsigned  varNum   = compiler->lvaTrackedToVarNum[varIndex];
                     regNumber regNum   = getVarReg(outVarToRegMap, varNum);
                     Interval* interval = getIntervalForLocalVar(varNum);
-                    assert(interval->physReg == regNum || (interval->physReg == REG_NA && regNum == REG_STK));
+                    assert(interval->physReg == regNum || (interval->physReg == REG_NA && regNum == REG_STK) || (VarSetOps::IsMember(compiler, liveInOnStack, varIndex) && regNum == REG_STK));
                     interval->physReg     = REG_NA;
                     interval->assignedReg = nullptr;
                     interval->isActive    = false;
@@ -12160,7 +12643,7 @@ void LinearScan::verifyResolutionMove(GenTree* resolutionMove, LsraLocation curr
         }
         else
         {
-            assert((lcl->gtFlags & GTF_SPILL) != 0);
+            assert(((lcl->gtFlags & GTF_SPILL) != 0) || ((lcl->gtFlags & GTF_REG_DEATH) != 0));
             srcRegNum = dstRegNum;
             dstRegNum = REG_STK;
         }

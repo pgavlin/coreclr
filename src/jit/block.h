@@ -453,6 +453,8 @@ struct BasicBlock : private LIR::Range
 
 #define BBF_DOMINATED_BY_EXCEPTIONAL_ENTRY 0x400000000 // Block is dominated by exceptional entry.
 
+#define BBF_ON_WORKLIST 0x400000000 // This block is on the dataflow worklist.
+
 // Flags that relate blocks to loop structure.
 
 #define BBF_LOOP_FLAGS (BBF_LOOP_PREHEADER | BBF_LOOP_HEAD | BBF_LOOP_CALL0 | BBF_LOOP_CALL1)
@@ -901,6 +903,9 @@ struct BasicBlock : private LIR::Range
     void dspBlockILRange(); // Display the block's IL range as [XXX...YYY), where XXX and YYY might be "???" for
                             // BAD_IL_OFFSET.
 #endif                      // DEBUG
+
+    BasicBlock* bbWorklistPrev; // Previous block on the dataflow worklist
+    BasicBlock* bbWorklistNext; // Next block on the dataflow worklist
 
     VARSET_TP bbVarUse; // variables used     by block (before an assignment)
     VARSET_TP bbVarDef; // variables assigned by block (before a use)

@@ -74,6 +74,43 @@ struct LsraBlockInfo
     bool                 hasCriticalInEdge;
     bool                 hasCriticalOutEdge;
 
+    // Maps from a lclNum to the set of defs that are live-out of the block.
+    //
+    // TODO(pdg): optimize this similar to 
+    struct DefSet
+    {
+        struct DefLocHashTableInfo
+        {
+            static bool Equals(const DefLoc& x, const DefLoc& y)
+            {
+                return x.m_tree == y.m_tree;
+            }
+
+            static unsigned GetHashCode(const DefLoc& key)
+            {
+                return HashTableInfo<GenTree*>::GetHashCode(key.m_tree);
+            }
+        };
+
+        union
+        {
+            DefLoc singleDef;
+            HashTable<DefLoc, bool, DefLocHashTableInfo>* defs;
+        };
+        bool hasSingleDef;
+
+        DefSet()
+            : defs(nullptr)
+            , hasSingleDef(false)
+        {
+        }
+    };
+
+    bool visitedReachingDefs;
+    bool liveOutDefsChanged;
+    HashTable<unsigned, DefSet>* liveInDefs;
+    HashTable<unsigned, DefSet>* liveOutDefs;
+
 #if TRACK_LSRA_STATS
     // Per block maintained LSRA statistics.
 
@@ -341,6 +378,7 @@ class LinearScan : public LinearScanInterface
     friend class Interval;
     friend class Lowering;
     friend class TreeNodeInfo;
+    friend class ReachingDefs;
 
 public:
     // This could use further abstraction.  From Compiler we need the tree,
@@ -446,11 +484,11 @@ public:
     };
 
     void addResolution(
-        BasicBlock* block, GenTreePtr insertionPoint, Interval* interval, regNumber outReg, regNumber inReg);
+        BasicBlock* block, GenTreePtr insertionPoint, Interval* interval, regNumber outReg, regNumber inReg, bool killRegOnly = false);
 
     void handleOutgoingCriticalEdges(BasicBlock* block);
 
-    void resolveEdge(BasicBlock* fromBlock, BasicBlock* toBlock, ResolveType resolveType, VARSET_VALARG_TP liveSet);
+    BasicBlock* resolveEdge(BasicBlock* fromBlock, BasicBlock* toBlock, ResolveType resolveType, VARSET_VALARG_TP liveSet);
 
     void resolveEdges();
 
@@ -694,6 +732,8 @@ private:
     void processBlockStartLocations(BasicBlock* current, bool allocationPass);
     void processBlockEndLocations(BasicBlock* current);
 
+    bool isLiveOutOnStack(unsigned bbNum, unsigned varNum);
+
     RefType CheckBlockType(BasicBlock* block, BasicBlock* prevBlock);
 
     // insert refpositions representing prolog zero-inits which will be added later
@@ -809,9 +849,11 @@ private:
                                           RefPosition* defs[],
                                           int total DEBUGARG(unsigned minRegCandidateCount));
 
+    void placeLclVarSpill(BasicBlock* block, Interval* interval, GenTree* node);
+
     void resolveLocalRef(BasicBlock* block, GenTreePtr treeNode, RefPosition* currentRefPosition);
 
-    void insertMove(BasicBlock* block, GenTreePtr insertionPoint, unsigned lclNum, regNumber inReg, regNumber outReg);
+    void insertMove(BasicBlock* block, GenTreePtr insertionPoint, unsigned lclNum, regNumber inReg, regNumber outReg, bool killRegOnly);
 
     void insertSwap(BasicBlock* block,
                     GenTreePtr  insertionPoint,
@@ -921,8 +963,9 @@ private:
     unsigned bbNumMaxBeforeResolution;
     struct SplitEdgeInfo
     {
-        unsigned fromBBNum;
-        unsigned toBBNum;
+        unsigned  fromBBNum;
+        unsigned  toBBNum;
+        regMaskTP usedFromStackRegs;
     };
     typedef SimplerHashTable<unsigned, SmallPrimitiveKeyFuncs<unsigned>, SplitEdgeInfo, JitSimplerHashBehavior>
                                 SplitBBNumToTargetBBNumMap;
@@ -942,6 +985,7 @@ private:
     void setInVarRegForBB(unsigned int bbNum, unsigned int varNum, regNumber reg);
     void setOutVarRegForBB(unsigned int bbNum, unsigned int varNum, regNumber reg);
     VarToRegMap getInVarToRegMap(unsigned int bbNum);
+    VarToRegMap getInVarToRegMap(unsigned int bbNum, SplitEdgeInfo& edgeInfo);
     VarToRegMap getOutVarToRegMap(unsigned int bbNum);
     regNumber getVarReg(VarToRegMap map, unsigned int varNum);
     // Initialize the incoming VarToRegMap to the given map values (generally a predecessor of
@@ -1153,6 +1197,7 @@ private:
     // pointer to an array of regNumber, one per variable.
     VarToRegMap* inVarToRegMaps;
     VarToRegMap* outVarToRegMaps;
+    VARSET_TP* outVarOnStackSets;
 
     // A temporary VarToRegMap used during the resolution of critical edges.
     VarToRegMap sharedCriticalVarToRegMap;
@@ -1209,6 +1254,7 @@ public:
         : registerPreferences(registerPreferences)
         , relatedInterval(nullptr)
         , assignedReg(nullptr)
+        , lastDefPosition(nullptr)
         , registerType(registerType)
         , isLocalVar(false)
         , isSplit(false)
@@ -1252,6 +1298,8 @@ public:
     // has been assigned at some point - if the interval is active, this is the
     // register it currently occupies.
     RegRecord* assignedReg;
+
+    RefPosition* lastDefPosition;
 
     // DECIDE : put this in a union or do something w/ inheritance?
     // this is an interval for a physical register, not a allocatable entity

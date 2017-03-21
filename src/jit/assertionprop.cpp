@@ -4363,12 +4363,13 @@ public:
     }
 
     // At the start of the merge function of the dataflow equations, initialize premerge state (to detect change.)
-    void StartMerge(BasicBlock* block)
+    bool StartMerge(BasicBlock* block)
     {
         JITDUMP("AssertionPropCallback::StartMerge: BB%02d in -> %s\n", block->bbNum,
                 BitVecOps::ToString(apTraits, block->bbAssertionIn));
         BitVecOps::Assign(apTraits, preMergeOut, block->bbAssertionOut);
         BitVecOps::Assign(apTraits, preMergeJumpDestOut, mJumpDestOut[block->bbNum]);
+        return true;
     }
 
     // During merge, perform the actual merging of the predecessor's (since this is a forward analysis) dataflow flags.

@@ -17,6 +17,23 @@ struct HashTableInfo
 };
 
 //------------------------------------------------------------------------
+// HashTableInfo<unsigned>: specialized version of HashTableInfo for
+//                          unsigned integers.
+template <>
+struct HashTableInfo<unsigned>
+{
+    static bool Equals(const unsigned x, const unsigned y)
+    {
+        return x == y;
+    }
+
+    static unsigned GetHashCode(const unsigned key)
+    {
+        return key;
+    }
+};
+
+//------------------------------------------------------------------------
 // HashTableInfo<TKey*>: specialized version of HashTableInfo for pointer-
 //                       typed keys.
 template <typename TKey>
@@ -297,7 +314,6 @@ protected:
     }
 
 public:
-#ifdef DEBUG
     class Iterator;
 
     class KeyValuePair final
@@ -403,7 +419,6 @@ public:
     {
         return Iterator(m_buckets, m_numBuckets, m_numBuckets);
     }
-#endif // DEBUG
 
     unsigned Count() const
     {
@@ -547,7 +562,14 @@ class HashTable final : public HashTableBase<TKey, TValue, TKeyInfo>
 
     static unsigned RoundUp(unsigned initialSize)
     {
-        return 1 << genLog2(initialSize);
+        initialSize--;
+        initialSize |= (initialSize >> 1);
+        initialSize |= (initialSize >> 2);
+        initialSize |= (initialSize >> 4);
+        initialSize |= (initialSize >> 8);
+        initialSize |= (initialSize >> 16);
+        initialSize++;
+        return initialSize;
     }
 
 public:

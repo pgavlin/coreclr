@@ -330,6 +330,8 @@ public:
     unsigned char lvClassInfoUpdated : 1; // true if this var has updated class handle or exactness
 #endif
 
+    unsigned char lvSpillOnEntry : 1; // Spill this lclVar on entry. Must be live-in to the entry block.
+
     union {
         unsigned lvFieldLclStart; // The index of the local var representing the first field in the promoted struct
                                   // local.
