@@ -3582,12 +3582,12 @@ void CodeGen::genCodeForCpObj(GenTreeObj* cpObjNode)
         if (genIsRegCandidateLocal(actualSrcAddr))
         {
             srcLclVarNum     = actualSrcAddr->AsLclVarCommon()->gtLclNum;
-            isSrcAddrLiveOut = ((actualSrcAddr->gtFlags & (GTF_VAR_DEATH | GTF_SPILL)) == 0);
+            isSrcAddrLiveOut = ((actualSrcAddr->gtFlags & (GTF_VAR_DEATH | GTF_SPILL | GTF_REG_DEATH)) == 0);
         }
         if (genIsRegCandidateLocal(actualDstAddr))
         {
             dstLclVarNum     = actualDstAddr->AsLclVarCommon()->gtLclNum;
-            isDstAddrLiveOut = ((actualDstAddr->gtFlags & (GTF_VAR_DEATH | GTF_SPILL)) == 0);
+            isDstAddrLiveOut = ((actualDstAddr->gtFlags & (GTF_VAR_DEATH | GTF_SPILL | GTF_REG_DEATH)) == 0);
         }
         assert((actualSrcAddr->gtRegNum != REG_RSI) || !isSrcAddrLiveOut ||
                ((srcLclVarNum == dstLclVarNum) && !isDstAddrLiveOut));

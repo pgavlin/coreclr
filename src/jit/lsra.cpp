@@ -132,6 +132,7 @@ class ReachingDefs final
         if (!m_lsra.blockInfo[block->bbNum].visitedReachingDefs)
         {
             HashTable<unsigned, LsraBlockInfo::DefSet>& liveOutDefs = *m_lsra.blockInfo[block->bbNum].liveOutDefs;
+            const bool isEntryBlock = block == m_lsra.compiler->fgFirstBB;
 
             VARSET_ITER_INIT(m_lsra.compiler, iter, m_block->bbLiveIn, varIndex);
             while (iter.NextElem(m_lsra.compiler, &varIndex))
@@ -141,6 +142,17 @@ class ReachingDefs final
                 LsraBlockInfo::DefSet defSet;
                 defSet.hasSingleDef = false;
                 defSet.defs = new (m_lsra.compiler, CMK_LSRA) HashTable<DefLoc, bool, LsraBlockInfo::DefSet::DefLocHashTableInfo>(m_lsra.compiler, 4);
+
+                // Insert null entries for all vars that are live in to the first block
+                if (isEntryBlock)
+                {
+                    DefLoc loc;
+                    loc.m_tree = nullptr;
+                    loc.m_blk = nullptr;
+
+                    defSet.defs->AddOrUpdate(loc, true);
+                }
+
                 m_curLiveInDefs->AddOrUpdate(lclNum, defSet);
 
                 if (!VarSetOps::IsMember(m_lsra.compiler, m_block->bbVarDef, varIndex) && VarSetOps::IsMember(m_lsra.compiler, m_block->bbLiveOut, varIndex))
@@ -2171,6 +2183,7 @@ void LinearScan::identifyCandidates()
 #ifndef _TARGET_64BIT_
         varDsc->lvOtherReg = REG_STK;
 #endif // _TARGET_64BIT_
+        varDsc->lvSpillOnEntry = false;
 
 #if !defined(_TARGET_64BIT_)
         if (intervalType == TYP_LONG)
@@ -4858,27 +4871,6 @@ void LinearScan::buildIntervals()
             if (!VarSetOps::IsEmpty(compiler, block->bbLiveIn))
             {
                 blockInfo[block->bbNum].liveInDefs = new (compiler, CMK_LSRA) HashTable<unsigned, LsraBlockInfo::DefSet>(compiler);
-                if (block == compiler->fgFirstBB)
-                {
-                    HashTable<unsigned, LsraBlockInfo::DefSet>& liveInDefs = *blockInfo[block->bbNum].liveInDefs;
-
-                    // Insert null entries for all vars that are live in to the first block
-                    VARSET_ITER_INIT(compiler, iter, block->bbLiveIn, varIndex);
-                    while (iter.NextElem(compiler, &varIndex))
-                    {
-                        LsraBlockInfo::DefSet defSet;
-                        defSet.hasSingleDef = false;
-                        defSet.defs = new (compiler, CMK_LSRA) HashTable<DefLoc, bool, LsraBlockInfo::DefSet::DefLocHashTableInfo>(compiler, 4);
-
-                        DefLoc loc;
-                        loc.m_tree = nullptr;
-                        loc.m_blk = nullptr;
-
-                        defSet.defs->AddOrUpdate(loc, true);
-
-                        liveInDefs.AddOrUpdate(compiler->lvaTrackedToVarNum[varIndex], defSet);
-                    }
-                }
             }
             else
             {
