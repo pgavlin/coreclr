@@ -1658,7 +1658,7 @@ void Compiler::compShutdown()
         s_aggMemStats.Print(jitstdout);
 
         fprintf(fout, "\nLargest method:\n");
-        s_maxCompMemStats.Print(jitstdout);
+        s_maxCompMemStats.Print(jitstdout, nullptr, nullptr);
 
         fprintf(fout, "\n");
         fprintf(fout, "---------------------------------------------------\n");
@@ -4347,6 +4347,14 @@ void Compiler::compFunctionTraceEnd(void* methodCodePtr, ULONG methodCodeSize, b
 //
 void Compiler::compCompile(void** methodCodePtr, ULONG* methodCodeSize, JitFlags* compileFlags)
 {
+#if MEASURE_MEM_ALLOC
+    for (int i = 0; i < PHASE_NUMBER_OF; i++)
+    {
+        compLiveBytesByPhase[i] = 0;
+        compDeadBytesByPhase[i] = 0;
+    }
+#endif
+
     if (compIsForInlining())
     {
         // Notify root instance that an inline attempt is about to import IL
@@ -5369,7 +5377,7 @@ void Compiler::compCompileFinish()
         genMemStats.nraTotalSizeUsed  = compGetAllocator()->getTotalBytesUsed();
         memAllocHist.record((unsigned)((genMemStats.nraTotalSizeAlloc + 1023) / 1024));
         memUsedHist.record((unsigned)((genMemStats.nraTotalSizeUsed + 1023) / 1024));
-        s_aggMemStats.Add(genMemStats);
+        s_aggMemStats.Add(genMemStats, compLiveBytesByPhase, compDeadBytesByPhase);
         if (genMemStats.allocSz > s_maxCompMemStats.allocSz)
         {
             s_maxCompMemStats = genMemStats;
@@ -5380,7 +5388,7 @@ void Compiler::compCompileFinish()
     if (s_dspMemStats || verbose)
     {
         printf("\nAllocations for %s (MethodHash=%08x)\n", info.compFullName, info.compMethodHash());
-        genMemStats.Print(jitstdout);
+        genMemStats.Print(jitstdout, compLiveBytesByPhase, compDeadBytesByPhase);
     }
 #endif // DEBUG
 #endif // MEASURE_MEM_ALLOC
@@ -8092,11 +8100,12 @@ const char* Compiler::MemStats::s_CompMemKindNames[] = {
 #include "compmemkind.h"
 };
 
-void Compiler::MemStats::Print(FILE* f)
+void Compiler::MemStats::Print(FILE* f, size_t* liveBytes, size_t* deadBytes)
 {
     fprintf(f, "count: %10u, size: %10llu, max = %10llu\n", allocCnt, allocSz, allocSzMax);
     fprintf(f, "allocateMemory: %10llu, nraUsed: %10llu\n", nraTotalSizeAlloc, nraTotalSizeUsed);
     PrintByKind(f);
+    PrintLiveBytes(f, liveBytes, deadBytes);
 }
 
 void Compiler::MemStats::PrintByKind(FILE* f)
@@ -8108,6 +8117,22 @@ void Compiler::MemStats::PrintByKind(FILE* f)
     {
         float pct = 100.0f * static_cast<float>(allocSzByKind[cmk]) / allocSzF;
         fprintf(f, "  %20s | %10llu | %6.2f%%\n", s_CompMemKindNames[cmk], allocSzByKind[cmk], pct);
+    }
+    fprintf(f, "\n");
+}
+
+void Compiler::MemStats::PrintLiveBytes(FILE* f, size_t* liveBytes, size_t* deadBytes)
+{
+    if (liveBytes == nullptr || deadBytes == nullptr)
+    {
+        return;
+    }
+
+    fprintf(f, "\nLive/dead bytes by phase:\n %40s | %10s | %10s\n", "phase", "live", "dead");
+    fprintf(f, " %40s-+-%10s-+-%10s\n", "----------------------------------------", "----------", "----------");
+    for (int i = 0; i < PHASE_NUMBER_OF; i++)
+    {
+        fprintf(f, " %40s | %10Iu | %10Iu\n", PhaseNames[i], liveBytes[i], deadBytes[i]);
     }
     fprintf(f, "\n");
 }
@@ -8126,6 +8151,7 @@ void Compiler::AggregateMemStats::Print(FILE* f)
     fprintf(f, "  allocateMemory   : %12llu (avg %7llu per method)\n", nraTotalSizeAlloc, nraTotalSizeAlloc / nMethods);
     fprintf(f, "  nraUsed    : %12llu (avg %7llu per method)\n", nraTotalSizeUsed, nraTotalSizeUsed / nMethods);
     PrintByKind(f);
+    PrintLiveBytes(f, m_liveBytesByPhase, m_deadBytesByPhase);
 }
 #endif // MEASURE_MEM_ALLOC
 

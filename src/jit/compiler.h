@@ -8453,20 +8453,26 @@ public:
             allocSzByKind[cmk] += sz;
         }
 
-        void Print(FILE* f);       // Print these stats to f.
+        void Print(FILE* f, size_t* liveBytes, size_t* deadBytes);       // Print these stats to f.
         void PrintByKind(FILE* f); // Do just the by-kind histogram part.
+        void PrintLiveBytes(FILE* f, size_t* liveBytes, size_t* deadBytes);
     };
     MemStats genMemStats;
 
     struct AggregateMemStats : public MemStats
     {
+        size_t m_liveBytesByPhase[PHASE_NUMBER_OF]; // Live bytes in the arena allocator per phase
+        size_t m_deadBytesByPhase[PHASE_NUMBER_OF]; // Dead bytes in the arena allocator per phase
+
         unsigned nMethods;
 
         AggregateMemStats() : MemStats(), nMethods(0)
         {
+            memset(m_liveBytesByPhase, 0, sizeof(m_liveBytesByPhase));
+            memset(m_deadBytesByPhase, 0, sizeof(m_deadBytesByPhase));
         }
 
-        void Add(const MemStats& ms)
+        void Add(const MemStats& ms, size_t* liveBytesByPhase, size_t* deadBytesByPhase)
         {
             nMethods++;
             allocCnt += ms.allocCnt;
@@ -8478,6 +8484,12 @@ public:
             }
             nraTotalSizeAlloc += ms.nraTotalSizeAlloc;
             nraTotalSizeUsed += ms.nraTotalSizeUsed;
+
+            for (int i = 0; i < PHASE_NUMBER_OF; i++)
+            {
+                m_liveBytesByPhase[i] += liveBytesByPhase[i];
+                m_deadBytesByPhase[i] += deadBytesByPhase[i];
+            }
         }
 
         void Print(FILE* f); // Print these stats to jitstdout.
