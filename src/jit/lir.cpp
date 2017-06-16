@@ -1543,6 +1543,8 @@ bool LIR::Range::CheckLIR(Compiler* compiler, bool checkUnusedValues) const
             bool added = unusedDefs.AddOrUpdate(*node, true);
             assert(added);
         }
+
+        assert(node->CheckTypes());
     }
 
     assert(prev == m_lastNode);

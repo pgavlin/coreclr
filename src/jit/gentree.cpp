@@ -17115,3 +17115,152 @@ regNumber GenTree::ExtractTempReg(regMaskTP mask /* = (regMaskTP)-1 */)
 }
 
 #endif // !LEGACY_BACKEND
+
+#ifdef DEBUG
+
+class CheckTypes
+{
+    CheckTypes() = delete;
+
+public:
+    // Check GT_CNS_INT.
+    //
+    // GT_CNS_INT represents an integer constant.
+    static void CnsInt(GenTreeIntCon* node)
+    {
+        assert(node != nullptr);
+        assert(node->OperIs(GT_CNS_INT));
+
+        const ssize_t val = node->IconValue();
+        switch (node->TypeGet())
+        {
+            case TYP_BOOL:
+                assert((val == 0) || (val == 1));
+                break;
+
+            case TYP_BYTE:
+                assert((val >= -128) && (val < 128));
+                break;
+
+            case TYP_UBYTE:
+                assert((val >= 0) && (val < 256));
+                break;
+
+            case TYP_SHORT:
+                assert((val >= -32768) && (val < 32768));
+                break;
+
+            case TYP_CHAR:
+            case TYP_USHORT:
+                assert((val >= 0) && (val < 65536));
+                break;
+
+#ifdef _HOST_64BIT_
+            case TYP_INT:
+                assert((val >= -2147483648) && (val < 2147483648));
+                break;
+
+            case TYP_UINT:
+                assert((val >= 0) && (val < 4294967296));
+                break;
+
+            case TYP_LONG:
+            case TYP_ULONG:
+                static_assert_no_msg(sizeof(GenTreeIntCon::gtIconVal) == 8);
+                break;
+#else
+            case TYP_INT:
+            case TYP_UINT:
+                static_assert_no_msg(sizeof(GenTreeIntCon::gtIconVal) == 4);
+                break;
+#endif // _HOST_64BIT_
+
+            case TYP_REF:
+            case TYP_BYREF:
+                // 0 is the only legal value for a ref or byref constant.
+                assert(node->IconValue() == 0);
+                break;
+
+            default:
+                assert(false && "Invalid type for GT_CNS_INT node");
+                break;
+        }
+
+        // TODO: check handles?
+    }
+
+    // Check GT_CNS_LNG.
+    //
+    // GT_CNS_LNG represents a 64-bit integer constant.
+    static void CnsLng(GenTreeLngCon* node)
+    {
+        assert(node != nullptr);
+        assert(node->OperIs(GT_CNS_LNG));
+
+        assert(node->TypeIs(TYP_LONG));
+    }
+
+    // Check GT_CNS_DBL.
+    //
+    // GT_CNS_DBL represents a double-precision floating-point constant.
+    static void CnsDbl(GenTreeDblCon* node)
+    {
+        assert(node != nullptr);
+        assert(node->OperIs(GT_CNS_DBL));
+
+        switch (node->TypeGet())
+        {
+            case TYP_FLOAT:
+            {
+                const bool isRepresentableValue = ((double)(float)node->gtDconVal) == node->gtDconVal;
+                const bool isNan = _isnan(node->gtDconVal);
+                assert(isRepresentableValue || isNan);
+                break;
+            }
+
+            case TYP_DOUBLE:
+                break;
+
+            default:
+                assert(false && "Invalid type for GT_CNS_DBL node");
+                break;
+        }
+    }
+
+    static void CnsStr(GenTreeStrCon* node)
+    {
+        assert(node != nullptr);
+        assert(node->OperIs(GT_CNS_STR));
+
+        assert(node->TypeIs(TYP_REF));
+    }
+};
+
+bool GenTree::CheckTypes()
+{
+    switch (OperGet())
+    {
+        case GT_CNS_INT:
+            CheckTypes::CnsInt(AsIntCon());
+            break;
+
+        case GT_CNS_LNG:
+            CheckTypes::CnsLng(AsLngCon());
+            break;
+
+        case GT_CNS_DBL:
+            CheckTypes::CnsDbl(AsDblCon());
+            break;
+
+        case GT_CNS_STR:
+            CheckTypes::CnsStr(AsStrCon());
+            break;
+
+        default:
+            break;
+    }
+
+    return true;
+}
+
+#endif // DEBUG

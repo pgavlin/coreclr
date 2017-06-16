@@ -1158,15 +1158,26 @@ public:
         }
     }
 
-    bool OperIs(genTreeOps oper)
+    bool OperIs(genTreeOps oper) const
     {
         return OperGet() == oper;
     }
 
     template <typename... T>
-    bool OperIs(genTreeOps oper, T... rest)
+    bool OperIs(genTreeOps oper, T... rest) const
     {
         return OperIs(oper) || OperIs(rest...);
+    }
+
+    bool TypeIs(var_types type) const
+    {
+        return TypeGet() == type;
+    }
+
+    template <typename... T>
+    bool TypeIs(var_types type, T... rest) const
+    {
+        return TypeIs(type) || TypeIs(rest...);
     }
 
     static bool OperIsConst(genTreeOps gtOper)
@@ -2146,6 +2157,7 @@ public:
 #endif
 
 #ifdef DEBUG
+    bool CheckTypes();
 
 private:
     GenTree& operator=(const GenTree& gt)
