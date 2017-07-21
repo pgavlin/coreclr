@@ -1676,6 +1676,15 @@ inline unsigned Compiler::lvaGrabTemp(bool shortLifetime DEBUGARG(const char* re
     lvaTable[lvaCount].lvIsTemp  = shortLifetime;
     lvaTable[lvaCount].lvOnFrame = true;
 
+#if !defined(LEGACY_BACKEND)
+    if (lvaLocalVarRefCounted && opts.MinOpts())
+    {
+        lvaTable[lvaCount].lvRefCnt    = 1;
+        lvaTable[lvaCount].lvRefCntWtd = 1;
+        lvaTable[lvaCount].lvTracked   = false;
+    }
+#endif
+
     unsigned tempNum = lvaCount;
 
     lvaCount++;
@@ -1826,6 +1835,13 @@ inline void LclVarDsc::lvaResetSortAgainFlag(Compiler* comp)
 
 inline void LclVarDsc::decRefCnts(BasicBlock::weight_t weight, Compiler* comp, bool propagate)
 {
+#if !defined(LEGACY_BACKEND)
+    if (comp->opts.MinOpts())
+    {
+        return;
+    }
+#endif // !defined(LEGACY_BACKEND)
+
     /* Decrement lvRefCnt and lvRefCntWtd */
     Compiler::lvaPromotionType promotionType = DUMMY_INIT(Compiler::PROMOTION_TYPE_NONE);
     if (varTypeIsStruct(lvType))
@@ -1916,6 +1932,13 @@ inline void LclVarDsc::decRefCnts(BasicBlock::weight_t weight, Compiler* comp, b
 
 inline void LclVarDsc::incRefCnts(BasicBlock::weight_t weight, Compiler* comp, bool propagate)
 {
+#if !defined(LEGACY_BACKEND)
+    if (comp->opts.MinOpts())
+    {
+        return;
+    }
+#endif // !defined(LEGACY_BACKEND)
+
     Compiler::lvaPromotionType promotionType = DUMMY_INIT(Compiler::PROMOTION_TYPE_NONE);
     if (varTypeIsStruct(lvType))
     {

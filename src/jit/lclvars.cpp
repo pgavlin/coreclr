@@ -3534,6 +3534,8 @@ void Compiler::lvaMarkLclRefs(GenTreePtr tree)
             varDsc->incRefCnts(lvaMarkRefsWeight, this);
             varDsc->incRefCnts(lvaMarkRefsWeight, this);
         }
+
+        return;
     }
 
     /* Is this an assigment? */
@@ -3545,6 +3547,7 @@ void Compiler::lvaMarkLclRefs(GenTreePtr tree)
 
         /* Set target register for RHS local if assignment is of a "small" type */
 
+#if CPU_HAS_BYTE_REGS
         if (varTypeIsByte(tree->gtType))
         {
             unsigned   lclNum;
@@ -3569,17 +3572,16 @@ void Compiler::lvaMarkLclRefs(GenTreePtr tree)
                     varDsc = &lvaTable[lclNum];
                 }
             }
-#if CPU_HAS_BYTE_REGS
             if (varDsc)
                 varDsc->addPrefReg(RBM_BYTE_REG_FLAG, this);
-#endif
         }
+#endif
 
 #if OPT_BOOL_OPS
 
         /* Is this an assignment to a local variable? */
 
-        if (op1->gtOper == GT_LCL_VAR && op2->gtType != TYP_BOOL)
+        if (!opts.MinOpts() && (op1->gtOper == GT_LCL_VAR && op2->gtType != TYP_BOOL))
         {
             /* Only simple assignments allowed for booleans */
 
@@ -3680,6 +3682,54 @@ void Compiler::lvaMarkLclRefs(GenTreePtr tree)
         return;
     }
 
+    bool allowStructs = false;
+#ifdef FEATURE_UNIX_AMD64_STRUCT_PASSING
+    // On System V the type of the var could be a struct type.
+    allowStructs = varTypeIsStruct(varDsc);
+#endif // FEATURE_UNIX_AMD64_STRUCT_PASSING
+
+    /* Variables must be used as the same type throughout the method */
+    noway_assert(tiVerificationNeeded || varDsc->lvType == TYP_UNDEF || tree->gtType == TYP_UNKNOWN || allowStructs ||
+                 genActualType(varDsc->TypeGet()) == genActualType(tree->gtType) ||
+                 (tree->gtType == TYP_BYREF && varDsc->TypeGet() == TYP_I_IMPL) ||
+                 (tree->gtType == TYP_I_IMPL && varDsc->TypeGet() == TYP_BYREF) || (tree->gtFlags & GTF_VAR_CAST) ||
+                 varTypeIsFloating(varDsc->TypeGet()) && varTypeIsFloating(tree->gtType));
+
+    /* Remember the type of the reference */
+
+    if (tree->gtType == TYP_UNKNOWN || varDsc->lvType == TYP_UNDEF)
+    {
+        varDsc->lvType = tree->gtType;
+        noway_assert(genActualType(varDsc->TypeGet()) == tree->gtType); // no truncation
+    }
+
+#ifdef DEBUG
+    if (tree->gtFlags & GTF_VAR_CAST)
+    {
+        // it should never be bigger than the variable slot
+
+        // Trees don't store the full information about structs
+        // so we can't check them.
+        if (tree->TypeGet() != TYP_STRUCT)
+        {
+            unsigned treeSize = genTypeSize(tree->TypeGet());
+            unsigned varSize  = genTypeSize(varDsc->TypeGet());
+            if (varDsc->TypeGet() == TYP_STRUCT)
+            {
+                varSize = varDsc->lvSize();
+            }
+
+            assert(treeSize <= varSize);
+        }
+    }
+#endif
+
+    // If we're not optimizing, then we're done.
+    if (opts.MinOpts())
+    {
+        return;
+    }
+
 #if ASSERTION_PROP
     if (fgDomsComputed && IsDominatedByExceptionalEntry(lvaMarkRefsCurBlock))
     {
@@ -3724,48 +3774,6 @@ void Compiler::lvaMarkLclRefs(GenTreePtr tree)
         }
     }
 #endif // ASSERTION_PROP
-
-    bool allowStructs = false;
-#ifdef FEATURE_UNIX_AMD64_STRUCT_PASSING
-    // On System V the type of the var could be a struct type.
-    allowStructs = varTypeIsStruct(varDsc);
-#endif // FEATURE_UNIX_AMD64_STRUCT_PASSING
-
-    /* Variables must be used as the same type throughout the method */
-    noway_assert(tiVerificationNeeded || varDsc->lvType == TYP_UNDEF || tree->gtType == TYP_UNKNOWN || allowStructs ||
-                 genActualType(varDsc->TypeGet()) == genActualType(tree->gtType) ||
-                 (tree->gtType == TYP_BYREF && varDsc->TypeGet() == TYP_I_IMPL) ||
-                 (tree->gtType == TYP_I_IMPL && varDsc->TypeGet() == TYP_BYREF) || (tree->gtFlags & GTF_VAR_CAST) ||
-                 varTypeIsFloating(varDsc->TypeGet()) && varTypeIsFloating(tree->gtType));
-
-    /* Remember the type of the reference */
-
-    if (tree->gtType == TYP_UNKNOWN || varDsc->lvType == TYP_UNDEF)
-    {
-        varDsc->lvType = tree->gtType;
-        noway_assert(genActualType(varDsc->TypeGet()) == tree->gtType); // no truncation
-    }
-
-#ifdef DEBUG
-    if (tree->gtFlags & GTF_VAR_CAST)
-    {
-        // it should never be bigger than the variable slot
-
-        // Trees don't store the full information about structs
-        // so we can't check them.
-        if (tree->TypeGet() != TYP_STRUCT)
-        {
-            unsigned treeSize = genTypeSize(tree->TypeGet());
-            unsigned varSize  = genTypeSize(varDsc->TypeGet());
-            if (varDsc->TypeGet() == TYP_STRUCT)
-            {
-                varSize = varDsc->lvSize();
-            }
-
-            assert(treeSize <= varSize);
-        }
-    }
-#endif
 }
 
 //------------------------------------------------------------------------
@@ -3965,6 +3973,28 @@ void Compiler::lvaMarkLocalVars()
     }
 
     /* Mark all local variable references */
+
+#if !defined(LEGACY_BACKEND)
+    if (opts.MinOpts())
+    {
+        // If we're not optimizing, we won't actually use these ref counts for anything besides deciding how much space
+        // we need to allocate on the frame. Just treat every var as having a single ref.
+        for (unsigned lclNum = 0; lclNum < lvaCount; lclNum++)
+        {
+            LclVarDsc* varDsc   = &lvaTable[lclNum];
+            varDsc->lvRefCnt    = 1;
+            varDsc->lvRefCntWtd = 1;
+            varDsc->lvTracked   = false;
+        }
+
+        lvaLocalVarRefCounted = true;
+
+        lvaCurEpoch++;
+        lvaTrackedCount             = 0;
+        lvaTrackedCountInSizeTUnits = 0;
+        return;
+    }
+#endif
 
     lvaRefCountingStarted = true;
     for (block = fgFirstBB; block; block = block->bbNext)

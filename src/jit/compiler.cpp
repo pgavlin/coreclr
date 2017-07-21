@@ -4569,7 +4569,6 @@ void Compiler::compCompile(void** methodCodePtr, ULONG* methodCodeSize, JitFlags
 #endif
 
     /* Create the variable table (and compute variable ref counts) */
-
     lvaMarkLocalVars();
     EndPhase(PHASE_MARK_LOCAL_VARS);
 
