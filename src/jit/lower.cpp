@@ -4693,7 +4693,10 @@ void Lowering::DoPhase()
             varDsc->lvRefCntWtd = BB_UNITY_WEIGHT;
             varDsc->lvTracked = false;
         }
+
+        comp->lvaCurEpoch++;
         comp->lvaTrackedCount = 0;
+        comp->lvaTrackedCountInSizeTUnits = 0;
     }
     comp->EndPhase(PHASE_LOWERING_DECOMP);
 
