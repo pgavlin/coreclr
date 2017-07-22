@@ -255,8 +255,6 @@ void Compiler::optCopyProp(BasicBlock* block, GenTreePtr stmt, GenTreePtr tree, 
         }
 #endif
 
-        lvaTable[lclNum].decRefCnts(block->getBBWeight(this), this);
-        lvaTable[newLclNum].incRefCnts(block->getBBWeight(this), this);
         tree->gtLclVarCommon.SetLclNum(newLclNum);
         tree->AsLclVarCommon()->SetSsaNum(newSsaNum);
 #ifdef DEBUG

@@ -9274,12 +9274,6 @@ void Compiler::fgSimpleLowering()
 void Compiler::fgUpdateRefCntForClone(BasicBlock* addedToBlock, GenTreePtr clonedTree)
 {
     assert(clonedTree->gtOper != GT_STMT);
-
-    if (lvaLocalVarRefCounted)
-    {
-        compCurBB = addedToBlock;
-        IncLclVarRefCountsVisitor::WalkTree(this, clonedTree);
-    }
 }
 
 /*****************************************************************************
@@ -9287,20 +9281,6 @@ void Compiler::fgUpdateRefCntForClone(BasicBlock* addedToBlock, GenTreePtr clone
 
 void Compiler::fgUpdateRefCntForExtract(GenTreePtr wholeTree, GenTreePtr keptTree)
 {
-    if (lvaLocalVarRefCounted)
-    {
-        /*  Update the refCnts of removed lcl vars - The problem is that
-         *  we have to consider back the side effects trees so we first
-         *  increment all refCnts for side effects then decrement everything
-         *  in the statement
-         */
-        if (keptTree)
-        {
-            IncLclVarRefCountsVisitor::WalkTree(this, keptTree);
-        }
-
-        DecLclVarRefCountsVisitor::WalkTree(this, wholeTree);
-    }
 }
 
 VARSET_VALRET_TP Compiler::fgGetVarBits(GenTreePtr tree)
@@ -9541,16 +9521,6 @@ DONE:
     if (optValnumCSE_phase)
     {
         optValnumCSE_UnmarkCSEs(stmt->gtStmtExpr, nullptr);
-    }
-    else
-    {
-        if (updateRefCount)
-        {
-            if (fgStmtListThreaded)
-            {
-                DecLclVarRefCountsVisitor::WalkTree(this, stmt->gtStmtExpr);
-            }
-        }
     }
 
 #ifdef DEBUG

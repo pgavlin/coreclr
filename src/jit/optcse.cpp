@@ -284,10 +284,6 @@ Compiler::fgWalkResult Compiler::optUnmarkCSEs(GenTreePtr* pTree, fgWalkData* da
 
         // make sure it's been initialized
         assert(comp->optCSEweight <= BB_MAX_WEIGHT);
-
-        /* Decrement its lvRefCnt and lvRefCntWtd */
-
-        varDsc->decRefCnts(comp->optCSEweight, comp);
     }
 
     return WALK_CONTINUE;
@@ -2176,15 +2172,6 @@ public:
                 cse->gtVNPair = ref->gtVNPair; // The comma's value is the same as 'val'
                                                // as the assignment to the CSE LclVar
                                                // cannot add any new exceptions
-            }
-
-            // Increment ref count for the CSE ref
-            m_pCompiler->lvaTable[cseLclVarNum].incRefCnts(blk->getBBWeight(m_pCompiler), m_pCompiler);
-
-            if (isDef)
-            {
-                // Also increment ref count for the CSE assignment
-                m_pCompiler->lvaTable[cseLclVarNum].incRefCnts(blk->getBBWeight(m_pCompiler), m_pCompiler);
             }
 
             // Walk the statement 'stm' and find the pointer

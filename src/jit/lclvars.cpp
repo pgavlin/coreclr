@@ -1950,7 +1950,6 @@ void Compiler::lvaPromoteStructVar(unsigned lclNum, lvaStructPromotionInfo* Stru
 #endif // FEATURE_MULTIREG_ARGS && defined(FEATURE_SIMD)
 
             lvaMarkRefsWeight = BB_UNITY_WEIGHT;            // incRefCnts can use this compiler global variable
-            fieldVarDsc->incRefCnts(BB_UNITY_WEIGHT, this); // increment the ref count for prolog initialization
         }
 #endif
 

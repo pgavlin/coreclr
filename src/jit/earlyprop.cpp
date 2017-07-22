@@ -327,16 +327,12 @@ bool Compiler::optEarlyPropRewriteTree(GenTreePtr tree)
             actualValCopy = gtNewLargeOperNode(GT_ADD, TYP_INT);
         }
 
-        DecLclVarRefCountsVisitor::WalkTree(this, tree);
-
         actualValCopy->CopyFrom(actualVal, this);
         actualValCopy->gtType = origType;
         if (isIndexExpr)
         {
             actualValCopy->LabelIndex(this);
         }
-
-        IncLclVarRefCountsVisitor::WalkTree(this, actualValCopy);
 
         if (actualValCopy != tree)
         {

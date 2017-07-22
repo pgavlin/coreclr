@@ -492,9 +492,6 @@ GenTree* Lowering::LowerSwitch(GenTree* node)
     // is now less than zero 0 (that would also hit the default case).
     gtDefaultCaseCond->gtFlags |= GTF_UNSIGNED;
 
-    /* Increment the lvRefCnt and lvRefCntWtd for temp */
-    tempVarDsc->incRefCnts(blockWeight, comp);
-
     GenTreePtr gtDefaultCaseJump = comp->gtNewOperNode(GT_JTRUE, TYP_VOID, gtDefaultCaseCond);
     gtDefaultCaseJump->gtFlags   = node->gtFlags;
 
@@ -654,8 +651,6 @@ GenTree* Lowering::LowerSwitch(GenTree* node)
                 GenTreePtr gtCaseCond =
                     comp->gtNewOperNode(GT_EQ, TYP_INT, comp->gtNewLclvNode(tempLclNum, tempLclType),
                                         comp->gtNewIconNode(i, TYP_INT));
-                /* Increment the lvRefCnt and lvRefCntWtd for temp */
-                tempVarDsc->incRefCnts(blockWeight, comp);
 
                 GenTreePtr gtCaseBranch = comp->gtNewOperNode(GT_JTRUE, TYP_VOID, gtCaseCond);
                 LIR::Range caseRange    = LIR::SeqTree(comp, gtCaseBranch);
@@ -709,8 +704,6 @@ GenTree* Lowering::LowerSwitch(GenTree* node)
 #endif
         GenTreePtr gtTableSwitch =
             comp->gtNewOperNode(GT_SWITCH_TABLE, TYP_VOID, switchValue, comp->gtNewJmpTableNode());
-        /* Increment the lvRefCnt and lvRefCntWtd for temp */
-        tempVarDsc->incRefCnts(blockWeight, comp);
 
         // this block no longer branches to the default block
         afterDefaultCondBlock->bbJumpSwt->removeDefault();
@@ -2207,11 +2200,6 @@ void Lowering::LowerCompare(GenTree* cmp)
                 if (loSrc1->OperIs(GT_CNS_INT, GT_LCL_VAR, GT_LCL_FLD))
                 {
                     BlockRange().Remove(loSrc1);
-
-                    if (loSrc1->OperIs(GT_LCL_VAR, GT_LCL_FLD))
-                    {
-                        comp->lvaDecRefCnts(m_block, loSrc1);
-                    }
                 }
                 else
                 {
@@ -3443,9 +3431,6 @@ GenTree* Lowering::LowerVirtualVtableCall(GenTreeCall* call)
         lclNum = vtableCallTemp;
     }
 
-    // We'll introduce another use of this local so increase its ref count.
-    comp->lvaTable[lclNum].incRefCnts(comp->compCurBB->getBBWeight(comp), comp);
-
     // Get hold of the vtable offset (note: this might be expensive)
     unsigned vtabOffsOfIndirection;
     unsigned vtabOffsAfterIndirection;
@@ -4056,7 +4041,6 @@ GenTree* Lowering::LowerUnsignedDivOrMod(GenTreeOp* divMod)
             GenTree* dividend = comp->gtNewLclvNode(dividendLclNum, type);
             GenTree* sub      = comp->gtNewOperNode(GT_SUB, type, dividend, mulhi);
             BlockRange().InsertBefore(divMod, dividend, sub);
-            comp->lvaTable[dividendLclNum].incRefCnts(curBBWeight, comp);
 
             GenTree* one = comp->gtNewIconNode(1, TYP_INT);
             GenTree* rsz = comp->gtNewOperNode(GT_RSZ, type, sub, one);
@@ -4068,7 +4052,6 @@ GenTree* Lowering::LowerUnsignedDivOrMod(GenTreeOp* divMod)
             GenTree* mulhiCopy = comp->gtNewLclvNode(mulhiLclNum, type);
             GenTree* add       = comp->gtNewOperNode(GT_ADD, type, rsz, mulhiCopy);
             BlockRange().InsertBefore(divMod, mulhiCopy, add);
-            comp->lvaTable[mulhiLclNum].incRefCnts(curBBWeight, comp);
 
             mulhi = add;
             shift -= 1;
@@ -4097,7 +4080,6 @@ GenTree* Lowering::LowerUnsignedDivOrMod(GenTreeOp* divMod)
             divMod->gtOp2 = mul;
 
             BlockRange().InsertBefore(divMod, div, divisor, mul, dividend);
-            comp->lvaTable[dividendLclNum].incRefCnts(curBBWeight, comp);
         }
 
         return mulhi;
@@ -4237,7 +4219,6 @@ GenTree* Lowering::LowerSignedDivOrMod(GenTreePtr node)
         if (requiresAddSubAdjust)
         {
             dividend = comp->gtNewLclvNode(dividendLclNum, type);
-            comp->lvaTable[dividendLclNum].incRefCnts(curBBWeight, comp);
 
             adjusted = comp->gtNewOperNode(divisorValue > 0 ? GT_ADD : GT_SUB, type, mulhi, dividend);
             BlockRange().InsertBefore(divMod, dividend, adjusted);
@@ -4254,7 +4235,6 @@ GenTree* Lowering::LowerSignedDivOrMod(GenTreePtr node)
         LIR::Use adjustedUse(BlockRange(), &signBit->gtOp.gtOp1, signBit);
         unsigned adjustedLclNum = adjustedUse.ReplaceWithLclVar(comp, curBBWeight);
         adjusted                = comp->gtNewLclvNode(adjustedLclNum, type);
-        comp->lvaTable[adjustedLclNum].incRefCnts(curBBWeight, comp);
         BlockRange().InsertBefore(divMod, adjusted);
 
         if (requiresShiftAdjust)
@@ -4275,7 +4255,6 @@ GenTree* Lowering::LowerSignedDivOrMod(GenTreePtr node)
             GenTree* div = comp->gtNewOperNode(GT_ADD, type, adjusted, signBit);
 
             dividend = comp->gtNewLclvNode(dividendLclNum, type);
-            comp->lvaTable[dividendLclNum].incRefCnts(curBBWeight, comp);
 
             // divisor % dividend = dividend - divisor x div
             GenTree* divisor = comp->gtNewIconNode(divisorValue, type);
@@ -4330,8 +4309,6 @@ GenTree* Lowering::LowerSignedDivOrMod(GenTreePtr node)
     GenTree* adjustedDividend =
         comp->gtNewOperNode(GT_ADD, type, adjustment, comp->gtNewLclvNode(dividendLclNum, type));
 
-    comp->lvaTable[dividendLclNum].incRefCnts(curBBWeight, comp);
-
     GenTree* newDivMod;
 
     if (isDiv)
@@ -4356,8 +4333,6 @@ GenTree* Lowering::LowerSignedDivOrMod(GenTreePtr node)
 
         newDivMod = comp->gtNewOperNode(GT_SUB, type, comp->gtNewLclvNode(dividendLclNum, type),
                                         comp->gtNewOperNode(GT_AND, type, adjustedDividend, divisor));
-
-        comp->lvaTable[dividendLclNum].incRefCnts(curBBWeight, comp);
     }
 
     // Remove the divisor and dividend nodes from the linear order,
@@ -4641,6 +4616,39 @@ void Lowering::DoPhase()
     // computing it separately in LSRA.
     if ((comp->lvaCount != 0) && comp->backendRequiresLocalVarLifetimes())
     {
+        // Recompute lclVar ref counts and resort the lclVar table.
+        for (unsigned lclNum = 0; lclNum < comp->lvaCount; lclNum++)
+        {
+            LclVarDsc* varDsc = &comp->lvaTable[lclNum];
+            varDsc->lvRefCnt = 0;
+            varDsc->lvRefCntWtd = 0;
+        }
+
+        for (BasicBlock* block = comp->fgFirstBB; block != nullptr; block = block->bbNext)
+        {
+            const BasicBlock::weight_t weight = block->getBBWeight(comp);
+            for (GenTree* node : LIR::AsRange(block))
+            {
+                switch (node->OperGet())
+                {
+                    case GT_LCL_VAR:
+                    case GT_LCL_FLD:
+                    case GT_LCL_VAR_ADDR:
+                    case GT_LCL_FLD_ADDR:
+                    case GT_STORE_LCL_VAR:
+                    case GT_STORE_LCL_FLD:
+                    {
+                        const unsigned lclNum = node->AsLclVarCommon()->gtLclNum;
+                        comp->lvaTable[lclNum].incRefCnts(weight, comp);
+                        break;
+                    }
+
+                    default:
+                        break;
+                }
+            }
+        }
+
         comp->lvaSortAgain = true;
     }
     comp->EndPhase(PHASE_LOWERING_DECOMP);

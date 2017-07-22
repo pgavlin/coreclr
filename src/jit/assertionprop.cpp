@@ -433,8 +433,6 @@ void Compiler::optAddCopies()
 
             /* Increment its lvRefCnt and lvRefCntWtd */
             lvaTable[lclNum].incRefCnts(fgFirstBB->getBBWeight(this), this);
-
-            /* Increment its lvRefCnt and lvRefCntWtd */
             lvaTable[copyLclNum].incRefCnts(fgFirstBB->getBBWeight(this), this);
         }
         else
@@ -2702,10 +2700,6 @@ GenTreePtr Compiler::optConstantAssertionProp(AssertionDsc* curAssertion,
         gtDispTree(newTree, nullptr, nullptr, true);
     }
 #endif
-    if (lvaLocalVarRefCounted)
-    {
-        lvaTable[lclNum].decRefCnts(compCurBB->getBBWeight(this), this);
-    }
 
     return optAssertionProp_Update(newTree, tree, stmt);
 }
@@ -2818,8 +2812,6 @@ GenTreePtr Compiler::optCopyAssertionProp(AssertionDsc* curAssertion,
     // If global assertion prop, by now we should have ref counts, fix them.
     if (lvaLocalVarRefCounted)
     {
-        lvaTable[lclNum].decRefCnts(compCurBB->getBBWeight(this), this);
-        lvaTable[copyLclNum].incRefCnts(compCurBB->getBBWeight(this), this);
         tree->gtLclVarCommon.SetSsaNum(copySsaNum);
     }
     tree->gtLclVarCommon.SetLclNum(copyLclNum);
@@ -3105,9 +3097,6 @@ GenTreePtr Compiler::optAssertionPropGlobal_RelOp(ASSERT_VALARG_TP assertions,
             gtDispTree(tree, nullptr, nullptr, true);
         }
 #endif
-        // Decrement the ref counts, before we change the oper.
-        lvaTable[op1->gtLclVar.gtLclNum].decRefCnts(compCurBB->getBBWeight(this), this);
-
         // Change the oper to const.
         if (genActualType(op1->TypeGet()) == TYP_INT)
         {
@@ -3166,8 +3155,6 @@ GenTreePtr Compiler::optAssertionPropGlobal_RelOp(ASSERT_VALARG_TP assertions,
             gtDispTree(tree, nullptr, nullptr, true);
         }
 #endif
-        lvaTable[op1->gtLclVar.gtLclNum].decRefCnts(compCurBB->getBBWeight(this), this);
-
         // If floating point, don't just substitute op1 with op2, this won't work if
         // op2 is NaN. Just turn it into a "true" or "false" yielding expression.
         if (op1->TypeGet() == TYP_DOUBLE || op1->TypeGet() == TYP_FLOAT)
@@ -3177,7 +3164,6 @@ GenTreePtr Compiler::optAssertionPropGlobal_RelOp(ASSERT_VALARG_TP assertions,
             // point only on JTrue nodes, so if the condition held earlier, it will hold
             // now. We don't create OAK_EQUAL assertion on floating point from GT_ASG
             // because we depend on value num which would constant prop the NaN.
-            lvaTable[op2->gtLclVar.gtLclNum].decRefCnts(compCurBB->getBBWeight(this), this);
             op1->ChangeOperConst(GT_CNS_DBL);
             op1->gtDblCon.gtDconVal = 0;
             op2->ChangeOperConst(GT_CNS_DBL);
@@ -3187,7 +3173,6 @@ GenTreePtr Compiler::optAssertionPropGlobal_RelOp(ASSERT_VALARG_TP assertions,
         else
         {
             noway_assert(varTypeIsIntegralOrI(op1->TypeGet()));
-            lvaTable[op2->gtLclVar.gtLclNum].incRefCnts(compCurBB->getBBWeight(this), this);
             op1->AsLclVarCommon()->SetLclNum(op2->AsLclVarCommon()->GetLclNum());
             op1->AsLclVarCommon()->SetSsaNum(op2->AsLclVarCommon()->GetSsaNum());
         }
@@ -4636,7 +4621,6 @@ GenTreePtr Compiler::optPrepareTreeForReplacement(GenTreePtr oldTree, GenTreePtr
     }
 
     // Decrement the ref counts as the oldTree is going to be dropped.
-    lvaRecursiveDecRefCounts(oldTree);
     return newTree;
 }
 

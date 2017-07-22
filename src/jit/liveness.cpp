@@ -1047,8 +1047,6 @@ void Compiler::fgExtendDbgLifetimes()
                 }
 #endif // DEBUG
 
-                varDsc->incRefCnts(block->getBBWeight(this), this);
-
                 block->bbFlags |= BBF_CHANGED; // indicates that the contents of the block have changed.
             }
 
@@ -2390,11 +2388,6 @@ bool Compiler::fgTryRemoveDeadLIRStore(LIR::Range& blockRange, GenTree* node, Ge
     // bash it to a NOP.
     if ((store->gtFlags & GTF_LATE_ARG) != 0)
     {
-        if (store->IsLocal())
-        {
-            lvaDecRefCnts(compCurBB, store);
-        }
-
         store->gtBashToNOP();
     }
     else
