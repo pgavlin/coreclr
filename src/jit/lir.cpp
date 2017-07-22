@@ -1085,7 +1085,19 @@ LIR::Range LIR::Range::Remove(ReadOnlyRange&& range)
 void LIR::Range::Delete(Compiler* compiler, BasicBlock* block, GenTree* node)
 {
     assert(node != nullptr);
+    assert((block == nullptr) == (compiler == nullptr));
+
     Remove(node);
+
+    if (block != nullptr)
+    {
+        if (((node->OperGet() == GT_CALL) && ((node->gtFlags & GTF_CALL_UNMANAGED) != 0)) ||
+            (node->OperIsLocal() && !node->IsPhiNode()))
+        {
+            compiler->lvaDecRefCnts(block, node);
+        }
+    }
+
     DEBUG_DESTROY_NODE(node);
 }
 
@@ -1106,8 +1118,23 @@ void LIR::Range::Delete(Compiler* compiler, BasicBlock* block, GenTree* firstNod
 {
     assert(firstNode != nullptr);
     assert(lastNode != nullptr);
+    assert((block == nullptr) == (compiler == nullptr));
 
     Remove(firstNode, lastNode);
+
+    assert(lastNode->gtNext == nullptr);
+
+    if (block != nullptr)
+    {
+        for (GenTree* node = firstNode; node != nullptr; node = node->gtNext)
+        {
+            if (((node->OperGet() == GT_CALL) && ((node->gtFlags & GTF_CALL_UNMANAGED) != 0)) ||
+                (node->OperIsLocal() && !node->IsPhiNode()))
+            {
+                compiler->lvaDecRefCnts(block, node);
+            }
+        }
+    }
 
 #ifdef DEBUG
     // We can't do this in the loop above because it causes `IsPhiNode` to return a false negative

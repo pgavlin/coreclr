@@ -4620,14 +4620,23 @@ void Lowering::DoPhase()
         for (unsigned lclNum = 0; lclNum < comp->lvaCount; lclNum++)
         {
             LclVarDsc* varDsc = &comp->lvaTable[lclNum];
-            varDsc->lvRefCnt = 0;
-            varDsc->lvRefCntWtd = 0;
+
+            if (!varDsc->lvHasImplicitUse)
+            {
+                varDsc->lvRefCnt = 0;
+                varDsc->lvRefCntWtd = 0;
+            }
+            else
+            {
+                varDsc->lvRefCnt = 1;
+                varDsc->lvRefCntWtd = BB_UNITY_WEIGHT;
+            }
         }
 
         for (BasicBlock* block = comp->fgFirstBB; block != nullptr; block = block->bbNext)
         {
             const BasicBlock::weight_t weight = block->getBBWeight(comp);
-            for (GenTree* node : LIR::AsRange(block))
+            for (GenTree* node : LIR::AsRange(block).NonPhiNodes())
             {
                 switch (node->OperGet())
                 {
@@ -4649,7 +4658,42 @@ void Lowering::DoPhase()
             }
         }
 
+        for (unsigned lclNum = 0; lclNum < comp->lvaCount; lclNum++)
+        {
+            LclVarDsc* varDsc = &comp->lvaTable[lclNum];
+            if (varDsc->lvIsRegArg && (varDsc->lvRefCnt > 0))
+            {
+                varDsc->incRefCnts(BB_UNITY_WEIGHT, comp);
+                varDsc->incRefCnts(BB_UNITY_WEIGHT, comp);
+            }
+        }
+
+        if (comp->lvaKeepAliveAndReportThis() && comp->lvaTable[0].lvRefCnt == 0)
+        {
+            comp->lvaTable[0].lvRefCnt = 1;
+            // This isn't strictly needed as we will make a copy of the param-type-arg
+            // in the prolog. However, this ensures that the LclVarDsc corresponding to
+            // info.compTypeCtxtArg is valid.
+        }
+        else if (comp->lvaReportParamTypeArg() && comp->lvaTable[comp->info.compTypeCtxtArg].lvRefCnt == 0)
+        {
+            comp->lvaTable[comp->info.compTypeCtxtArg].lvRefCnt = 1;
+        }
+
         comp->lvaSortAgain = true;
+    }
+    else
+    {
+        // If we don't need local var lifetimes, just consider everything to be referenced once and mark all vars as
+        // untracked.
+        for (unsigned lclNum = 0; lclNum < comp->lvaCount; lclNum++)
+        {
+            LclVarDsc* varDsc = &comp->lvaTable[lclNum];
+            varDsc->lvRefCnt = 1;
+            varDsc->lvRefCntWtd = BB_UNITY_WEIGHT;
+            varDsc->lvTracked = false;
+        }
+        comp->lvaTrackedCount = 0;
     }
     comp->EndPhase(PHASE_LOWERING_DECOMP);
 

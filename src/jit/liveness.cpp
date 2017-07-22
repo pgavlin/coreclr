@@ -2386,6 +2386,11 @@ bool Compiler::fgTryRemoveDeadLIRStore(LIR::Range& blockRange, GenTree* node, Ge
     // bash it to a NOP.
     if ((store->gtFlags & GTF_LATE_ARG) != 0)
     {
+        if (store->IsLocal())
+        {
+            lvaDecRefCnts(compCurBB, store);
+        }
+
         store->gtBashToNOP();
     }
     else
