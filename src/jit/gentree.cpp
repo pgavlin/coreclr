@@ -11861,9 +11861,6 @@ GenTreePtr Compiler::gtFoldExpr(GenTreePtr tree)
                 GenTreePtr sideEffList = nullptr;
                 gtExtractSideEffList(op1, &sideEffList);
 
-                fgUpdateRefCntForExtract(op1, sideEffList);   // Decrement refcounts for op1, Keeping any side-effects
-                fgUpdateRefCntForExtract(colon_op1, nullptr); // Decrement refcounts for colon_op1
-
                 // Clear colon flags only if the qmark itself is not conditionaly executed
                 if ((tree->gtFlags & GTF_COLON_COND) == 0)
                 {

@@ -2084,7 +2084,6 @@ void Compiler::fgComputeLife(VARSET_TP&       life,
                                 printf("\n");
                             }
 #endif // DEBUG
-                            fgUpdateRefCntForExtract(tree, sideEffList);
 
                             /* The NOP node becomes a GT_COMMA holding the side effect list */
 
@@ -2114,7 +2113,6 @@ void Compiler::fgComputeLife(VARSET_TP&       life,
                                 printf("\n");
                             }
 #endif // DEBUG
-                            fgUpdateRefCntForExtract(tree, NULL);
                         }
                     }
 
@@ -2640,7 +2638,6 @@ bool Compiler::fgRemoveDeadStore(GenTree**        pTree,
                         printf("\n");
                     }
 #endif // DEBUG
-                    fgUpdateRefCntForExtract(asgNode, sideEffList);
 
                     /* Replace the assignment statement with the list of side effects */
                     noway_assert(sideEffList->gtOper != GT_STMT);
@@ -2733,7 +2730,6 @@ bool Compiler::fgRemoveDeadStore(GenTree**        pTree,
 #endif // DEBUG
                 if (sideEffList->gtOper == asgNode->gtOper)
                 {
-                    fgUpdateRefCntForExtract(asgNode, sideEffList);
 #ifdef DEBUG
                     *treeModf = true;
 #endif // DEBUG
@@ -2743,7 +2739,6 @@ bool Compiler::fgRemoveDeadStore(GenTree**        pTree,
                 }
                 else
                 {
-                    fgUpdateRefCntForExtract(asgNode, sideEffList);
 #ifdef DEBUG
                     *treeModf = true;
 #endif // DEBUG
@@ -2778,9 +2773,6 @@ bool Compiler::fgRemoveDeadStore(GenTree**        pTree,
                     printf("\n");
                 }
 #endif // DEBUG
-                /* No side effects - Remove the interior statement */
-                fgUpdateRefCntForExtract(asgNode, nullptr);
-
                 /* Change the assignment to a GT_NOP node */
 
                 asgNode->gtBashToNOP();

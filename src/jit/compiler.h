@@ -3771,10 +3771,6 @@ public:
 
     bool fgMarkIntf(VARSET_VALARG_TP varSet1, unsigned varIndex);
 
-    void fgUpdateRefCntForClone(BasicBlock* addedToBlock, GenTreePtr clonedTree);
-
-    void fgUpdateRefCntForExtract(GenTreePtr wholeTree, GenTreePtr keptTree);
-
     void fgComputeLifeCall(VARSET_TP& life, GenTreeCall* call);
 
     bool fgComputeLifeLocal(VARSET_TP& life, VARSET_VALARG_TP keepAliveVars, GenTree* lclVarNode, GenTree* node);

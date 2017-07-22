@@ -9268,21 +9268,6 @@ void Compiler::fgSimpleLowering()
 #endif
 }
 
-/*****************************************************************************
- */
-
-void Compiler::fgUpdateRefCntForClone(BasicBlock* addedToBlock, GenTreePtr clonedTree)
-{
-    assert(clonedTree->gtOper != GT_STMT);
-}
-
-/*****************************************************************************
- */
-
-void Compiler::fgUpdateRefCntForExtract(GenTreePtr wholeTree, GenTreePtr keptTree)
-{
-}
-
 VARSET_VALRET_TP Compiler::fgGetVarBits(GenTreePtr tree)
 {
     VARSET_TP varBits(VarSetOps::MakeEmpty(this));
@@ -13689,7 +13674,6 @@ bool Compiler::fgOptimizeSwitchBranches(BasicBlock* block)
                 {
                     /* Update the lclvar ref counts */
                     compCurBB = block;
-                    fgUpdateRefCntForExtract(switchTree, sideEffList);
 
                     /* Update ordering, costs, FP levels, etc. */
                     gtSetStmtInfo(switchStmt);
@@ -14096,7 +14080,6 @@ bool Compiler::fgOptimizeBranchToNext(BasicBlock* block, BasicBlock* bNext, Basi
                     {
                         /* Update the lclvar ref counts */
                         compCurBB = block;
-                        fgUpdateRefCntForExtract(cond->gtStmtExpr, sideEffList);
 
                         /* Update ordering, costs, FP levels, etc. */
                         gtSetStmtInfo(cond);
@@ -14376,9 +14359,6 @@ bool Compiler::fgOptimizeBranch(BasicBlock* bJump)
     {
         return false;
     }
-
-    // Bump up the ref-counts of any variables in 'stmt'
-    fgUpdateRefCntForClone(bJump, stmt->gtStmtExpr);
 
     //
     // Find the last statement in the bJump block
