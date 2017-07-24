@@ -5401,7 +5401,7 @@ regMaskTP Compiler::rpPredictAssignRegVars(regMaskTP regAvail)
     noway_assert((lvaSortAgain == false) || (opts.MinOpts() == false));
 
     if (lvaSortAgain)
-        lvaSortOnly();
+        lvaSortOnly(lvaCount);
 
 #ifdef DEBUG
     fgDebugCheckBBlist();

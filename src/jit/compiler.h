@@ -2630,7 +2630,7 @@ public:
     unsigned lvaGrabTemps(unsigned cnt DEBUGARG(const char* reason));
     unsigned lvaGrabTempWithImplicitUse(bool shortLifetime DEBUGARG(const char* reason));
 
-    void lvaSortOnly();
+    void lvaSortOnly(unsigned count);
     void lvaSortByRefCount();
     void lvaDumpRefCounts();
 
