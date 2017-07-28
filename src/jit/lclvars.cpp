@@ -3165,7 +3165,8 @@ void Compiler::lvaSortOnly(unsigned count)
 
     qsort(lvaRefSorted, count, sizeof(*lvaRefSorted), (compCodeOpt() == SMALL_CODE) ? RefCntCmp : WtdRefCntCmp);
 
-    lvaSortAgain = false;
+    lvaLocalVarSorted = true;
+    lvaSortAgain      = false;
 
     lvaDumpRefCounts();
 }
@@ -3216,6 +3217,7 @@ void Compiler::lvaSortByRefCount()
 {
     lvaTrackedCount             = 0;
     lvaTrackedCountInSizeTUnits = 0;
+    lvaLocalVarSorted           = false;
 
 #ifdef DEBUG
     VarSetOps::AssignNoCopy(this, lvaTrackedVars, VarSetOps::MakeEmpty(this));
@@ -3239,6 +3241,7 @@ void Compiler::lvaSortByRefCount()
 
     /* Fill in the table used for sorting */
 
+    unsigned mayTrackNum = 0, untrackedIndex = lvaCount - 1;
     for (lclNum = 0, varDsc = lvaTable; lclNum < lvaCount; lclNum++, varDsc++)
     {
         /* If we have JMP, all arguments must have a location
@@ -3389,49 +3392,64 @@ void Compiler::lvaSortByRefCount()
         /* Append this variable to the table for sorting if it has not been excluded for tracking*/
         if (varDsc->lvTracked)
         {
-            *refTab++ = varDsc;
+            refTab[mayTrackNum] = varDsc;
+            if (mayTrackNum < lclMAX_TRACKED)
+            {
+                lvaTrackedToVarNum[mayTrackNum] = lclNum;
+                varDsc->lvVarIndex = mayTrackNum;
+            }
+            mayTrackNum++;
         }
         else
         {
-            --refTabEnd;
-            *refTabEnd = varDsc;
+            refTab[untrackedIndex] = varDsc;
+            untrackedIndex--;
         }
     }
 
     /* Now sort the variable table by ref-count */
 
-    unsigned mayTrackCount = refTab - lvaRefSorted;
-    JITDUMP("may track %d out of %d lclVars", mayTrackCount, lvaCount);
+    JITDUMP("may track %d out of %d lclVars", mayTrackNum, lvaCount);
 
-    lvaSortOnly(mayTrackCount);
-
-    /* Decide which variables will be worth tracking */
-
-    if (mayTrackCount > lclMAX_TRACKED)
+#if !defined(LEGACY_BACKEND)
+    if (mayTrackNum <= lclMAX_TRACKED)
     {
-        /* Mark all variables past the first 'lclMAX_TRACKED' as untracked */
-
-        unsigned limit = lclMAX_TRACKED + mayTrackCount;
-        for (lclNum = lclMAX_TRACKED; lclNum < limit; lclNum++)
-        {
-            lvaRefSorted[lclNum]->lvTracked = 0;
-        }
+        // We're just going to track everything we can, and the loop above has already set up the requisite data
+        // structures. We're done.
+        lvaTrackedCount = mayTrackNum;
+        lvaSortAgain = false;
     }
+    else
+#endif
+    {
+        lvaSortOnly(mayTrackNum);
+
+        /* Decide which variables will be worth tracking */
+
+        if (mayTrackNum > lclMAX_TRACKED)
+        {
+            /* Mark all variables past the first 'lclMAX_TRACKED' as untracked */
+
+            unsigned limit = lclMAX_TRACKED + mayTrackNum;
+            for (lclNum = lclMAX_TRACKED; lclNum < limit; lclNum++)
+            {
+                lvaRefSorted[lclNum]->lvTracked = 0;
+            }
+        }
 
 #ifdef DEBUG
-    // Re-Initialize to -1 for safety in debug build.
-    memset(lvaTrackedToVarNum, -1, sizeof(lvaTrackedToVarNum));
+        // Re-Initialize to -1 for safety in debug build.
+        memset(lvaTrackedToVarNum, -1, sizeof(lvaTrackedToVarNum));
 #endif
 
-    /* Assign indices to all the variables we've decided to track */
+        /* Assign indices to all the variables we've decided to track */
 
-    for (lclNum = 0; lclNum < min(mayTrackCount, lclMAX_TRACKED); lclNum++)
-    {
-        varDsc = lvaRefSorted[lclNum];
-        if (varDsc->lvTracked)
+        for (lclNum = 0; lclNum < min(mayTrackNum, lclMAX_TRACKED); lclNum++)
         {
-            /* This variable will be tracked - assign it an index */
+            varDsc = lvaRefSorted[lclNum];
+            assert(varDsc->lvTracked);
 
+            /* This variable will be tracked - assign it an index */
             lvaTrackedToVarNum[lvaTrackedCount] = (unsigned)(varDsc - lvaTable); // The type of varDsc and lvaTable
             // is LclVarDsc. Subtraction will give us
             // the index.

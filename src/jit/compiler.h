@@ -2373,6 +2373,7 @@ public:
     bool     lvaRefCountingStarted; // Set to true when we have started counting the local vars
     bool     lvaLocalVarRefCounted; // Set to true after we have called lvaMarkLocalVars()
     bool     lvaSortAgain;          // true: We need to sort the lvaTable
+    bool     lvaLocalVarSorted;     // true: Tracked local vars are sorted by ref count
     bool     lvaTrackedFixed;       // true: We cannot add new 'tracked' variable
     unsigned lvaCount;              // total number of locals
 
