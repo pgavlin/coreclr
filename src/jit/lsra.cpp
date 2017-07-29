@@ -2759,6 +2759,37 @@ void LinearScan::addRefsForPhysRegMask(regMaskTP mask, LsraLocation currentLoc, 
     }
 }
 
+void LinearScan::buildParamDefPosition(LclVarDsc* argDsc)
+{
+    assert(argDsc->lvIsParam);
+    assert(isCandidateVar(argDsc));
+
+    // Only reserve a register if the argument is actually used.
+    // Is it dead on entry? If compJmpOpUsed is true, then the arguments
+    // have to be kept alive, so we have to consider it as live on entry.
+    // Use lvRefCnt instead of checking bbLiveIn because if it's volatile we
+    // won't have done dataflow on it, but it needs to be marked as live-in so
+    // it will get saved in the prolog.
+    if (!compiler->compJmpOpUsed && argDsc->lvRefCnt == 0 && !compiler->opts.compDbgCode)
+    {
+        return;
+    }
+
+    Interval* interval = getIntervalForLocalVar(argDsc->lvVarIndex);
+    regMaskTP mask     = allRegs(TypeGet(argDsc));
+    if (argDsc->lvIsRegArg)
+    {
+        // Set this interval as currently assigned to that register
+        regNumber inArgReg = argDsc->lvArgReg;
+        assert(inArgReg < REG_COUNT);
+        mask = genRegMask(inArgReg);
+        assignPhysReg(inArgReg, interval);
+        updateRegStateForArg(argDsc);
+    }
+
+    newRefPosition(interval, MinLocation, RefTypeParamDef, nullptr, mask);
+}
+
 void LinearScan::buildParamDefPositions()
 {
     // Next, create ParamDef RefPositions for all the tracked parameters,
@@ -2777,35 +2808,7 @@ void LinearScan::buildParamDefPositions()
         VarSetOps::Iter iter(compiler, registerCandidateParams);
         for (unsigned varIndex = 0; iter.NextElem(&varIndex); )
         {
-            lclNum = compiler->lvaTrackedToVarNum[varIndex];
-            argDsc = &(compiler->lvaTable[lclNum]);
-
-            assert(argDsc->lvIsParam);
-            assert(isCandidateVar(argDsc));
-
-            // Only reserve a register if the argument is actually used.
-            // Is it dead on entry? If compJmpOpUsed is true, then the arguments
-            // have to be kept alive, so we have to consider it as live on entry.
-            // Use lvRefCnt instead of checking bbLiveIn because if it's volatile we
-            // won't have done dataflow on it, but it needs to be marked as live-in so
-            // it will get saved in the prolog.
-            if (!compiler->compJmpOpUsed && argDsc->lvRefCnt == 0 && !compiler->opts.compDbgCode)
-            {
-                continue;
-            }
-
-            Interval* interval = getIntervalForLocalVar(varIndex);
-            regMaskTP mask     = allRegs(TypeGet(argDsc));
-            if (argDsc->lvIsRegArg)
-            {
-                // Set this interval as currently assigned to that register
-                regNumber inArgReg = argDsc->lvArgReg;
-                assert(inArgReg < REG_COUNT);
-                mask = genRegMask(inArgReg);
-                assignPhysReg(inArgReg, interval);
-                updateRegStateForArg(argDsc);
-            }
-            newRefPosition(interval, MinLocation, RefTypeParamDef, nullptr, mask);
+            buildParamDefPosition(&compiler->lvaTable[compiler->lvaTrackedToVarNum[varIndex]]);
         }
     }
 
