@@ -1979,10 +1979,15 @@ bool LinearScan::isRegCandidate(LclVarDsc* varDsc)
 
 void LinearScan::identifyCandidates()
 {
+    registerCandidateParamCount = 0;
+
     if (enregisterLocalVars)
     {
         // Initialize the set of lclVars that are candidates for register allocation.
         VarSetOps::AssignNoCopy(compiler, registerCandidateVars, VarSetOps::MakeEmpty(compiler));
+
+        // Initialize the set of parameters that are candidates for register allocation.
+        VarSetOps::AssignNoCopy(compiler, registerCandidateParams, VarSetOps::MakeEmpty(compiler));
 
         // Initialize the sets of lclVars that are used to determine whether, and for which lclVars,
         // we need to perform resolution across basic blocks.
@@ -2268,6 +2273,12 @@ void LinearScan::identifyCandidates()
             if (varDsc->lvIsStructField)
             {
                 newInt->isStructField = true;
+            }
+
+            if (varDsc->lvIsParam)
+            {
+                VarSetOps::AddElemD(compiler, registerCandidateParams, varDsc->lvVarIndex);
+                registerCandidateParamCount++;
             }
 
             INTRACK_STATS(regCandidateVarCount++);
@@ -2745,6 +2756,91 @@ void LinearScan::addRefsForPhysRegMask(regMaskTP mask, LsraLocation currentLoc, 
                 pos->lastUse = true;
             }
         }
+    }
+}
+
+void LinearScan::buildParamDefPositions()
+{
+    // Next, create ParamDef RefPositions for all the tracked parameters,
+    // in order of their varIndex
+
+    LclVarDsc*   argDsc;
+    unsigned int lclNum;
+
+    RegState* intRegState                   = &compiler->codeGen->intRegState;
+    RegState* floatRegState                 = &compiler->codeGen->floatRegState;
+    intRegState->rsCalleeRegArgMaskLiveIn   = RBM_NONE;
+    floatRegState->rsCalleeRegArgMaskLiveIn = RBM_NONE;
+
+    if (registerCandidateParamCount > 0)
+    {
+        VarSetOps::Iter iter(compiler, registerCandidateParams);
+        for (unsigned varIndex = 0; iter.NextElem(&varIndex); )
+        {
+            lclNum = compiler->lvaTrackedToVarNum[varIndex];
+            argDsc = &(compiler->lvaTable[lclNum]);
+
+            assert(argDsc->lvIsParam);
+            assert(isCandidateVar(argDsc));
+
+            // Only reserve a register if the argument is actually used.
+            // Is it dead on entry? If compJmpOpUsed is true, then the arguments
+            // have to be kept alive, so we have to consider it as live on entry.
+            // Use lvRefCnt instead of checking bbLiveIn because if it's volatile we
+            // won't have done dataflow on it, but it needs to be marked as live-in so
+            // it will get saved in the prolog.
+            if (!compiler->compJmpOpUsed && argDsc->lvRefCnt == 0 && !compiler->opts.compDbgCode)
+            {
+                continue;
+            }
+
+            Interval* interval = getIntervalForLocalVar(varIndex);
+            regMaskTP mask     = allRegs(TypeGet(argDsc));
+            if (argDsc->lvIsRegArg)
+            {
+                // Set this interval as currently assigned to that register
+                regNumber inArgReg = argDsc->lvArgReg;
+                assert(inArgReg < REG_COUNT);
+                mask = genRegMask(inArgReg);
+                assignPhysReg(inArgReg, interval);
+                updateRegStateForArg(argDsc);
+            }
+            newRefPosition(interval, MinLocation, RefTypeParamDef, nullptr, mask);
+        }
+    }
+
+    // Now set up the reg state for the non-tracked args
+    // (We do this here because we want to generate the ParamDef RefPositions in tracked
+    // order, so that loop doesn't hit the non-tracked args)
+
+    for (unsigned argNum = 0; argNum < compiler->info.compArgsCount; argNum++, argDsc++)
+    {
+        argDsc = &(compiler->lvaTable[argNum]);
+
+        if (argDsc->lvPromotedStruct())
+        {
+            noway_assert(argDsc->lvFieldCnt == 1); // We only handle one field here
+
+            unsigned fieldVarNum = argDsc->lvFieldLclStart;
+            argDsc               = &(compiler->lvaTable[fieldVarNum]);
+        }
+
+        assert(argDsc->lvIsParam);
+        if (enregisterLocalVars && argDsc->lvTracked && VarSetOps::IsMember(compiler, registerCandidateParams, argDsc->lvVarIndex))
+        {
+            continue;
+        }
+
+        if (argDsc->lvIsRegArg)
+        {
+            updateRegStateForArg(argDsc);
+        }
+    }
+
+    // If there is a secret stub param, it is also live in
+    if (compiler->info.compPublishStubParam)
+    {
+        intRegState->rsCalleeRegArgMaskLiveIn |= RBM_SECRET_STUB_PARAM;
     }
 }
 
