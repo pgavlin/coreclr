@@ -715,6 +715,8 @@ private:
 
     void resolveConflictingDefAndUse(Interval* interval, RefPosition* defRefPosition);
 
+    void buildParamDefPositions();
+
     void buildRefPositionsForNode(GenTree*                  tree,
                                   BasicBlock*               block,
                                   LocationInfoListNodePool& listNodePool,
