@@ -2790,6 +2790,32 @@ void LinearScan::buildParamDefPosition(LclVarDsc* argDsc)
     newRefPosition(interval, MinLocation, RefTypeParamDef, nullptr, mask);
 }
 
+template<typename TIter, typename Comparator>
+static void SortHelper(TIter iter, unsigned count, Comparator comparator)
+{
+    if (count <= 32)
+    {
+        // Insertion sort
+        for (unsigned i = 1; i < count; i++)
+        {
+            auto val = iter[i];
+
+            unsigned j = i;
+            for (; (j > 0) && (comparator(&val, &iter[j - 1]) < 0); j--)
+            {
+                iter[j] = iter[j - 1];
+            }
+
+            iter[j] = val;
+        }
+    }
+    else
+    {
+        // Quick sort
+        qsort(iter, count, sizeof(*iter), comparator);
+    }
+}
+
 void LinearScan::buildParamDefPositions()
 {
     // Next, create ParamDef RefPositions for all the tracked parameters,
@@ -2805,10 +2831,37 @@ void LinearScan::buildParamDefPositions()
 
     if (registerCandidateParamCount > 0)
     {
-        VarSetOps::Iter iter(compiler, registerCandidateParams);
-        for (unsigned varIndex = 0; iter.NextElem(&varIndex); )
+        if (compiler->lvaLocalVarSorted)
         {
-            buildParamDefPosition(&compiler->lvaTable[compiler->lvaTrackedToVarNum[varIndex]]);
+            VarSetOps::Iter iter(compiler, registerCandidateParams);
+            for (unsigned varIndex = 0; iter.NextElem(&varIndex); )
+            {
+                buildParamDefPosition(&compiler->lvaTable[compiler->lvaTrackedToVarNum[varIndex]]);
+            }
+        }
+        else
+        {
+            LclVarDsc** sortedParams = new (compiler, CMK_LSRA) LclVarDsc*[registerCandidateParamCount];
+
+            VarSetOps::Iter iter(compiler, registerCandidateParams);
+            for (unsigned varIndex = 0, i = 0; iter.NextElem(&varIndex); i++)
+            {
+                sortedParams[i] = &compiler->lvaTable[compiler->lvaTrackedToVarNum[varIndex]];
+            }
+
+            if (compiler->compCodeOpt() == Compiler::SMALL_CODE)
+            {
+                SortHelper(sortedParams, registerCandidateParamCount, Compiler::RefCntCmp);
+            }
+            else
+            {
+                SortHelper(sortedParams, registerCandidateParamCount, Compiler::WtdRefCntCmp);
+            }
+
+            for (unsigned i = 0; i < registerCandidateParamCount; i++)
+            {
+                buildParamDefPosition(sortedParams[i]);
+            }
         }
     }
 
@@ -4618,107 +4671,7 @@ void LinearScan::buildIntervals()
     JITDUMP("\nbuildIntervals second part ========\n");
     currentLoc = 0;
 
-    // Next, create ParamDef RefPositions for all the tracked parameters,
-    // in order of their varIndex
-
-    LclVarDsc*   argDsc;
-    unsigned int lclNum;
-
-    RegState* intRegState                   = &compiler->codeGen->intRegState;
-    RegState* floatRegState                 = &compiler->codeGen->floatRegState;
-    intRegState->rsCalleeRegArgMaskLiveIn   = RBM_NONE;
-    floatRegState->rsCalleeRegArgMaskLiveIn = RBM_NONE;
-
-    for (unsigned int varIndex = 0; varIndex < compiler->lvaTrackedCount; varIndex++)
-    {
-        lclNum = compiler->lvaTrackedToVarNum[varIndex];
-        argDsc = &(compiler->lvaTable[lclNum]);
-
-        if (!argDsc->lvIsParam)
-        {
-            continue;
-        }
-
-        // Only reserve a register if the argument is actually used.
-        // Is it dead on entry? If compJmpOpUsed is true, then the arguments
-        // have to be kept alive, so we have to consider it as live on entry.
-        // Use lvRefCnt instead of checking bbLiveIn because if it's volatile we
-        // won't have done dataflow on it, but it needs to be marked as live-in so
-        // it will get saved in the prolog.
-        if (!compiler->compJmpOpUsed && argDsc->lvRefCnt == 0 && !compiler->opts.compDbgCode)
-        {
-            continue;
-        }
-
-        if (argDsc->lvIsRegArg)
-        {
-            updateRegStateForArg(argDsc);
-        }
-
-        if (isCandidateVar(argDsc))
-        {
-            Interval* interval = getIntervalForLocalVar(varIndex);
-            regMaskTP mask     = allRegs(TypeGet(argDsc));
-            if (argDsc->lvIsRegArg)
-            {
-                // Set this interval as currently assigned to that register
-                regNumber inArgReg = argDsc->lvArgReg;
-                assert(inArgReg < REG_COUNT);
-                mask = genRegMask(inArgReg);
-                assignPhysReg(inArgReg, interval);
-            }
-            RefPosition* pos = newRefPosition(interval, MinLocation, RefTypeParamDef, nullptr, mask);
-        }
-        else if (varTypeIsStruct(argDsc->lvType))
-        {
-            for (unsigned fieldVarNum = argDsc->lvFieldLclStart;
-                 fieldVarNum < argDsc->lvFieldLclStart + argDsc->lvFieldCnt; ++fieldVarNum)
-            {
-                LclVarDsc* fieldVarDsc = &(compiler->lvaTable[fieldVarNum]);
-                if (fieldVarDsc->lvLRACandidate)
-                {
-                    assert(fieldVarDsc->lvTracked);
-                    Interval*    interval = getIntervalForLocalVar(fieldVarDsc->lvVarIndex);
-                    RefPosition* pos =
-                        newRefPosition(interval, MinLocation, RefTypeParamDef, nullptr, allRegs(TypeGet(fieldVarDsc)));
-                }
-            }
-        }
-        else
-        {
-            // We can overwrite the register (i.e. codegen saves it on entry)
-            assert(argDsc->lvRefCnt == 0 || !argDsc->lvIsRegArg || argDsc->lvDoNotEnregister ||
-                   !argDsc->lvLRACandidate || (varTypeIsFloating(argDsc->TypeGet()) && compiler->opts.compDbgCode));
-        }
-    }
-
-    // Now set up the reg state for the non-tracked args
-    // (We do this here because we want to generate the ParamDef RefPositions in tracked
-    // order, so that loop doesn't hit the non-tracked args)
-
-    for (unsigned argNum = 0; argNum < compiler->info.compArgsCount; argNum++, argDsc++)
-    {
-        argDsc = &(compiler->lvaTable[argNum]);
-
-        if (argDsc->lvPromotedStruct())
-        {
-            noway_assert(argDsc->lvFieldCnt == 1); // We only handle one field here
-
-            unsigned fieldVarNum = argDsc->lvFieldLclStart;
-            argDsc               = &(compiler->lvaTable[fieldVarNum]);
-        }
-        noway_assert(argDsc->lvIsParam);
-        if (!argDsc->lvTracked && argDsc->lvIsRegArg)
-        {
-            updateRegStateForArg(argDsc);
-        }
-    }
-
-    // If there is a secret stub param, it is also live in
-    if (compiler->info.compPublishStubParam)
-    {
-        intRegState->rsCalleeRegArgMaskLiveIn |= RBM_SECRET_STUB_PARAM;
-    }
+    buildParamDefPositions();
 
     LocationInfoListNodePool listNodePool(compiler, 8);
     SmallHashTable<GenTree*, LocationInfoList, 32> operandToLocationInfoMap(compiler);
@@ -4949,6 +4902,7 @@ void LinearScan::buildIntervals()
 #ifdef DEBUG
         if (getLsraExtendLifeTimes())
         {
+            unsigned   lclNum;
             LclVarDsc* varDsc;
             for (lclNum = 0, varDsc = compiler->lvaTable; lclNum < compiler->lvaCount; lclNum++, varDsc++)
             {
