@@ -1195,6 +1195,9 @@ private:
 
     // The set of all register candidates. Note that this may be a subset of tracked vars.
     VARSET_TP registerCandidateVars;
+    // The set of all register candidate params.
+    VARSET_TP registerCandidateParams;
+    unsigned  registerCandidateParamCount;
     // Current set of live register candidate vars, used during building of RefPositions to determine
     // whether to preference to callee-save.
     VARSET_TP currentLiveVars;

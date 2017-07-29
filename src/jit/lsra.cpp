@@ -1979,10 +1979,15 @@ bool LinearScan::isRegCandidate(LclVarDsc* varDsc)
 
 void LinearScan::identifyCandidates()
 {
+    registerCandidateParamCount = 0;
+
     if (enregisterLocalVars)
     {
         // Initialize the set of lclVars that are candidates for register allocation.
         VarSetOps::AssignNoCopy(compiler, registerCandidateVars, VarSetOps::MakeEmpty(compiler));
+
+        // Initialize the set of parameters that are candidates for register allocation.
+        VarSetOps::AssignNoCopy(compiler, registerCandidateParams, VarSetOps::MakeEmpty(compiler));
 
         // Initialize the sets of lclVars that are used to determine whether, and for which lclVars,
         // we need to perform resolution across basic blocks.
@@ -2268,6 +2273,12 @@ void LinearScan::identifyCandidates()
             if (varDsc->lvIsStructField)
             {
                 newInt->isStructField = true;
+            }
+
+            if (varDsc->lvIsParam)
+            {
+                VarSetOps::AddElemD(compiler, registerCandidateParams, varDsc->lvVarIndex);
+                registerCandidateParamCount++;
             }
 
             INTRACK_STATS(regCandidateVarCount++);
@@ -2761,34 +2772,28 @@ void LinearScan::buildParamDefPositions()
     intRegState->rsCalleeRegArgMaskLiveIn   = RBM_NONE;
     floatRegState->rsCalleeRegArgMaskLiveIn = RBM_NONE;
 
-    for (unsigned int varIndex = 0; varIndex < compiler->lvaTrackedCount; varIndex++)
+    if (registerCandidateParamCount > 0)
     {
-        lclNum = compiler->lvaTrackedToVarNum[varIndex];
-        argDsc = &(compiler->lvaTable[lclNum]);
-
-        if (!argDsc->lvIsParam)
+        VarSetOps::Iter iter(compiler, registerCandidateParams);
+        for (unsigned varIndex = 0; iter.NextElem(&varIndex); )
         {
-            continue;
-        }
+            lclNum = compiler->lvaTrackedToVarNum[varIndex];
+            argDsc = &(compiler->lvaTable[lclNum]);
 
-        // Only reserve a register if the argument is actually used.
-        // Is it dead on entry? If compJmpOpUsed is true, then the arguments
-        // have to be kept alive, so we have to consider it as live on entry.
-        // Use lvRefCnt instead of checking bbLiveIn because if it's volatile we
-        // won't have done dataflow on it, but it needs to be marked as live-in so
-        // it will get saved in the prolog.
-        if (!compiler->compJmpOpUsed && argDsc->lvRefCnt == 0 && !compiler->opts.compDbgCode)
-        {
-            continue;
-        }
+            assert(argDsc->lvIsParam);
+            assert(isCandidateVar(argDsc));
 
-        if (argDsc->lvIsRegArg)
-        {
-            updateRegStateForArg(argDsc);
-        }
+            // Only reserve a register if the argument is actually used.
+            // Is it dead on entry? If compJmpOpUsed is true, then the arguments
+            // have to be kept alive, so we have to consider it as live on entry.
+            // Use lvRefCnt instead of checking bbLiveIn because if it's volatile we
+            // won't have done dataflow on it, but it needs to be marked as live-in so
+            // it will get saved in the prolog.
+            if (!compiler->compJmpOpUsed && argDsc->lvRefCnt == 0 && !compiler->opts.compDbgCode)
+            {
+                continue;
+            }
 
-        if (isCandidateVar(argDsc))
-        {
             Interval* interval = getIntervalForLocalVar(varIndex);
             regMaskTP mask     = allRegs(TypeGet(argDsc));
             if (argDsc->lvIsRegArg)
@@ -2798,29 +2803,9 @@ void LinearScan::buildParamDefPositions()
                 assert(inArgReg < REG_COUNT);
                 mask = genRegMask(inArgReg);
                 assignPhysReg(inArgReg, interval);
+                updateRegStateForArg(argDsc);
             }
-            RefPosition* pos = newRefPosition(interval, MinLocation, RefTypeParamDef, nullptr, mask);
-        }
-        else if (varTypeIsStruct(argDsc->lvType))
-        {
-            for (unsigned fieldVarNum = argDsc->lvFieldLclStart;
-                 fieldVarNum < argDsc->lvFieldLclStart + argDsc->lvFieldCnt; ++fieldVarNum)
-            {
-                LclVarDsc* fieldVarDsc = &(compiler->lvaTable[fieldVarNum]);
-                if (fieldVarDsc->lvLRACandidate)
-                {
-                    assert(fieldVarDsc->lvTracked);
-                    Interval*    interval = getIntervalForLocalVar(fieldVarDsc->lvVarIndex);
-                    RefPosition* pos =
-                        newRefPosition(interval, MinLocation, RefTypeParamDef, nullptr, allRegs(TypeGet(fieldVarDsc)));
-                }
-            }
-        }
-        else
-        {
-            // We can overwrite the register (i.e. codegen saves it on entry)
-            assert(argDsc->lvRefCnt == 0 || !argDsc->lvIsRegArg || argDsc->lvDoNotEnregister ||
-                   !argDsc->lvLRACandidate || (varTypeIsFloating(argDsc->TypeGet()) && compiler->opts.compDbgCode));
+            newRefPosition(interval, MinLocation, RefTypeParamDef, nullptr, mask);
         }
     }
 
@@ -2839,8 +2824,14 @@ void LinearScan::buildParamDefPositions()
             unsigned fieldVarNum = argDsc->lvFieldLclStart;
             argDsc               = &(compiler->lvaTable[fieldVarNum]);
         }
-        noway_assert(argDsc->lvIsParam);
-        if (!argDsc->lvTracked && argDsc->lvIsRegArg)
+
+        assert(argDsc->lvIsParam);
+        if (enregisterLocalVars && argDsc->lvTracked && VarSetOps::IsMember(compiler, registerCandidateParams, argDsc->lvVarIndex))
+        {
+            continue;
+        }
+
+        if (argDsc->lvIsRegArg)
         {
             updateRegStateForArg(argDsc);
         }
