@@ -18789,19 +18789,32 @@ void Compiler::fgOrderBlockOps(GenTreePtr  tree,
 /* static */
 GenTreePtr Compiler::fgGetFirstNode(GenTreePtr tree)
 {
-    GenTreePtr child = tree;
-    while (child->NumChildren() > 0)
+    class Helper final : public GenTreeVisitor<Helper>
     {
-        if (child->OperIsBinary() && child->IsReverseOp())
+    public:
+        enum
         {
-            child = child->GetChild(1);
-        }
-        else
+            DoPostOrder = true,
+            UseExecutionOrder = true
+        };
+
+        GenTree* m_firstNode;
+
+        Helper(Compiler* compiler)
+            : GenTreeVisitor<Helper>(compiler)
         {
-            child = child->GetChild(0);
         }
-    }
-    return child;
+
+        fgWalkResult PostOrderVisit(GenTree** use, GenTree* user)
+        {
+            m_firstNode = *use;
+            return WALK_ABORT;
+        };
+    };
+
+    Helper helper(nullptr);
+    helper.WalkTree(&tree, nullptr);
+    return helper.m_firstNode;
 }
 
 // Examine the bbTreeList and return the estimated code size for this block

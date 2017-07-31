@@ -4114,7 +4114,6 @@ public:
 
     // Dominator computation member functions
     // Not exposed outside Compiler
-protected:
     bool fgDominate(BasicBlock* b1, BasicBlock* b2); // Return true if b1 dominates b2
 
     bool fgReachable(BasicBlock* b1, BasicBlock* b2); // Returns true if block b1 can reach block b2
@@ -4126,6 +4125,7 @@ protected:
                           // Based on: A Simple, Fast Dominance Algorithm
                           // by Keith D. Cooper, Timothy J. Harvey, and Ken Kennedy
 
+protected:
     void fgCompDominatedByExceptionalEntryBlocks();
 
     BlockSet_ValRet_T fgGetDominatorSet(BasicBlock* block); // Returns a set of blocks that dominate the given block.
@@ -4166,11 +4166,11 @@ protected:
     // && postOrder(A) >= postOrder(B) making the computation O(1).
     void fgTraverseDomTree(unsigned bbNum, BasicBlockList** domTree, unsigned* preNum, unsigned* postNum);
 
+public:
     // When the flow graph changes, we need to update the block numbers, predecessor lists, reachability sets, and
     // dominators.
     void fgUpdateChangedFlowGraph();
 
-public:
     // Compute the predecessors of the blocks in the control flow graph.
     void fgComputePreds();
 
@@ -4646,6 +4646,7 @@ private:
     GenTree* fgTreeSeqLst;
     GenTree* fgTreeSeqBeg;
 
+public:
     GenTree* fgSetTreeSeq(GenTree* tree, GenTree* prev = nullptr, bool isLIR = false);
     void fgSetTreeSeqHelper(GenTree* tree, bool isLIR);
     void fgSetTreeSeqFinish(GenTreePtr tree, bool isLIR);
@@ -4654,6 +4655,7 @@ private:
 
     //------------------------- Morphing --------------------------------------
 
+private:
     unsigned fgPtrArgCntCur;
     unsigned fgPtrArgCntMax;
     hashBv*  fgOutgoingArgTemps;
@@ -5601,8 +5603,10 @@ protected:
     unsigned optCSEweight;         // The weight of the current block when we are
                                    // scanning for CSE expressions
 
+public:
     bool optIsCSEcandidate(GenTreePtr tree);
 
+protected:
     // lclNumIsTrueCSE returns true if the LclVar was introduced by the CSE phase of the compiler
     //
     bool lclNumIsTrueCSE(unsigned lclNum) const
@@ -5622,6 +5626,7 @@ protected:
     bool optConfigDisableCSE2();
 #endif
     void optOptimizeCSEs();
+    void optOptimizeDomCSEs();
 
 #endif // FEATURE_ANYCSE
 
@@ -9485,7 +9490,7 @@ protected:
 
     GenTreeVisitor(Compiler* compiler) : m_compiler(compiler), m_ancestors(compiler)
     {
-        assert(compiler != nullptr);
+        assert(!ComputeStack || (compiler != nullptr));
 
         static_assert_no_msg(TVisitor::DoPreOrder || TVisitor::DoPostOrder);
         static_assert_no_msg(!TVisitor::DoLclVarsOnly || TVisitor::DoPreOrder);
@@ -9984,6 +9989,74 @@ public:
     Compiler::fgWalkResult PreOrderVisit(GenTree** use, GenTree* user);
 
     static Compiler::fgWalkResult WalkTree(Compiler* compiler, GenTree* tree);
+};
+
+class WalkTree final
+{
+    WalkTree() = delete;
+
+    template <bool computeStack, bool doPreOrder, bool doPostOrder, bool useExecutionOrder, typename TVisitor>
+    class Visitor final : public GenTreeVisitor<Visitor<computeStack, doPreOrder, doPostOrder, useExecutionOrder, TVisitor>>
+    {
+    public:
+        enum
+        {
+            ComputeStack      = computeStack,
+            DoPreOrder        = doPreOrder,
+            DoPostOrder       = doPostOrder,
+            UseExecutionOrder = useExecutionOrder,
+        };
+
+    private:
+        TVisitor m_visitor;
+
+    public:
+        Visitor(Compiler* compiler, TVisitor visitor)
+            : GenTreeVisitor<Visitor<computeStack, doPreOrder, doPostOrder, useExecutionOrder, TVisitor>>(compiler), m_visitor(visitor)
+        {
+            static_assert_no_msg(doPreOrder || doPostOrder);
+            static_assert_no_msg(doPreOrder != doPostOrder);
+        }
+
+        Compiler::fgWalkResult PostOrederVisit(GenTree** use, GenTree* user)
+        {
+            return m_visitor(use, user);
+        }
+
+        Compiler::fgWalkResult PreOrderVisit(GenTree** use, GenTree* user)
+        {
+            return m_visitor(use, user);
+        }
+    };
+
+public:
+    template<typename TVisitor>
+    static void PreOrder(Compiler* compiler, GenTree* tree, TVisitor visitor)
+    {
+        Visitor<false, true, false, false, TVisitor> v(compiler, visitor);
+        v.WalkTree(&tree, nullptr);
+    }
+
+    template<typename TVisitor>
+    static void PostOrder(Compiler* compiler, GenTree* tree, TVisitor visitor)
+    {
+        Visitor<false, false, true, false, TVisitor> v(compiler, visitor);
+        v.WalkTree(&tree, nullptr);
+    }
+
+    template<typename TVisitor>
+    static void PreExecutionOrder(Compiler* compiler, GenTree* tree, TVisitor visitor)
+    {
+        Visitor<false, true, false, true, TVisitor> v(compiler, visitor);
+        v.WalkTree(&tree, nullptr);
+    }
+
+    template<typename TVisitor>
+    static void PostExecutionOrder(Compiler* compiler, GenTree* tree, TVisitor visitor)
+    {
+        Visitor<false, false, true, true, TVisitor> v(compiler, visitor);
+        v.WalkTree(&tree, nullptr);
+    }
 };
 
 /*

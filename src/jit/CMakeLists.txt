@@ -26,6 +26,7 @@ set( JIT_SOURCES
   compiler.cpp
   copyprop.cpp
   disasm.cpp
+  domcse.cpp
   earlyprop.cpp
   ee_il_dll.cpp
   eeinterface.cpp

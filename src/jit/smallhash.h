@@ -440,7 +440,7 @@ public:
 
     Iterator begin() const
     {
-        return Iterator(m_buckets, m_numBuckets, 0);
+        return Iterator(m_buckets, m_numBuckets, m_numFullBuckets == 0 ? m_numBuckets : 0);
     }
 
     Iterator end() const
@@ -579,6 +579,30 @@ public:
         *value = m_buckets[index].m_value;
         return true;
     }
+
+    //------------------------------------------------------------------------
+    // HashTableBase::TryGetPointer: retrieves a pointer to the value for a
+    //                               key if the key exists in the table.
+    //
+    // Arguments:
+    //    key   - The key to find from the table.
+    //    pointer - An output parameter that will hold the pointer to the value
+    //              for the key.
+    //
+    // Returns:
+    //    True if the key was found in the table; false otherwise.
+    bool TryGetPointer(const TKey& key, TValue** pointer) const
+    {
+        unsigned unused, index;
+        if (!TryGetBucket(TKeyInfo::GetHashCode(key), key, &unused, &index))
+        {
+            return false;
+        }
+
+        *pointer = &m_buckets[index].m_value;
+        return true;
+    }
+
 
     //------------------------------------------------------------------------
     // HashTableBase::Contains: returns true if a key exists in the table and

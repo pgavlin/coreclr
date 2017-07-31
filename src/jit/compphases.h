@@ -67,6 +67,8 @@ CompPhaseNameMacro(PHASE_VALUE_NUMBER,           "Do value numbering",          
 
 CompPhaseNameMacro(PHASE_OPTIMIZE_INDEX_CHECKS,  "Optimize index checks",          "OPT-CHK",  false, -1, false)
 
+CompPhaseNameMacro(PHASE_OPTIMIZE_DOM_CSE,       "Optimize dominator CSEs",        "OPT-DCSE", false, -1, false)
+
 #if FEATURE_VALNUM_CSE
 CompPhaseNameMacro(PHASE_OPTIMIZE_VALNUM_CSES,   "Optimize Valnum CSEs",           "OPT-CSE",  false, -1, false)
 #endif

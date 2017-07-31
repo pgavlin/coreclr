@@ -832,7 +832,10 @@ public:
 #endif // DEBUG
 
     // Returns true if "vn" is a reserved value number
-    static bool isReservedVN(ValueNum);
+    static bool isReservedVN(ValueNum vn)
+    {
+        return (vn >= ValueNumStore::RecursiveVN) || (vn < SRC_NumSpecialRefConsts);
+    }
 
 #define VALUENUM_SUPPORT_MERGE 0
 #if VALUENUM_SUPPORT_MERGE

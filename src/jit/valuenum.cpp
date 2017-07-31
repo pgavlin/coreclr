@@ -4187,20 +4187,6 @@ const char* ValueNumStore::reservedName(ValueNum vn)
 
 #endif // DEBUG
 
-// Returns true if "vn" is a reserved value number
-
-// static
-bool ValueNumStore::isReservedVN(ValueNum vn)
-{
-    int val = vn - ValueNumStore::RecursiveVN; // Adding two, making 'RecursiveVN' equal to zero
-    int max = ValueNumStore::SRC_NumSpecialRefConsts - ValueNumStore::RecursiveVN;
-
-    if ((val >= 0) && (val < max))
-    {
-        return true;
-    }
-    return false;
-}
 
 #ifdef DEBUG
 void ValueNumStore::RunTests(Compiler* comp)

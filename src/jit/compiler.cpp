@@ -4631,6 +4631,8 @@ void Compiler::compCompile(void** methodCodePtr, ULONG* methodCodeSize, JitFlags
         bool doValueNum      = true;
         bool doLoopHoisting  = true;
         bool doCopyProp      = true;
+        bool doDataflowCSE   = true;
+        bool doDominatorCSE  = false;
         bool doAssertionProp = true;
         bool doRangeAnalysis = true;
         int  iterations      = 1;
@@ -4641,6 +4643,8 @@ void Compiler::compCompile(void** methodCodePtr, ULONG* methodCodeSize, JitFlags
         doValueNum      = doSsa && (JitConfig.JitDoValueNumber() != 0);
         doLoopHoisting  = doValueNum && (JitConfig.JitDoLoopHoisting() != 0);
         doCopyProp      = doValueNum && (JitConfig.JitDoCopyProp() != 0);
+        doDataflowCSE   = doValueNum && (JitConfig.JitDoDataflowCSE() != 0);
+        doDominatorCSE  = doValueNum && (JitConfig.JitDoDominatorCSE() != 0);
         doAssertionProp = doValueNum && (JitConfig.JitDoAssertionProp() != 0);
         doRangeAnalysis = doAssertionProp && (JitConfig.JitDoRangeAnalysis() != 0);
 
@@ -4687,7 +4691,14 @@ void Compiler::compCompile(void** methodCodePtr, ULONG* methodCodeSize, JitFlags
 
 #if FEATURE_ANYCSE
             /* Remove common sub-expressions */
-            optOptimizeCSEs();
+            if (doDataflowCSE)
+            {
+                optOptimizeCSEs();
+            }
+            if (doDominatorCSE)
+            {
+                optOptimizeDomCSEs();
+            }
 #endif // FEATURE_ANYCSE
 
 #if ASSERTION_PROP
