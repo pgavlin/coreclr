@@ -3458,6 +3458,7 @@ void LinearScan::buildUpperVectorRestoreRefPositions(GenTree*         tree,
             assert(tempInterval->isInternal == true);
             RefPosition* pos =
                 newRefPosition(tempInterval, currentLoc, RefTypeUpperVectorSaveUse, tree, RBM_FLT_CALLEE_SAVED);
+            pos->lastUse = true;
             // Restore the relatedInterval onto varInterval, and set varInterval as the relatedInterval
             // of tempInterval.
             varInterval->relatedInterval  = tempInterval->relatedInterval;
@@ -5329,9 +5330,14 @@ regNumber LinearScan::tryAllocateFreeReg(Interval* currentInterval, RefPosition*
         // as the related preference.  We'll take the related
         // interval preferences into account in the loop over all the registers.
 
+        RefPosition* const recentRef = relatedInterval->recentRefPosition;
         if (relatedInterval->assignedReg != nullptr)
         {
             relatedPreferences = genRegMask(relatedInterval->assignedReg->regNum);
+        }
+        else if ((recentRef != nullptr) && (recentRef->registerAssignment != RBM_NONE) && !recentRef->copyReg)
+        {
+            relatedPreferences = recentRef->registerAssignment;
         }
         else
         {
@@ -7106,19 +7112,21 @@ void LinearScan::freeRegister(RegRecord* physRegRecord)
         // don't unassign it until we need the register.
         if (!assignedInterval->isConstant)
         {
-            RefPosition* nextRefPosition = assignedInterval->getNextRefPosition();
-            // Unassign the register only if there are no more RefPositions, or the next
-            // one is a def.  Note that the latter condition doesn't actually ensure that
-            // there aren't subsequent uses that could be reached by a def in the assigned
-            // register, but is merely a heuristic to avoid tying up the register (or using
-            // it when it's non-optimal).  A better alternative would be to use SSA, so that
+            RefPosition* refPosition = assignedInterval->recentRefPosition;
+            assert(refPosition != nullptr);
+
+            // Unassign the register only if there are no more RefPositions, or the current
+            // one is a last use. A better alternative would be to use SSA, so that
             // we wouldn't unnecessarily link separate live ranges to the same register.
-            if (nextRefPosition == nullptr || RefTypeIsDef(nextRefPosition->refType))
+            if (refPosition->lastUse)
             {
 #ifdef _TARGET_ARM_
                 assert((assignedInterval->registerType != TYP_DOUBLE) || genIsValidDoubleReg(physRegRecord->regNum));
 #endif // _TARGET_ARM_
                 unassignPhysReg(physRegRecord, nullptr);
+
+                // Clear the association between this interval and the register.
+                assignedInterval->assignedReg = nullptr;
             }
         }
     }
@@ -12383,7 +12391,7 @@ void LinearScan::verifyFinalAllocation()
                     {
                         regRecord->assignedInterval = nullptr;
                     }
-                    else
+                    else if (currentRefPosition->IsActualRef())
                     {
                         assert(!currentRefPosition->RequiresRegister());
                     }
