@@ -384,11 +384,11 @@ namespace $([System.String]::Copy($(Category)).Replace(".","_").Replace("\","").
     <MSBuild Projects="src\Common\test_dependencies\test_dependencies.csproj"
              Condition=" '$(BuildWrappers)'=='true' " />
 
-    <!-- Default for building -->
+    <!-- Default for building
     <MSBuild Projects="$(MSBuildProjectFile)"
              Targets="CreateAllWrappers"
              Properties="_CMDDIR=%(TestDirectories.Identity)"
-             Condition=" '$(BuildWrappers)'=='true' " />
+             Condition=" '$(BuildWrappers)'=='true' " />-->
 
     <!-- Execution -->
 
