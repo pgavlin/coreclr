@@ -1,0 +1,16 @@
+using CoreclrTestLib;
+using Xunit;
+
+namespace baseservices_threading
+{
+    class _events_ManualResetEvent_ConstructTrue_ConstructTrue_
+    {
+        [OuterLoop]
+        [Fact]
+        public void _events_ManualResetEvent_ConstructTrue_ConstructTrue_cmd()
+        {
+            int rv = CoreClrTestWrapperLib.RunTest("baseservices\\threading\\events\\ManualResetEvent\\ConstructTrue\\ConstructTrue.cmd");
+            Assert.Equal(rv, CoreClrTestWrapperLib.EXIT_SUCCESS_CODE);
+        }
+    }
+}

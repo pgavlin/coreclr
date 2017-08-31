@@ -1,0 +1,16 @@
+using CoreclrTestLib;
+using Xunit;
+
+namespace JIT_Methodical
+{
+    class _VT_etc__dbgctor_recurse__dbgctor_recurse_
+    {
+        [OuterLoop]
+        [Fact]
+        public void _VT_etc__dbgctor_recurse__dbgctor_recurse_cmd()
+        {
+            int rv = CoreClrTestWrapperLib.RunTest("JIT\\Methodical\\VT\\etc\\_dbgctor_recurse\\_dbgctor_recurse.cmd");
+            Assert.Equal(rv, CoreClrTestWrapperLib.EXIT_SUCCESS_CODE);
+        }
+    }
+}

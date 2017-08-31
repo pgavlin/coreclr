@@ -1,0 +1,15 @@
+using CoreclrTestLib;
+using Xunit;
+
+namespace JIT_Regression
+{
+    class _CLR_x86_JIT_V1_M12_Beta2_b83690_b83690_b83690_
+    {
+        [Fact]
+        public void _CLR_x86_JIT_V1_M12_Beta2_b83690_b83690_b83690_cmd()
+        {
+            int rv = CoreClrTestWrapperLib.RunTest("JIT\\Regression\\CLR-x86-JIT\\V1-M12-Beta2\\b83690\\b83690\\b83690.cmd");
+            Assert.Equal(rv, CoreClrTestWrapperLib.EXIT_SUCCESS_CODE);
+        }
+    }
+}

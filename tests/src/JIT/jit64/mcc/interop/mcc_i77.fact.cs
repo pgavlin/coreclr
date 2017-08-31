@@ -1,0 +1,16 @@
+using CoreclrTestLib;
+using Xunit;
+
+namespace JIT_jit64
+{
+    class _mcc_interop_mcc_i77_mcc_i77_
+    {
+        [Trait("ExcludeBuiltAgainstPackages", "Unix")]
+        [Fact]
+        public void _mcc_interop_mcc_i77_mcc_i77_cmd()
+        {
+            int rv = CoreClrTestWrapperLib.RunTest("JIT\\jit64\\mcc\\interop\\mcc_i77\\mcc_i77.cmd");
+            Assert.Equal(rv, CoreClrTestWrapperLib.EXIT_SUCCESS_CODE);
+        }
+    }
+}

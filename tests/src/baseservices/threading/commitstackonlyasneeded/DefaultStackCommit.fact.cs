@@ -1,0 +1,17 @@
+using CoreclrTestLib;
+using Xunit;
+
+namespace baseservices_threading
+{
+    class _commitstackonlyasneeded_DefaultStackCommit_DefaultStackCommit_
+    {
+        [Trait("ExcludeBuiltAgainstPackages", "Unix")]
+        [OuterLoop]
+        [Fact]
+        public void _commitstackonlyasneeded_DefaultStackCommit_DefaultStackCommit_cmd()
+        {
+            int rv = CoreClrTestWrapperLib.RunTest("baseservices\\threading\\commitstackonlyasneeded\\DefaultStackCommit\\DefaultStackCommit.cmd");
+            Assert.Equal(rv, CoreClrTestWrapperLib.EXIT_SUCCESS_CODE);
+        }
+    }
+}

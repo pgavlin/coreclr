@@ -1,0 +1,15 @@
+using CoreclrTestLib;
+using Xunit;
+
+namespace JIT_Methodical
+{
+    class _casts_coverage__speed_relcastclass_newobj__speed_relcastclass_newobj_
+    {
+        [Fact]
+        public void _casts_coverage__speed_relcastclass_newobj__speed_relcastclass_newobj_cmd()
+        {
+            int rv = CoreClrTestWrapperLib.RunTest("JIT\\Methodical\\casts\\coverage\\_speed_relcastclass_newobj\\_speed_relcastclass_newobj.cmd");
+            Assert.Equal(rv, CoreClrTestWrapperLib.EXIT_SUCCESS_CODE);
+        }
+    }
+}
