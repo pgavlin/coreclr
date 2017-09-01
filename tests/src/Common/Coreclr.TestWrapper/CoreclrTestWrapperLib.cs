@@ -13,6 +13,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Win32.SafeHandles;
+using Xunit;
 
 namespace CoreclrTestLib
 {
@@ -100,20 +101,34 @@ namespace CoreclrTestLib
 
         static _Global()
         {
-            reportBase = System.Environment.GetEnvironmentVariable("XunitTestReportDirBase");
-            testBinaryBase = System.IO.Path.GetDirectoryName(new Uri(Assembly.GetExecutingAssembly().CodeBase).LocalPath);
-            coreRoot = System.IO.Path.GetFullPath(System.Environment.GetEnvironmentVariable("CORE_ROOT"));
-
-            if (String.IsNullOrEmpty(reportBase)) {
-                reportBase = System.IO.Path.Combine(testBinaryBase, "Reports");
+            testBinaryBase = Environment.GetEnvironmentVariable("XunitTestBinBase");
+            if (string.IsNullOrEmpty(testBinaryBase))
+            {
+                throw new ArgumentException("Environment variable XunitTestBinBase is not set");
             }
             else
             {
-                reportBase = System.IO.Path.GetFullPath(reportBase);
+                testBinaryBase = Path.GetFullPath(testBinaryBase);
             }
 
-            if (String.IsNullOrEmpty(coreRoot)) {
-                throw new ArgumentException("Environment variable CORE_ROOT is not set");
+            reportBase = Environment.GetEnvironmentVariable("XunitTestReportDirBase");
+            if (string.IsNullOrEmpty(reportBase))
+            {
+                reportBase = Path.Combine(testBinaryBase, "Reports");
+            }
+            else
+            {
+                reportBase = Path.GetFullPath(reportBase);
+            }
+
+            coreRoot = Environment.GetEnvironmentVariable("CORE_ROOT");
+            if (string.IsNullOrEmpty(coreRoot))
+            {
+                coreRoot = Path.Combine(Path.Combine(testBinaryBase, "Tests"), "Core_Root");
+            }
+            else
+            {
+                coreRoot = Path.GetFullPath(coreRoot);
             }
 
             string operatingSystem = System.Environment.GetEnvironmentVariable("OS");
@@ -351,8 +366,7 @@ namespace CoreclrTestLib
                                                "> set CORE_ROOT=" + _Global.coreRoot + "\n" +
                                                "> " + testExecutable + "\n";
 
-                //Assert.True(ret == EXIT_SUCCESS_CODE, msg);
-                throw new Exception(msg);
+                Assert.True(ret == EXIT_SUCCESS_CODE, msg);
             }
         }
     }

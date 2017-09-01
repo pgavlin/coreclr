@@ -3,14 +3,13 @@ using Xunit;
 
 namespace JIT_jit64
 {
-    class _localloc_unwind_unwind02_dynamic_unwind02_dynamic_
+    public class _localloc_unwind_unwind02_dynamic_unwind02_dynamic_
     {
         [OuterLoop]
         [Fact]
         public void _localloc_unwind_unwind02_dynamic_unwind02_dynamic_cmd()
         {
-            int rv = CoreClrTestWrapperLib.RunTest("JIT\\jit64\\localloc\\unwind\\unwind02_dynamic\\unwind02_dynamic.cmd");
-            Assert.Equal(rv, CoreClrTestWrapperLib.EXIT_SUCCESS_CODE);
+            CoreclrTestWrapperLib.RunTest("JIT\\jit64\\localloc\\unwind\\unwind02_dynamic\\unwind02_dynamic.cmd");
         }
     }
 }

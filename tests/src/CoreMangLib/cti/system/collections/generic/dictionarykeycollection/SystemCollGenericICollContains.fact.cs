@@ -3,14 +3,13 @@ using Xunit;
 
 namespace CoreMangLib_cti
 {
-    class _system_collections_generic_dictionarykeycollection_SystemCollGenericICollContains_SystemCollGenericICollContains_
+    public class _system_collections_generic_dictionarykeycollection_SystemCollGenericICollContains_SystemCollGenericICollContains_
     {
         [OuterLoop]
         [Fact]
         public void _system_collections_generic_dictionarykeycollection_SystemCollGenericICollContains_SystemCollGenericICollContains_cmd()
         {
-            int rv = CoreClrTestWrapperLib.RunTest("CoreMangLib\\cti\\system\\collections\\generic\\dictionarykeycollection\\SystemCollGenericICollContains\\SystemCollGenericICollContains.cmd");
-            Assert.Equal(rv, CoreClrTestWrapperLib.EXIT_SUCCESS_CODE);
+            CoreclrTestWrapperLib.RunTest("CoreMangLib\\cti\\system\\collections\\generic\\dictionarykeycollection\\SystemCollGenericICollContains\\SystemCollGenericICollContains.cmd");
         }
     }
 }

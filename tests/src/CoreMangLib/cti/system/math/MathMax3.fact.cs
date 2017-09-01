@@ -3,14 +3,13 @@ using Xunit;
 
 namespace CoreMangLib_cti
 {
-    class _system_math_MathMax3_MathMax3_
+    public class _system_math_MathMax3_MathMax3_
     {
         [OuterLoop]
         [Fact]
         public void _system_math_MathMax3_MathMax3_cmd()
         {
-            int rv = CoreClrTestWrapperLib.RunTest("CoreMangLib\\cti\\system\\math\\MathMax3\\MathMax3.cmd");
-            Assert.Equal(rv, CoreClrTestWrapperLib.EXIT_SUCCESS_CODE);
+            CoreclrTestWrapperLib.RunTest("CoreMangLib\\cti\\system\\math\\MathMax3\\MathMax3.cmd");
         }
     }
 }

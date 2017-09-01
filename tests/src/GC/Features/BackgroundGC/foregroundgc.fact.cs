@@ -3,7 +3,7 @@ using Xunit;
 
 namespace GC_Features
 {
-    class _BackgroundGC_foregroundgc_foregroundgc_
+    public class _BackgroundGC_foregroundgc_foregroundgc_
     {
         [ActiveIssue("3392")]
         [Trait("ExcludeBuiltAgainstPackages", "Unix")]
@@ -11,8 +11,7 @@ namespace GC_Features
         [Fact]
         public void _BackgroundGC_foregroundgc_foregroundgc_cmd()
         {
-            int rv = CoreClrTestWrapperLib.RunTest("GC\\Features\\BackgroundGC\\foregroundgc\\foregroundgc.cmd");
-            Assert.Equal(rv, CoreClrTestWrapperLib.EXIT_SUCCESS_CODE);
+            CoreclrTestWrapperLib.RunTest("GC\\Features\\BackgroundGC\\foregroundgc\\foregroundgc.cmd");
         }
     }
 }

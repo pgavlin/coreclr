@@ -3,14 +3,13 @@ using Xunit;
 
 namespace JIT_CodeGenBringUpTests
 {
-    class _FPMul_FPMul_
+    public class _FPMul_FPMul_
     {
         [OuterLoop]
         [Fact]
         public void _FPMul_FPMul_cmd()
         {
-            int rv = CoreClrTestWrapperLib.RunTest("JIT\\CodeGenBringUpTests\\FPMul\\FPMul.cmd");
-            Assert.Equal(rv, CoreClrTestWrapperLib.EXIT_SUCCESS_CODE);
+            CoreclrTestWrapperLib.RunTest("JIT\\CodeGenBringUpTests\\FPMul\\FPMul.cmd");
         }
     }
 }

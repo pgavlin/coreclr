@@ -3,14 +3,13 @@ using Xunit;
 
 namespace GC_Scenarios
 {
-    class _GCSimulator_GCSimulator_23_GCSimulator_23_
+    public class _GCSimulator_GCSimulator_23_GCSimulator_23_
     {
         [OuterLoop]
         [Fact]
         public void _GCSimulator_GCSimulator_23_GCSimulator_23_cmd()
         {
-            int rv = CoreClrTestWrapperLib.RunTest("GC\\Scenarios\\GCSimulator\\GCSimulator_23\\GCSimulator_23.cmd");
-            Assert.Equal(rv, CoreClrTestWrapperLib.EXIT_SUCCESS_CODE);
+            CoreclrTestWrapperLib.RunTest("GC\\Scenarios\\GCSimulator\\GCSimulator_23\\GCSimulator_23.cmd");
         }
     }
 }

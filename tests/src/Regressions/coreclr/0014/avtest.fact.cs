@@ -3,13 +3,12 @@ using Xunit;
 
 namespace Regressions_coreclr
 {
-    class _0014_avtest_avtest_
+    public class _0014_avtest_avtest_
     {
         [Fact]
         public void _0014_avtest_avtest_cmd()
         {
-            int rv = CoreClrTestWrapperLib.RunTest("Regressions\\coreclr\\0014\\avtest\\avtest.cmd");
-            Assert.Equal(rv, CoreClrTestWrapperLib.EXIT_SUCCESS_CODE);
+            CoreclrTestWrapperLib.RunTest("Regressions\\coreclr\\0014\\avtest\\avtest.cmd");
         }
     }
 }

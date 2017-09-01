@@ -3,7 +3,7 @@ using Xunit;
 
 namespace JIT_Directed
 {
-    class _RVAInit_overlap_overlap_
+    public class _RVAInit_overlap_overlap_
     {
         [ActiveIssue("2451")]
         [Trait("ExcludeBuiltAgainstPackages", "Unix")]
@@ -11,8 +11,7 @@ namespace JIT_Directed
         [Fact]
         public void _RVAInit_overlap_overlap_cmd()
         {
-            int rv = CoreClrTestWrapperLib.RunTest("JIT\\Directed\\RVAInit\\overlap\\overlap.cmd");
-            Assert.Equal(rv, CoreClrTestWrapperLib.EXIT_SUCCESS_CODE);
+            CoreclrTestWrapperLib.RunTest("JIT\\Directed\\RVAInit\\overlap\\overlap.cmd");
         }
     }
 }

@@ -3,14 +3,13 @@ using Xunit;
 
 namespace JIT_Methodical
 {
-    class _divrem_div_r4div_cs_ro_r4div_cs_ro_
+    public class _divrem_div_r4div_cs_ro_r4div_cs_ro_
     {
         [OuterLoop]
         [Fact]
         public void _divrem_div_r4div_cs_ro_r4div_cs_ro_cmd()
         {
-            int rv = CoreClrTestWrapperLib.RunTest("JIT\\Methodical\\divrem\\div\\r4div_cs_ro\\r4div_cs_ro.cmd");
-            Assert.Equal(rv, CoreClrTestWrapperLib.EXIT_SUCCESS_CODE);
+            CoreclrTestWrapperLib.RunTest("JIT\\Methodical\\divrem\\div\\r4div_cs_ro\\r4div_cs_ro.cmd");
         }
     }
 }

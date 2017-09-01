@@ -3,15 +3,14 @@ using Xunit;
 
 namespace baseservices_threading
 {
-    class _mutex_openexisting_openmutexneg7_openmutexneg7_
+    public class _mutex_openexisting_openmutexneg7_openmutexneg7_
     {
         [Trait("ExcludeBuiltAgainstPackages", "Unix")]
         [OuterLoop]
         [Fact]
         public void _mutex_openexisting_openmutexneg7_openmutexneg7_cmd()
         {
-            int rv = CoreClrTestWrapperLib.RunTest("baseservices\\threading\\mutex\\openexisting\\openmutexneg7\\openmutexneg7.cmd");
-            Assert.Equal(rv, CoreClrTestWrapperLib.EXIT_SUCCESS_CODE);
+            CoreclrTestWrapperLib.RunTest("baseservices\\threading\\mutex\\openexisting\\openmutexneg7\\openmutexneg7.cmd");
         }
     }
 }

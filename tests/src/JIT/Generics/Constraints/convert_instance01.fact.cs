@@ -3,14 +3,13 @@ using Xunit;
 
 namespace JIT_Generics
 {
-    class _Constraints_convert_instance01_convert_instance01_
+    public class _Constraints_convert_instance01_convert_instance01_
     {
         [OuterLoop]
         [Fact]
         public void _Constraints_convert_instance01_convert_instance01_cmd()
         {
-            int rv = CoreClrTestWrapperLib.RunTest("JIT\\Generics\\Constraints\\convert_instance01\\convert_instance01.cmd");
-            Assert.Equal(rv, CoreClrTestWrapperLib.EXIT_SUCCESS_CODE);
+            CoreclrTestWrapperLib.RunTest("JIT\\Generics\\Constraints\\convert_instance01\\convert_instance01.cmd");
         }
     }
 }

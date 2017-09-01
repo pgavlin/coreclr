@@ -3,14 +3,13 @@ using Xunit;
 
 namespace CoreMangLib_cti
 {
-    class _system_text_stringbuilder_StringBuilderAppend15_StringBuilderAppend15_
+    public class _system_text_stringbuilder_StringBuilderAppend15_StringBuilderAppend15_
     {
         [OuterLoop]
         [Fact]
         public void _system_text_stringbuilder_StringBuilderAppend15_StringBuilderAppend15_cmd()
         {
-            int rv = CoreClrTestWrapperLib.RunTest("CoreMangLib\\cti\\system\\text\\stringbuilder\\StringBuilderAppend15\\StringBuilderAppend15.cmd");
-            Assert.Equal(rv, CoreClrTestWrapperLib.EXIT_SUCCESS_CODE);
+            CoreclrTestWrapperLib.RunTest("CoreMangLib\\cti\\system\\text\\stringbuilder\\StringBuilderAppend15\\StringBuilderAppend15.cmd");
         }
     }
 }

@@ -3,14 +3,13 @@ using Xunit;
 
 namespace Loader_classloader
 {
-    class _TypeGeneratorTests_TypeGeneratorTest1249_Generated1249_Generated1249_
+    public class _TypeGeneratorTests_TypeGeneratorTest1249_Generated1249_Generated1249_
     {
         [OuterLoop]
         [Fact]
         public void _TypeGeneratorTests_TypeGeneratorTest1249_Generated1249_Generated1249_cmd()
         {
-            int rv = CoreClrTestWrapperLib.RunTest("Loader\\classloader\\TypeGeneratorTests\\TypeGeneratorTest1249\\Generated1249\\Generated1249.cmd");
-            Assert.Equal(rv, CoreClrTestWrapperLib.EXIT_SUCCESS_CODE);
+            CoreclrTestWrapperLib.RunTest("Loader\\classloader\\TypeGeneratorTests\\TypeGeneratorTest1249\\Generated1249\\Generated1249.cmd");
         }
     }
 }

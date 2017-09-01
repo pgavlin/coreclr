@@ -3,13 +3,12 @@ using Xunit;
 
 namespace JIT_Methodical
 {
-    class _explicit_rotate__il_relrotarg_valref__il_relrotarg_valref_
+    public class _explicit_rotate__il_relrotarg_valref__il_relrotarg_valref_
     {
         [Fact]
         public void _explicit_rotate__il_relrotarg_valref__il_relrotarg_valref_cmd()
         {
-            int rv = CoreClrTestWrapperLib.RunTest("JIT\\Methodical\\explicit\\rotate\\_il_relrotarg_valref\\_il_relrotarg_valref.cmd");
-            Assert.Equal(rv, CoreClrTestWrapperLib.EXIT_SUCCESS_CODE);
+            CoreclrTestWrapperLib.RunTest("JIT\\Methodical\\explicit\\rotate\\_il_relrotarg_valref\\_il_relrotarg_valref.cmd");
         }
     }
 }

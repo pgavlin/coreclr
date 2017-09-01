@@ -3,13 +3,12 @@ using Xunit;
 
 namespace Loader_classloader
 {
-    class _generics_Instantiation_Positive_AbstractBase03_AbstractBase03_
+    public class _generics_Instantiation_Positive_AbstractBase03_AbstractBase03_
     {
         [Fact]
         public void _generics_Instantiation_Positive_AbstractBase03_AbstractBase03_cmd()
         {
-            int rv = CoreClrTestWrapperLib.RunTest("Loader\\classloader\\generics\\Instantiation\\Positive\\AbstractBase03\\AbstractBase03.cmd");
-            Assert.Equal(rv, CoreClrTestWrapperLib.EXIT_SUCCESS_CODE);
+            CoreclrTestWrapperLib.RunTest("Loader\\classloader\\generics\\Instantiation\\Positive\\AbstractBase03\\AbstractBase03.cmd");
         }
     }
 }

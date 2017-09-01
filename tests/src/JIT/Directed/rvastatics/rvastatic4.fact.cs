@@ -3,7 +3,7 @@ using Xunit;
 
 namespace JIT_Directed
 {
-    class _rvastatics_rvastatic4_rvastatic4_
+    public class _rvastatics_rvastatic4_rvastatic4_
     {
         [ActiveIssue("2451")]
         [Trait("ExcludeBuiltAgainstPackages", "Unix")]
@@ -11,8 +11,7 @@ namespace JIT_Directed
         [Fact]
         public void _rvastatics_rvastatic4_rvastatic4_cmd()
         {
-            int rv = CoreClrTestWrapperLib.RunTest("JIT\\Directed\\rvastatics\\rvastatic4\\rvastatic4.cmd");
-            Assert.Equal(rv, CoreClrTestWrapperLib.EXIT_SUCCESS_CODE);
+            CoreclrTestWrapperLib.RunTest("JIT\\Directed\\rvastatics\\rvastatic4\\rvastatic4.cmd");
         }
     }
 }

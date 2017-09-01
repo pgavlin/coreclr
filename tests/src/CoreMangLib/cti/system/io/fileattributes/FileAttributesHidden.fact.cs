@@ -3,14 +3,13 @@ using Xunit;
 
 namespace CoreMangLib_cti
 {
-    class _system_io_fileattributes_FileAttributesHidden_FileAttributesHidden_
+    public class _system_io_fileattributes_FileAttributesHidden_FileAttributesHidden_
     {
         [OuterLoop]
         [Fact]
         public void _system_io_fileattributes_FileAttributesHidden_FileAttributesHidden_cmd()
         {
-            int rv = CoreClrTestWrapperLib.RunTest("CoreMangLib\\cti\\system\\io\\fileattributes\\FileAttributesHidden\\FileAttributesHidden.cmd");
-            Assert.Equal(rv, CoreClrTestWrapperLib.EXIT_SUCCESS_CODE);
+            CoreclrTestWrapperLib.RunTest("CoreMangLib\\cti\\system\\io\\fileattributes\\FileAttributesHidden\\FileAttributesHidden.cmd");
         }
     }
 }

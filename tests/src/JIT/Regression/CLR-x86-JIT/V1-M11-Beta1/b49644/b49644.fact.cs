@@ -3,7 +3,7 @@ using Xunit;
 
 namespace JIT_Regression
 {
-    class _CLR_x86_JIT_V1_M11_Beta1_b49644_b49644_b49644_
+    public class _CLR_x86_JIT_V1_M11_Beta1_b49644_b49644_b49644_
     {
         [ActiveIssue("2451")]
         [Trait("ExcludeBuiltAgainstPackages", "Unix")]
@@ -11,8 +11,7 @@ namespace JIT_Regression
         [Fact]
         public void _CLR_x86_JIT_V1_M11_Beta1_b49644_b49644_b49644_cmd()
         {
-            int rv = CoreClrTestWrapperLib.RunTest("JIT\\Regression\\CLR-x86-JIT\\V1-M11-Beta1\\b49644\\b49644\\b49644.cmd");
-            Assert.Equal(rv, CoreClrTestWrapperLib.EXIT_SUCCESS_CODE);
+            CoreclrTestWrapperLib.RunTest("JIT\\Regression\\CLR-x86-JIT\\V1-M11-Beta1\\b49644\\b49644\\b49644.cmd");
         }
     }
 }

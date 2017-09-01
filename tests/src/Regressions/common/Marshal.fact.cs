@@ -3,13 +3,12 @@ using Xunit;
 
 namespace Regressions_common
 {
-    class _Marshal_Marshal_
+    public class _Marshal_Marshal_
     {
         [Fact]
         public void _Marshal_Marshal_cmd()
         {
-            int rv = CoreClrTestWrapperLib.RunTest("Regressions\\common\\Marshal\\Marshal.cmd");
-            Assert.Equal(rv, CoreClrTestWrapperLib.EXIT_SUCCESS_CODE);
+            CoreclrTestWrapperLib.RunTest("Regressions\\common\\Marshal\\Marshal.cmd");
         }
     }
 }

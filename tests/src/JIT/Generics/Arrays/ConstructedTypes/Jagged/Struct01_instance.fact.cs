@@ -3,14 +3,13 @@ using Xunit;
 
 namespace JIT_Generics
 {
-    class _Arrays_ConstructedTypes_Jagged_Struct01_instance_Struct01_instance_
+    public class _Arrays_ConstructedTypes_Jagged_Struct01_instance_Struct01_instance_
     {
         [OuterLoop]
         [Fact]
         public void _Arrays_ConstructedTypes_Jagged_Struct01_instance_Struct01_instance_cmd()
         {
-            int rv = CoreClrTestWrapperLib.RunTest("JIT\\Generics\\Arrays\\ConstructedTypes\\Jagged\\Struct01_instance\\Struct01_instance.cmd");
-            Assert.Equal(rv, CoreClrTestWrapperLib.EXIT_SUCCESS_CODE);
+            CoreclrTestWrapperLib.RunTest("JIT\\Generics\\Arrays\\ConstructedTypes\\Jagged\\Struct01_instance\\Struct01_instance.cmd");
         }
     }
 }

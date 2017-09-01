@@ -3,14 +3,13 @@ using Xunit;
 
 namespace CoreMangLib_cti
 {
-    class _system_type_TypeGetElementType_TypeGetElementType_
+    public class _system_type_TypeGetElementType_TypeGetElementType_
     {
         [OuterLoop]
         [Fact]
         public void _system_type_TypeGetElementType_TypeGetElementType_cmd()
         {
-            int rv = CoreClrTestWrapperLib.RunTest("CoreMangLib\\cti\\system\\type\\TypeGetElementType\\TypeGetElementType.cmd");
-            Assert.Equal(rv, CoreClrTestWrapperLib.EXIT_SUCCESS_CODE);
+            CoreclrTestWrapperLib.RunTest("CoreMangLib\\cti\\system\\type\\TypeGetElementType\\TypeGetElementType.cmd");
         }
     }
 }

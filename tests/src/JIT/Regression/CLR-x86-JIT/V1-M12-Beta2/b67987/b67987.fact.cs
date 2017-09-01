@@ -3,13 +3,12 @@ using Xunit;
 
 namespace JIT_Regression
 {
-    class _CLR_x86_JIT_V1_M12_Beta2_b67987_b67987_b67987_
+    public class _CLR_x86_JIT_V1_M12_Beta2_b67987_b67987_b67987_
     {
         [Fact]
         public void _CLR_x86_JIT_V1_M12_Beta2_b67987_b67987_b67987_cmd()
         {
-            int rv = CoreClrTestWrapperLib.RunTest("JIT\\Regression\\CLR-x86-JIT\\V1-M12-Beta2\\b67987\\b67987\\b67987.cmd");
-            Assert.Equal(rv, CoreClrTestWrapperLib.EXIT_SUCCESS_CODE);
+            CoreclrTestWrapperLib.RunTest("JIT\\Regression\\CLR-x86-JIT\\V1-M12-Beta2\\b67987\\b67987\\b67987.cmd");
         }
     }
 }

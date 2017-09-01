@@ -3,7 +3,7 @@ using Xunit;
 
 namespace JIT_Directed
 {
-    class _tls_test_tls_test_tls_
+    public class _tls_test_tls_test_tls_
     {
         [ActiveIssue("2441")]
         [Trait("ExcludeBuiltAgainstPackages", "Unix")]
@@ -11,8 +11,7 @@ namespace JIT_Directed
         [Fact]
         public void _tls_test_tls_test_tls_cmd()
         {
-            int rv = CoreClrTestWrapperLib.RunTest("JIT\\Directed\\tls\\test-tls\\test-tls.cmd");
-            Assert.Equal(rv, CoreClrTestWrapperLib.EXIT_SUCCESS_CODE);
+            CoreclrTestWrapperLib.RunTest("JIT\\Directed\\tls\\test-tls\\test-tls.cmd");
         }
     }
 }

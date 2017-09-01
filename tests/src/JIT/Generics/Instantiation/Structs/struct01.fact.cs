@@ -3,13 +3,12 @@ using Xunit;
 
 namespace JIT_Generics
 {
-    class _Instantiation_Structs_struct01_struct01_
+    public class _Instantiation_Structs_struct01_struct01_
     {
         [Fact]
         public void _Instantiation_Structs_struct01_struct01_cmd()
         {
-            int rv = CoreClrTestWrapperLib.RunTest("JIT\\Generics\\Instantiation\\Structs\\struct01\\struct01.cmd");
-            Assert.Equal(rv, CoreClrTestWrapperLib.EXIT_SUCCESS_CODE);
+            CoreclrTestWrapperLib.RunTest("JIT\\Generics\\Instantiation\\Structs\\struct01\\struct01.cmd");
         }
     }
 }

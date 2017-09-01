@@ -3,7 +3,7 @@ using Xunit;
 
 namespace GC_Coverage
 {
-    class _smalloom_smalloom_
+    public class _smalloom_smalloom_
     {
         [ActiveIssue("3392")]
         [Trait("ExcludeBuiltAgainstPackages", "Unix")]
@@ -11,8 +11,7 @@ namespace GC_Coverage
         [Fact]
         public void _smalloom_smalloom_cmd()
         {
-            int rv = CoreClrTestWrapperLib.RunTest("GC\\Coverage\\smalloom\\smalloom.cmd");
-            Assert.Equal(rv, CoreClrTestWrapperLib.EXIT_SUCCESS_CODE);
+            CoreclrTestWrapperLib.RunTest("GC\\Coverage\\smalloom\\smalloom.cmd");
         }
     }
 }

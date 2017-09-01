@@ -3,13 +3,12 @@ using Xunit;
 
 namespace JIT_Methodical
 {
-    class _MDArray_basics_doublearr_cs_d_doublearr_cs_d_
+    public class _MDArray_basics_doublearr_cs_d_doublearr_cs_d_
     {
         [Fact]
         public void _MDArray_basics_doublearr_cs_d_doublearr_cs_d_cmd()
         {
-            int rv = CoreClrTestWrapperLib.RunTest("JIT\\Methodical\\MDArray\\basics\\doublearr_cs_d\\doublearr_cs_d.cmd");
-            Assert.Equal(rv, CoreClrTestWrapperLib.EXIT_SUCCESS_CODE);
+            CoreclrTestWrapperLib.RunTest("JIT\\Methodical\\MDArray\\basics\\doublearr_cs_d\\doublearr_cs_d.cmd");
         }
     }
 }

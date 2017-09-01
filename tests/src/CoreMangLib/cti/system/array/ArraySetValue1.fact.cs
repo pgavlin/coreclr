@@ -3,14 +3,13 @@ using Xunit;
 
 namespace CoreMangLib_cti
 {
-    class _system_array_ArraySetValue1_ArraySetValue1_
+    public class _system_array_ArraySetValue1_ArraySetValue1_
     {
         [OuterLoop]
         [Fact]
         public void _system_array_ArraySetValue1_ArraySetValue1_cmd()
         {
-            int rv = CoreClrTestWrapperLib.RunTest("CoreMangLib\\cti\\system\\array\\ArraySetValue1\\ArraySetValue1.cmd");
-            Assert.Equal(rv, CoreClrTestWrapperLib.EXIT_SUCCESS_CODE);
+            CoreclrTestWrapperLib.RunTest("CoreMangLib\\cti\\system\\array\\ArraySetValue1\\ArraySetValue1.cmd");
         }
     }
 }

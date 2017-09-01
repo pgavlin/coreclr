@@ -3,14 +3,13 @@ using Xunit;
 
 namespace JIT_Generics
 {
-    class _ConstrainedCall_class1_cs_r_class1_cs_r_
+    public class _ConstrainedCall_class1_cs_r_class1_cs_r_
     {
         [OuterLoop]
         [Fact]
         public void _ConstrainedCall_class1_cs_r_class1_cs_r_cmd()
         {
-            int rv = CoreClrTestWrapperLib.RunTest("JIT\\Generics\\ConstrainedCall\\class1_cs_r\\class1_cs_r.cmd");
-            Assert.Equal(rv, CoreClrTestWrapperLib.EXIT_SUCCESS_CODE);
+            CoreclrTestWrapperLib.RunTest("JIT\\Generics\\ConstrainedCall\\class1_cs_r\\class1_cs_r.cmd");
         }
     }
 }

@@ -3,14 +3,13 @@ using Xunit;
 
 namespace JIT_Methodical
 {
-    class _tailcall__il_dbgcompat_r8_r4__il_dbgcompat_r8_r4_
+    public class _tailcall__il_dbgcompat_r8_r4__il_dbgcompat_r8_r4_
     {
         [OuterLoop]
         [Fact]
         public void _tailcall__il_dbgcompat_r8_r4__il_dbgcompat_r8_r4_cmd()
         {
-            int rv = CoreClrTestWrapperLib.RunTest("JIT\\Methodical\\tailcall\\_il_dbgcompat_r8_r4\\_il_dbgcompat_r8_r4.cmd");
-            Assert.Equal(rv, CoreClrTestWrapperLib.EXIT_SUCCESS_CODE);
+            CoreclrTestWrapperLib.RunTest("JIT\\Methodical\\tailcall\\_il_dbgcompat_r8_r4\\_il_dbgcompat_r8_r4.cmd");
         }
     }
 }

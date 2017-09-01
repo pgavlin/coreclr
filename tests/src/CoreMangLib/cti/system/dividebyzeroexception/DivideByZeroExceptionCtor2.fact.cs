@@ -3,14 +3,13 @@ using Xunit;
 
 namespace CoreMangLib_cti
 {
-    class _system_dividebyzeroexception_DivideByZeroExceptionCtor2_DivideByZeroExceptionCtor2_
+    public class _system_dividebyzeroexception_DivideByZeroExceptionCtor2_DivideByZeroExceptionCtor2_
     {
         [OuterLoop]
         [Fact]
         public void _system_dividebyzeroexception_DivideByZeroExceptionCtor2_DivideByZeroExceptionCtor2_cmd()
         {
-            int rv = CoreClrTestWrapperLib.RunTest("CoreMangLib\\cti\\system\\dividebyzeroexception\\DivideByZeroExceptionCtor2\\DivideByZeroExceptionCtor2.cmd");
-            Assert.Equal(rv, CoreClrTestWrapperLib.EXIT_SUCCESS_CODE);
+            CoreclrTestWrapperLib.RunTest("CoreMangLib\\cti\\system\\dividebyzeroexception\\DivideByZeroExceptionCtor2\\DivideByZeroExceptionCtor2.cmd");
         }
     }
 }

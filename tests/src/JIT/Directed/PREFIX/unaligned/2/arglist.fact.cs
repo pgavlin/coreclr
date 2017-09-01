@@ -3,7 +3,7 @@ using Xunit;
 
 namespace JIT_Directed
 {
-    class _PREFIX_unaligned_2_arglist_arglist_
+    public class _PREFIX_unaligned_2_arglist_arglist_
     {
         [ActiveIssue("needs triage")]
         [Trait("ExcludeBuiltAgainstPackages", "Unix")]
@@ -11,8 +11,7 @@ namespace JIT_Directed
         [Fact]
         public void _PREFIX_unaligned_2_arglist_arglist_cmd()
         {
-            int rv = CoreClrTestWrapperLib.RunTest("JIT\\Directed\\PREFIX\\unaligned\\2\\arglist\\arglist.cmd");
-            Assert.Equal(rv, CoreClrTestWrapperLib.EXIT_SUCCESS_CODE);
+            CoreclrTestWrapperLib.RunTest("JIT\\Directed\\PREFIX\\unaligned\\2\\arglist\\arglist.cmd");
         }
     }
 }

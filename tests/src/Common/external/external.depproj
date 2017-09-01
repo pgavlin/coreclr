@@ -48,6 +48,9 @@
     <PackageReference Include="xunit.runner.utility">
       <Version>$(XunitPackageVersion)</Version>
     </PackageReference>
+    <PackageReference Include="Microsoft.xunit.netcore.extensions">
+      <Version>$(XunitNetcoreExtensionsVersion)</Version>
+    </PackageReference>
   </ItemGroup>
   <PropertyGroup>
     <TargetFramework>netcoreapp1.1</TargetFramework>
@@ -64,6 +67,7 @@
     <PackageToInclude Include="xunit.performance.core"/>
     <PackageToInclude Include="xunit.performance.execution"/>
     <PackageToInclude Include="xunit.performance.metrics"/>
+    <PackageToInclude Include="Microsoft.xunit.netcore.extensions"/>
     <PackageToInclude Include="Microsoft.Diagnostics.Tracing.TraceEvent"/>
     <PackageToInclude Include="Newtonsoft.Json"/>
     <PackageToInclude Include="Microsoft.CodeAnalysis.Analyzers"/>

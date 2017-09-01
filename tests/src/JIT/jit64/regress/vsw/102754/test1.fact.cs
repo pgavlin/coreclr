@@ -3,14 +3,13 @@ using Xunit;
 
 namespace JIT_jit64
 {
-    class _regress_vsw_102754_test1_test1_
+    public class _regress_vsw_102754_test1_test1_
     {
         [OuterLoop]
         [Fact]
         public void _regress_vsw_102754_test1_test1_cmd()
         {
-            int rv = CoreClrTestWrapperLib.RunTest("JIT\\jit64\\regress\\vsw\\102754\\test1\\test1.cmd");
-            Assert.Equal(rv, CoreClrTestWrapperLib.EXIT_SUCCESS_CODE);
+            CoreclrTestWrapperLib.RunTest("JIT\\jit64\\regress\\vsw\\102754\\test1\\test1.cmd");
         }
     }
 }

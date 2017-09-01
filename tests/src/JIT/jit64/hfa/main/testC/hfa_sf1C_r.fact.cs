@@ -3,14 +3,13 @@ using Xunit;
 
 namespace JIT_jit64
 {
-    class _hfa_main_testC_hfa_sf1C_r_hfa_sf1C_r_
+    public class _hfa_main_testC_hfa_sf1C_r_hfa_sf1C_r_
     {
         [OuterLoop]
         [Fact]
         public void _hfa_main_testC_hfa_sf1C_r_hfa_sf1C_r_cmd()
         {
-            int rv = CoreClrTestWrapperLib.RunTest("JIT\\jit64\\hfa\\main\\testC\\hfa_sf1C_r\\hfa_sf1C_r.cmd");
-            Assert.Equal(rv, CoreClrTestWrapperLib.EXIT_SUCCESS_CODE);
+            CoreclrTestWrapperLib.RunTest("JIT\\jit64\\hfa\\main\\testC\\hfa_sf1C_r\\hfa_sf1C_r.cmd");
         }
     }
 }

@@ -3,7 +3,7 @@ using Xunit;
 
 namespace JIT_Directed
 {
-    class _RVAInit_extended_extended_
+    public class _RVAInit_extended_extended_
     {
         [ActiveIssue("2451")]
         [Trait("ExcludeBuiltAgainstPackages", "Unix")]
@@ -11,8 +11,7 @@ namespace JIT_Directed
         [Fact]
         public void _RVAInit_extended_extended_cmd()
         {
-            int rv = CoreClrTestWrapperLib.RunTest("JIT\\Directed\\RVAInit\\extended\\extended.cmd");
-            Assert.Equal(rv, CoreClrTestWrapperLib.EXIT_SUCCESS_CODE);
+            CoreclrTestWrapperLib.RunTest("JIT\\Directed\\RVAInit\\extended\\extended.cmd");
         }
     }
 }

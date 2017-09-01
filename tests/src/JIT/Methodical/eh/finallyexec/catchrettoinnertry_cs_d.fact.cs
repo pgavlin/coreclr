@@ -3,13 +3,12 @@ using Xunit;
 
 namespace JIT_Methodical
 {
-    class _eh_finallyexec_catchrettoinnertry_cs_d_catchrettoinnertry_cs_d_
+    public class _eh_finallyexec_catchrettoinnertry_cs_d_catchrettoinnertry_cs_d_
     {
         [Fact]
         public void _eh_finallyexec_catchrettoinnertry_cs_d_catchrettoinnertry_cs_d_cmd()
         {
-            int rv = CoreClrTestWrapperLib.RunTest("JIT\\Methodical\\eh\\finallyexec\\catchrettoinnertry_cs_d\\catchrettoinnertry_cs_d.cmd");
-            Assert.Equal(rv, CoreClrTestWrapperLib.EXIT_SUCCESS_CODE);
+            CoreclrTestWrapperLib.RunTest("JIT\\Methodical\\eh\\finallyexec\\catchrettoinnertry_cs_d\\catchrettoinnertry_cs_d.cmd");
         }
     }
 }

@@ -3,14 +3,13 @@ using Xunit;
 
 namespace JIT_CodeGenBringUpTests
 {
-    class _FactorialRec_FactorialRec_
+    public class _FactorialRec_FactorialRec_
     {
         [OuterLoop]
         [Fact]
         public void _FactorialRec_FactorialRec_cmd()
         {
-            int rv = CoreClrTestWrapperLib.RunTest("JIT\\CodeGenBringUpTests\\FactorialRec\\FactorialRec.cmd");
-            Assert.Equal(rv, CoreClrTestWrapperLib.EXIT_SUCCESS_CODE);
+            CoreclrTestWrapperLib.RunTest("JIT\\CodeGenBringUpTests\\FactorialRec\\FactorialRec.cmd");
         }
     }
 }

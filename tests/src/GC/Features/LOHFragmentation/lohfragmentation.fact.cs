@@ -3,7 +3,7 @@ using Xunit;
 
 namespace GC_Features
 {
-    class _LOHFragmentation_lohfragmentation_lohfragmentation_
+    public class _LOHFragmentation_lohfragmentation_lohfragmentation_
     {
         [ActiveIssue("3392")]
         [Trait("ExcludeBuiltAgainstPackages", "Unix")]
@@ -11,8 +11,7 @@ namespace GC_Features
         [Fact]
         public void _LOHFragmentation_lohfragmentation_lohfragmentation_cmd()
         {
-            int rv = CoreClrTestWrapperLib.RunTest("GC\\Features\\LOHFragmentation\\lohfragmentation\\lohfragmentation.cmd");
-            Assert.Equal(rv, CoreClrTestWrapperLib.EXIT_SUCCESS_CODE);
+            CoreclrTestWrapperLib.RunTest("GC\\Features\\LOHFragmentation\\lohfragmentation\\lohfragmentation.cmd");
         }
     }
 }

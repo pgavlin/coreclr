@@ -3,13 +3,12 @@ using Xunit;
 
 namespace JIT_Methodical
 {
-    class _cctor_misc_Desktop_throw_cs_d_throw_cs_d_
+    public class _cctor_misc_Desktop_throw_cs_d_throw_cs_d_
     {
         [Fact]
         public void _cctor_misc_Desktop_throw_cs_d_throw_cs_d_cmd()
         {
-            int rv = CoreClrTestWrapperLib.RunTest("JIT\\Methodical\\cctor\\misc\\Desktop\\throw_cs_d\\throw_cs_d.cmd");
-            Assert.Equal(rv, CoreClrTestWrapperLib.EXIT_SUCCESS_CODE);
+            CoreclrTestWrapperLib.RunTest("JIT\\Methodical\\cctor\\misc\\Desktop\\throw_cs_d\\throw_cs_d.cmd");
         }
     }
 }

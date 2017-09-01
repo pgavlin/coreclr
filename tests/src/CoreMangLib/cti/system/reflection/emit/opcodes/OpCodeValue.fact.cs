@@ -3,14 +3,13 @@ using Xunit;
 
 namespace CoreMangLib_cti
 {
-    class _system_reflection_emit_opcodes_OpCodeValue_OpCodeValue_
+    public class _system_reflection_emit_opcodes_OpCodeValue_OpCodeValue_
     {
         [OuterLoop]
         [Fact]
         public void _system_reflection_emit_opcodes_OpCodeValue_OpCodeValue_cmd()
         {
-            int rv = CoreClrTestWrapperLib.RunTest("CoreMangLib\\cti\\system\\reflection\\emit\\opcodes\\OpCodeValue\\OpCodeValue.cmd");
-            Assert.Equal(rv, CoreClrTestWrapperLib.EXIT_SUCCESS_CODE);
+            CoreclrTestWrapperLib.RunTest("CoreMangLib\\cti\\system\\reflection\\emit\\opcodes\\OpCodeValue\\OpCodeValue.cmd");
         }
     }
 }

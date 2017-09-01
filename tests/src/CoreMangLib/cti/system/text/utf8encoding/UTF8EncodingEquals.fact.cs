@@ -3,14 +3,13 @@ using Xunit;
 
 namespace CoreMangLib_cti
 {
-    class _system_text_utf8encoding_UTF8EncodingEquals_UTF8EncodingEquals_
+    public class _system_text_utf8encoding_UTF8EncodingEquals_UTF8EncodingEquals_
     {
         [OuterLoop]
         [Fact]
         public void _system_text_utf8encoding_UTF8EncodingEquals_UTF8EncodingEquals_cmd()
         {
-            int rv = CoreClrTestWrapperLib.RunTest("CoreMangLib\\cti\\system\\text\\utf8encoding\\UTF8EncodingEquals\\UTF8EncodingEquals.cmd");
-            Assert.Equal(rv, CoreClrTestWrapperLib.EXIT_SUCCESS_CODE);
+            CoreclrTestWrapperLib.RunTest("CoreMangLib\\cti\\system\\text\\utf8encoding\\UTF8EncodingEquals\\UTF8EncodingEquals.cmd");
         }
     }
 }

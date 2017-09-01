@@ -3,15 +3,14 @@ using Xunit;
 
 namespace JIT_jit64
 {
-    class _mcc_interop_mcc_i65_mcc_i65_
+    public class _mcc_interop_mcc_i65_mcc_i65_
     {
         [Trait("ExcludeBuiltAgainstPackages", "Unix")]
         [OuterLoop]
         [Fact]
         public void _mcc_interop_mcc_i65_mcc_i65_cmd()
         {
-            int rv = CoreClrTestWrapperLib.RunTest("JIT\\jit64\\mcc\\interop\\mcc_i65\\mcc_i65.cmd");
-            Assert.Equal(rv, CoreClrTestWrapperLib.EXIT_SUCCESS_CODE);
+            CoreclrTestWrapperLib.RunTest("JIT\\jit64\\mcc\\interop\\mcc_i65\\mcc_i65.cmd");
         }
     }
 }

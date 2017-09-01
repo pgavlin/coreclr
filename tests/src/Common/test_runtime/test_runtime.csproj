@@ -16,6 +16,12 @@
     <PackageReference Include="Microsoft.DotNet.CoreCLR.TestDependencies">
       <Version>1.0.0-prerelease</Version>
     </PackageReference>
+    <PackageReference Include="xunit.console.netcore">
+      <Version>$(XUnitConsoleNetCoreVersion)</Version>
+    </PackageReference>
+    <PackageReference Include="Microsoft.xunit.netcore.extensions">
+      <Version>$(XunitNetcoreExtensionsVersion)</Version>
+    </PackageReference>
     <PackageReference Include="jit-dasm">
       <Version>0.0.1.4</Version>
     </PackageReference>

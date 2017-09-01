@@ -3,14 +3,13 @@ using Xunit;
 
 namespace Loader_classloader
 {
-    class _v1_Beta1_Layout_Matrix_cs_L_1_2_1_L_1_2_1_
+    public class _v1_Beta1_Layout_Matrix_cs_L_1_2_1_L_1_2_1_
     {
         [OuterLoop]
         [Fact]
         public void _v1_Beta1_Layout_Matrix_cs_L_1_2_1_L_1_2_1_cmd()
         {
-            int rv = CoreClrTestWrapperLib.RunTest("Loader\\classloader\\v1\\Beta1\\Layout\\Matrix\\cs\\L-1-2-1\\L-1-2-1.cmd");
-            Assert.Equal(rv, CoreClrTestWrapperLib.EXIT_SUCCESS_CODE);
+            CoreclrTestWrapperLib.RunTest("Loader\\classloader\\v1\\Beta1\\Layout\\Matrix\\cs\\L-1-2-1\\L-1-2-1.cmd");
         }
     }
 }

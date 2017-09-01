@@ -3,14 +3,13 @@ using Xunit;
 
 namespace JIT_jit64
 {
-    class _valuetypes_nullable_castclass_castclass_castclass009_castclass009_
+    public class _valuetypes_nullable_castclass_castclass_castclass009_castclass009_
     {
         [OuterLoop]
         [Fact]
         public void _valuetypes_nullable_castclass_castclass_castclass009_castclass009_cmd()
         {
-            int rv = CoreClrTestWrapperLib.RunTest("JIT\\jit64\\valuetypes\\nullable\\castclass\\castclass\\castclass009\\castclass009.cmd");
-            Assert.Equal(rv, CoreClrTestWrapperLib.EXIT_SUCCESS_CODE);
+            CoreclrTestWrapperLib.RunTest("JIT\\jit64\\valuetypes\\nullable\\castclass\\castclass\\castclass009\\castclass009.cmd");
         }
     }
 }

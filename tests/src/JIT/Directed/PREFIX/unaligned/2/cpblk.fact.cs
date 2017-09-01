@@ -3,14 +3,13 @@ using Xunit;
 
 namespace JIT_Directed
 {
-    class _PREFIX_unaligned_2_cpblk_cpblk_
+    public class _PREFIX_unaligned_2_cpblk_cpblk_
     {
         [OuterLoop]
         [Fact]
         public void _PREFIX_unaligned_2_cpblk_cpblk_cmd()
         {
-            int rv = CoreClrTestWrapperLib.RunTest("JIT\\Directed\\PREFIX\\unaligned\\2\\cpblk\\cpblk.cmd");
-            Assert.Equal(rv, CoreClrTestWrapperLib.EXIT_SUCCESS_CODE);
+            CoreclrTestWrapperLib.RunTest("JIT\\Directed\\PREFIX\\unaligned\\2\\cpblk\\cpblk.cmd");
         }
     }
 }

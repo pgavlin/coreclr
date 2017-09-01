@@ -3,14 +3,13 @@ using Xunit;
 
 namespace CoreMangLib_cti
 {
-    class _system_io_fileattributes_FileAttributesTemporary_FileAttributesTemporary_
+    public class _system_io_fileattributes_FileAttributesTemporary_FileAttributesTemporary_
     {
         [OuterLoop]
         [Fact]
         public void _system_io_fileattributes_FileAttributesTemporary_FileAttributesTemporary_cmd()
         {
-            int rv = CoreClrTestWrapperLib.RunTest("CoreMangLib\\cti\\system\\io\\fileattributes\\FileAttributesTemporary\\FileAttributesTemporary.cmd");
-            Assert.Equal(rv, CoreClrTestWrapperLib.EXIT_SUCCESS_CODE);
+            CoreclrTestWrapperLib.RunTest("CoreMangLib\\cti\\system\\io\\fileattributes\\FileAttributesTemporary\\FileAttributesTemporary.cmd");
         }
     }
 }

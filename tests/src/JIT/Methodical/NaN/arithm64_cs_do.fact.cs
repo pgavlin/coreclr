@@ -3,14 +3,13 @@ using Xunit;
 
 namespace JIT_Methodical
 {
-    class _NaN_arithm64_cs_do_arithm64_cs_do_
+    public class _NaN_arithm64_cs_do_arithm64_cs_do_
     {
         [OuterLoop]
         [Fact]
         public void _NaN_arithm64_cs_do_arithm64_cs_do_cmd()
         {
-            int rv = CoreClrTestWrapperLib.RunTest("JIT\\Methodical\\NaN\\arithm64_cs_do\\arithm64_cs_do.cmd");
-            Assert.Equal(rv, CoreClrTestWrapperLib.EXIT_SUCCESS_CODE);
+            CoreclrTestWrapperLib.RunTest("JIT\\Methodical\\NaN\\arithm64_cs_do\\arithm64_cs_do.cmd");
         }
     }
 }

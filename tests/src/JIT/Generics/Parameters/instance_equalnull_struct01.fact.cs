@@ -3,14 +3,13 @@ using Xunit;
 
 namespace JIT_Generics
 {
-    class _Parameters_instance_equalnull_struct01_instance_equalnull_struct01_
+    public class _Parameters_instance_equalnull_struct01_instance_equalnull_struct01_
     {
         [OuterLoop]
         [Fact]
         public void _Parameters_instance_equalnull_struct01_instance_equalnull_struct01_cmd()
         {
-            int rv = CoreClrTestWrapperLib.RunTest("JIT\\Generics\\Parameters\\instance_equalnull_struct01\\instance_equalnull_struct01.cmd");
-            Assert.Equal(rv, CoreClrTestWrapperLib.EXIT_SUCCESS_CODE);
+            CoreclrTestWrapperLib.RunTest("JIT\\Generics\\Parameters\\instance_equalnull_struct01\\instance_equalnull_struct01.cmd");
         }
     }
 }
