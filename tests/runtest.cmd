@@ -250,12 +250,13 @@ set __BuildLogRootName=TestRunResults
 :: TODO: various trait/notrait options
 pushd %XunitTestBinBase%
 set CORE_LIBRARIES=%XunitTestBinBase%\CoreCLRTests
-set __XunitArgs=-notrait category=failing
+set __XunitFilters=-notrait category=failing
 if not "%__OuterLoop%"=="true" (
-    set __XunitArgs=%__XunitArgs% -notrait category=OuterLoop
+    set __XunitFilters=%__XunitFilters% -notrait category=OuterLoop
 )
-echo %CORE_ROOT%\corerun.exe %CORE_ROOT%\xunit.console.netcore.exe CoreCLRTests\CoreCLRTests.dll %__XunitArgs%
-%CORE_ROOT%\corerun.exe %CORE_ROOT%\xunit.console.netcore.exe CoreCLRTests\CoreCLRTests.dll %__XunitArgs%
+echo %CORE_ROOT%\corerun.exe %CORE_ROOT%\xunit.console.netcore.exe CoreCLRTests\CoreCLRTests.dll %__XunitFilters%  -xml %__TestRunXmlLog%
+%CORE_ROOT%\corerun.exe %CORE_ROOT%\xunit.console.netcore.exe CoreCLRTests\CoreCLRTests.dll %__XunitFilters% -xml %__TestRunXmlLog%
+set __errorlevel=%errorlevel%
 popd
 
 if "%__CollectDumps%"=="true" (
@@ -264,7 +265,7 @@ if "%__CollectDumps%"=="true" (
 
 if %__errorlevel% GEQ 1 (
     echo Test Run failed. Refer to the following:
-    echo     Html report: %__TestRunHtmlLog%
+    echo     Xml report: %__TestRunXmlLog%
     exit /b 1
 )
 
@@ -292,7 +293,6 @@ REM ===
 REM =========================================================================================
 
 echo %__MsgPrefix%Test run successful. Refer to the log files for details:
-echo     %__TestRunHtmlLog%
 echo     %__TestRunXmlLog%
 exit /b 0
 
