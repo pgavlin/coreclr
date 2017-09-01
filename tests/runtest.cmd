@@ -46,6 +46,7 @@ set __AgainstPackages=
 set __JitDisasm=
 set __IlasmRoundTrip=
 set __CollectDumps=
+set __OuterLoop=
 
 :Arg_Loop
 if "%1" == "" goto ArgsDone
@@ -86,6 +87,7 @@ if /i "%1" == "PerfTests"             (set __PerfTests=true&shift&goto Arg_Loop)
 if /i "%1" == "runcrossgentests"      (set RunCrossGen=true&shift&goto Arg_Loop)
 if /i "%1" == "link"                  (set DoLink=true&set ILLINK=%2&shift&shift&goto Arg_Loop)
 if /i "%1" == "tieredcompilation"     (set COMPLUS_EXPERIMENTAL_TieredCompilation=1&shift&goto Arg_Loop)
+if /i "%1" == "outerloop"             (set __OuterLoop=true&shift&goto Arg_Loop)
 
 REM change it to COMPlus_GCStress when we stop using xunit harness
 if /i "%1" == "gcstresslevel"         (set __GCSTRESSLEVEL=%2&set __TestTimeout=1800000&shift&shift&goto Arg_Loop)
@@ -243,8 +245,18 @@ REM Delete the unecessary mscorlib.ni file.
 del %CORE_ROOT%\mscorlib.ni.dll
 
 set __BuildLogRootName=TestRunResults
-call :msbuild "%__ProjectFilesDir%\runtest.proj" /p:Runtests=true /clp:showcommandline
-set __errorlevel=%errorlevel%
+
+:: run the tests using the Xunit console runner
+:: TODO: various trait/notrait options
+pushd %XunitTestBinBase%
+set CORE_LIBRARIES=%XunitTestBinBase%\CoreCLRTests
+set __XunitArgs=-notrait category=failing
+if not "%__OuterLoop%"=="true" (
+    set __XunitArgs=%__XunitArgs% -notrait category=OuterLoop
+)
+echo %CORE_ROOT%\corerun.exe %CORE_ROOT%\xunit.console.netcore.exe CoreCLRTests\CoreCLRTests.dll %__XunitArgs%
+%CORE_ROOT%\corerun.exe %CORE_ROOT%\xunit.console.netcore.exe CoreCLRTests\CoreCLRTests.dll %__XunitArgs%
+popd
 
 if "%__CollectDumps%"=="true" (
     python "%__DumplingHelperPath%" collect_dump %errorlevel% "%__CrashDumpFolder%" %__StartTime% "CoreCLR_Tests"
